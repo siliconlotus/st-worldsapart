@@ -1,65 +1,236 @@
 # WorldsApart
 
-Only what isn't already in the file headers. Each module's header explains what it is and why; read it
-before changing it.
+Only what isn't already in the file headers. Each module's header says what it is; read it before
+changing it.
 
-## eval/ has three kinds of file
+## Code comments say what is not obvious, never why
 
-- `*-check.mjs` — self-checking. Run with no arguments; they print `ok`/`FAIL` or assert. This is the
-  regression suite: `for f in eval/*-check.mjs; do node "$f"; done` should be silent-clean.
-- `scene.mjs`, `metrics.mjs` — libraries, no CLI. `scene.mjs` loads and scores one graded scene (index,
-  gazetteer, scorers, pool, nDCG); `metrics.mjs` holds the shared statistics. Both `graded-scene-grid.mjs`
-  and `paired-arms.mjs` go through them, so a second copy of the gazetteer or the scorers must never appear
-  — that path has already produced one 74% BM25 error, and two tools disagreeing would report the drift as a
-  parameter effect.
-- everything else (`*-grid.mjs`, `paired-arms`, `keyword-audit`, `relevance-eval`, `summary-center`) —
-  benchmark and analysis tools that need a vector index and/or lorebook path as an argument. Run bare they
-  print a usage line and exit non-zero; that is not a test failure.
+A comment is one of three things: what this is, when the name does not say it; what it does, when the
+code does not show it; or a likely misstep in editing it — the `??` that must not become `||`, the order
+a fixture must keep, the field core reads. Decisions, rationale and provenance are not comments: they
+live in the design docs and `measured-claims.md`, and a misstep warning may cite a claim ID as the
+pointer, in one line. A module header is at most two lines, a docblock one sentence plus the params
+whose shape is not obvious, an inline comment one line.
+
+## The design docs document how the code works and the decisions behind it
+
+`matcher-design.md` owns the matcher and the pipeline: how a key is written and matched, and what each
+stage does. `keyword-suggest-design.md` owns the suggester and the audit. `st-worldinfo.md` is ST
+core's own scan; `bundle-schema.md` the graded bundle; `embedding-models.md` the model guidance;
+`SMARTKEYS.md` the user's page, which must neither run ahead of the code nor lag it. Read the owning
+doc before changing what it covers, and update it rather than re-deriving it in conversation.
+
+A doc carries how the code works now and the architectural decisions behind it, and nothing else: not
+how it used to work, how it could work, how it does not work, speculation, or measurements nothing
+hinges on. An *Open* list holds at most options against a behaviour that stands.
+
+**Terms are stable, or they are announced as new.** Use the doc's vocabulary exactly, and prefer the
+standard technical term to a coinage.
+
+**A measurement stays only where a decision hinges on it**, cited by ID from
+`eval/eval-data/measured-claims.md`, the gitignored register that holds the numbers, the instrument and
+the n. Anything else is an assertion and says so. Unchallenged is not agreed.
+
+**Propose a new claim before writing it down.** Cuts and restatements of settled content can just be
+made; anything asserting what the doc does not already carry, with no measurement behind it, gets
+proposed first. The test is structural, not a judgement about how controversial it looks.
+
+## What is in eval/
+
+- `*-check.mjs` — self-checking, run with no arguments. The regression suite is run by exit code:
+  `for f in eval/*-check.mjs; do node "$f" >/dev/null 2>&1 || echo "FAIL $f"; done`. `eq()` sets
+  `process.exitCode`, so a failed assertion and a thrown error are the same signal; grepping for `^FAIL`
+  misses throws.
+- `scene.mjs`, `metrics.mjs`, `corpus.mjs` — libraries, no CLI. `scene.mjs` loads and scores one graded scene;
+  `metrics.mjs` holds the shared statistics; `corpus.mjs` resolves which lorebooks a run reads. Every
+  tool goes through them: a second copy of the gazetteer or the scorers must never appear (R22), and no
+  tool names a book.
+- `fixtures/` + `sentinel-check.mjs` — a synthetic book and chat whose every audit verdict is written
+  down, and `install-sentinel.mjs`, which symlinks both into `data/default-user/` so the same fixture
+  opens in the Studio. Symlinks rather than copies, so editing the fixture changes what the UI shows;
+  every other check calls the classifier one layer below what the UI uses.
+- `synthetic-data/` — generates graded data and measures nothing. `grade-pending.mjs` turns a row list
+  (`{bundle, book, uid}`) into judge jobs and merges the answers back, reading `eval-data` and writing
+  `grade-jobs`. The rubric is `.claude/agents/scene-relevance.md`, where Claude Code discovers
+  subagents; `scene-relevance-min.md` is the minimal-prompt arm.
+- everything else (`*-grid.mjs`, `param-screen`, `keyword-audit`, `relevance-regress`) — benchmark and
+  analysis tools that take a vector index and/or lorebook path. Run bare they print a usage line and
+  exit non-zero; that is not a test failure.
+
+## A harness that spends anything appends; it never collects and writes at the end
+
+No result may depend on the process finishing. Append each response as it arrives (JSONL) and key a
+cache so a re-run resumes rather than re-paying.
+
+**Order the sweep so every pass covers every arm.** Loop repeat-outermost and arm-innermost, so the
+first pass is one full replicate and a decision to abandon the rest can be made early.
+
+**Redirect the runner's output to a file and grep that; never filter the live stream.** `tail`
+re-buffers the log and `grep <pattern>` discards the line that explains the failure (H4).
+
+`pkill -f <script>` matches the wrapper shell too and kills queued jobs — kill by PID.
+
+**Run long jobs so they stay visible and stoppable, not so they survive.** `nohup … &` vanishes from the
+task list and outlives a deliberate stop; append-and-resume already makes a killed run cheap.
+
+**Prompt work belongs on a local model with a fixed seed.** A seed pins output at any temperature, so a
+prompt change is the only thing that can move the result. Hosted reasoning models honour neither seed nor
+temperature (H1), so they can confirm a finding transfers but cannot be where it is found.
 
 ## Graded scenes: pool first, then pair
 
-Two constraints shape every tuning claim, and both have tooling rather than a workaround.
+`n` is small and human grading is the scarce input. **Count the stories, not the files (C1)**: a story
+is neither a chat file nor a character card — a long run continues into a new file, and one card carries
+many stories. The closest key to a story is the lorebook, so group by that. Anything resting on corpus
+statistics has an effective n nearer the story count than the scene count (C1). So prefer
+`param-screen.mjs`, which contrasts one parameter at a time against each scene's own baseline and
+reports the sign test; at single-digit n the finding is the direction plus the mean delta, and
+"measured flat (ID), paired" is a legitimate outcome to write next to a default.
 
-`n` is single-digit and always will be — a chat has to be long enough to have retrievable history and rich
-enough for some of it to be irrelevant. So **argmax over a grid is not available**: use `paired-arms.mjs`,
-which contrasts one parameter at a time against each scene's own baseline and reports the sign test. At n<6
-nothing can reach p<0.05, so the finding is the direction plus the mean delta, and "measured flat, n=X scenes
-across Y chats, paired" is a legitimate and common outcome to write next to a default.
+A pool built from one configuration penalises every configuration far from it, so a defaults review
+scored against a single `/wa-grade` capture is not defensible. `/wa-super-grade` captures several
+population-changing arms, unions what they surfaced and grades the union once; later rounds grade only
+the delta. `judged@10` in `graded-scene-grid.mjs` is the stopping rule. It cannot always reach 10/10:
+offline re-derivation ranks keyword-only rows core's gates would have rejected — probability rolls,
+inclusion groups, delay and cooldown, character and tag filters, `@@dont_activate`,
+`delayUntilRecursion`, triggers. Matching is WA's and `scene.mjs` models it through the same
+`keywordScore` that runs at runtime.
 
-A pool built from one configuration penalises every configuration far from it, so a defaults review scored
-against a single `/wa-grade` capture is not defensible. `/wa-super-grade` captures several
-population-changing arms, unions what they surfaced and grades the union once; later rounds load earlier
-samples and grade only the delta. `judged@10` in `graded-scene-grid.mjs` is the stopping rule — add arms
-until the cells you care about stop showing gaps. It cannot always reach 10/10: offline re-derivation ranks
-keyword-only rows ST core would have rejected, and no arm can surface those.
+The bundle's own rules — one `grades` array per row, no verdict ever overwritten, the value in force
+read through `grading.mjs` `gradeValue` and never a stored scalar — are `bundle-schema.md`'s.
+
+**Grading is the expensive step, so extend a pool by delta and never re-pool.** Loaded grades are
+subtracted (`/wa-super-grade`), carried onto a fresh capture (`graft-grades.mjs`), or built into jobs
+only for what is pending (`grade-pending.mjs`). Where a shape change would do, migrate instead of
+re-grading.
+
+**A grade mean is only comparable at matched retrieval rank.** Grades fall steeply with pool depth, so a
+pass that graded deeper reads as a harsher rater (G2). Match the band or make no comparison; a scene's
+`entries` carry no rank, so join through the arm's `candidates`. Which rater graded a row correlates
+with rank band, so `graded-scene-grid.mjs` can report that as a parameter effect. Agreement is weakest
+at the head of the pool, where every selection criterion is defined, so a one-scene difference between
+arms is inside the noise (G3).
+
+## Chat-based measurement uses the standard corpus
+
+Anything measuring how keys behave against prose — match rate, over-matching, discourse recurrence — runs
+against the standard chat set in `eval/eval-data/README.md` (gitignored: the corpus is one person's
+chats), not whatever chat is open. Count usable messages, not raw lines: core and WA both drop
+`is_system`, and one chat in the set is mostly hidden (C3).
+
+Book-only measurements draw on the wider book population (C2). **Count lineages, not files** (C2): a
+book is versioned in place, and two versions of one book are not two books. Say which population a
+two-part finding rests on; the chat half cannot be widened by adding books.
+
+**A key existing in a book is not evidence that it is a good key**, and which books are curated is not
+derivable from the data. The per-book curation status is in `eval/eval-data/README.md`; ask rather than
+infer. In a curated book a removal is agreement with the flag and a retention is an override; curation
+says nothing about keys the flag never surfaced, so removals speak to precision, never to recall.
+
+## Four stages, and the three orderings
+
+The stages are `matcher-design.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
+**2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
+**3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
+per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, the dynamic
+block only, both tiers at one cutoff for every model), **5. Delivery** (`applyBudget`, every cap a
+prefix of the layout order). Say which stage a claim is about.
+
+**WA is a selection system, not a ranking system.** What ships is the set that survives stage 4, chosen
+by a threshold on each row alone; rank decides what overflows at stage 5, never what belongs. So the
+validity score is F2 over the delivered set, set-based and asymmetric — recall at grade >= 3, precision
+crediting a 2 at half (`metrics.mjs` `gradeCredit`) — with no window imposed on it. nDCG and any score
+read at a window the system is not asked to choose (`@R`) are diagnostics on the ordering, never
+evidence that the system works.
+
+**Three orderings, and only one is a ranking.** The retrieval ranking decides what is activated; the
+layout order is what the caps and budget take a prefix of (`runState.lastLayoutOrder`); the prompt
+order is the user's sort over the survivors (`runState.lastPromptOrder`). A change to the layout score
+can never surface an entry retrieval did not return, so no scoring change is a recall lever, only a
+precision one.
+
+**Three populations, and they cross-cut.** `memory` is STMB-marked and `reference` is everything else —
+the tier an entry belongs to. `durable` is `constant` plus sticky: in the prompt by intent rather than
+because relevance chose it — how a row got there, not what kind of thing it is. Sticky is read at two
+moments: the runtime reads the armed effect and hoists it past the cut, while the eval side reads a
+capture row's `block`, which a dry run never sets to sticky, so a sticky entry is durable at runtime
+once armed and is graded like any other activation.
+
+`eval/scene.mjs` models stages 1 and 3; the keyword loop in `makeCandidateSet` is stage 2 and may only
+admit what core could have activated — not disabled entries, not a `delayUntilRecursion` one on the
+initial pass, not an `excludeRecursion` one on a later one. It runs to a fixpoint when the scene records
+`recursive`; a scene that does not record it is read as recursion off.
 
 ## countKey is the only matcher
 
-`ranking.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
-Anything that reports on how a key will behave (the audit, the pruner, the Studio's keyword colouring)
-calls it rather than re-deriving the rules, so the audit can't drift from what actually fires at
-runtime. The Aho-Corasick batching in `keyword-core.mjs` changes only when and how often it is called.
+`matcher.mjs` `countKey()` mirrors ST core's `matchKeys` — match flags, `/regex/` keys, `?` SmartKeys.
+Anything that reports on how a key will behave (the audit, the pruner, the Studio's colouring) calls it
+rather than re-deriving the rules. The Aho-Corasick batching in `keyword-audit.mjs` changes only when
+and how often it is called.
+
+**Its checks are split by what they are faithful to.** `core-matcher-check.mjs` holds every claim about
+how WA relates to core on an unmodified lorebook — the parity and the named divergences.
+`matcher-check.mjs` holds WA's own semantics: SmartKeys, scoring units, the saturation curve, key
+refusals, excerpts. An assertion that cites core as the authority goes in the first; one about what a
+matched expression is worth goes in the second.
 
 ## Pure vs ST-coupled
 
-`ranking.mjs`, `keyword-core.mjs`, `selection.mjs`, `smartkeys.mjs`, `sort.mjs` and `plugin/*.mjs` are
-ST-free and node-importable, so the evals exercise the real shipped code instead of string-slicing it.
-Settings and ST globals are injected by the caller, never imported. The ST/DOM half is
-`worldsapart.js`, `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`.
+Every module under `extension/` and `plugin/` is ST-free and node-importable, so the evals exercise the
+shipped code, except the five that import ST: `keyword-tools.mjs`, `studio.mjs`, `ui-widgets.mjs`,
+`capture-ui.mjs` and `lang-store.mjs`; `worldsapart.js` is the ST half proper. Settings and ST globals
+are injected by the caller, never imported; `state.mjs` binds ST's store rather than importing it, so
+the harness can read the shipped value of every knob.
 
-One exception survives: `eval/bulk-reorder-check.mjs` string-slices `planUidReindex` out of
-`studio.mjs`, which imports ST and so can't be loaded under node.
+**Every string a user reads goes through ST's i18n, and `eval/i18n-check.mjs` is the gate.** In the ST half,
+injected HTML carries `data-i18n` (the English text is the key; `[title]…` for an attribute, `;` joining the
+two, so no key may hold `;`) and code strings use the `t` tag, one whole sentence per template so a translation
+can reorder it — a count whose noun changes is two templates, never a `${n === 1 ? '' : 's'}`. A pure module
+whose prose reaches the screen (`keyword-audit.mjs` verdicts, `wholeWordAdvice`) takes the tag as a parameter
+defaulting to plain interpolation, so the checks still assert English. An English constant a check or the docs
+name (a flag, a sort label, a grade anchor) stays the key and is `translate()`d where drawn; the check
+enumerates those tables. Nothing in the ST half may bind a local named `t`. `i18n/<locale>.json` must cover
+exactly the extracted keys, and the check prints the missing ones; `--dump` lists every key for drafting a
+locale. Console output, slash-command help and the SmartKey validator's messages are not translated.
 
-## Composite keys use US (``), never NUL
+**A harness may contain no literal that has an authoritative home.** Where the authority is a file,
+import it; where the authority is the user, require it.
 
-Cache keys and row ids that join fields into one string (the summary cache in `summarizeQuery`, the
-`rowId` helpers in `studio.mjs` and `keyword-tools.mjs`) separate with Unit Separator. It was `\0`, and
-that made git treat those files as **binary**: `git diff` printed "Binary files differ" instead of the
-change, with no line-level blame or three-way merge. `grep` silently produced no output and BSD `awk`
-truncated the line at the NUL. US has none of those effects and, being a control character, still can't
-collide with content the way a printable delimiter could.
+- a constant — the chunk settings, the BM25 k1/b, everything in `INTERNAL_KEYS` — is one value
+  everywhere. Import it.
+- a user setting — the embedding model, `relevanceCutoff` — has no knowable value, so the harness must
+  be told (a flag, the env, or the bundle's own record) and refuse when none supplies it. No eval harness
+  carries a fallback value for one. **Which lorebooks a sweep reads is one of these**: `corpus.mjs`
+  `booksOrExit()` takes them from `--books A.json,B.json` or the gitignored `eval-data/books.json`, so no
+  tool names a book and any developer can point the evals at a corpus they know.
+- a derived constant — the fitted feature set — comes off the artifact it derives from. Read `features`
+  out of the fit.
+- a deterministic value — the tier — is computed, and is never a parameter at all.
+
+One exception: `eval/bulk-reorder-check.mjs` string-slices `planUidReindex` out of `studio.mjs`, which
+imports ST. **A slice is not a test of the shipped code, and it fails silently**: a helper added outside
+the sliced range throws `ReferenceError`, and grepping for `^FAIL` reports green. If something in the
+ST-coupled half needs a check, move it to the pure half first.
+
+## Composite keys use US (``), never NUL
+
+Cache keys and row ids that join fields into one string (the `rowId` helpers in `studio.mjs` and
+`keyword-tools.mjs`) separate with Unit Separator. NUL makes git treat the file as binary and truncates
+lines in BSD `awk`; a printable delimiter can collide with content.
+
+Defects in ST core itself go in `upstream-st.md`, in the SillyTavern root — not in this repo.
 
 ## Plugin changes need a redeploy
 
 Editing anything in `plugin/` requires `node deploy-plugin.mjs` and an ST restart. `/plugins/worlds-apart/`
-is a generated copy; the settings panel shows a drift banner until the fingerprints match.
+is a generated copy; the settings panel shows a drift banner until the fingerprints match, and the
+deploy prints the fingerprint.
+
+**`PLUGIN_FILES` is the whole contents, not just what gets copied.** The deploy removes any top-level
+file the manifest no longer names, so retiring a plugin module is one edit to `fingerprint.mjs`.
+Directories are left alone.
+
+**The matcher deploys into the plugin, so editing `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`
+needs a redeploy too.** The manifest names them with `../extension/` paths and copies them FLAT beside
+`index.js`: they may import each other only by bare `./name`, and nothing else in `extension/`.
+`eval/plugin-deploy-check.mjs` is what fails when that breaks — the server would otherwise fail at load.

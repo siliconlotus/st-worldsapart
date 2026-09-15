@@ -143,8 +143,21 @@ vite.config.ts.timestamp-*
 .vite/
 summary-cache.json
 
-# Personal relevance-eval fixtures (private /wa-debug captures + human grades)
+# Personal eval fixtures (private captures + human grades)
 eval-data/
+
+# Judge jobs and their answers — derived from eval-data by grade-pending.mjs, rebuildable, and large
+eval/grade-jobs/
+eval/recal-jobs/
 
 # Local Claude notes (host-specific, not project facts)
 CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+.DS_Store
+
+# Contract archives and eval grading arms are eval-data creation artifacts, not project code.
+# The rubrics that MATTER are copied into eval/eval-data alongside the runs they graded.
+eval/contracts/
+.claude/agents/sr-*.md
+.claude/agents/scene-relevance-useful.md

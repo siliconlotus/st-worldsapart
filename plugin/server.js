@@ -1,30 +1,5 @@
-/**
- * Worlds Apart — server plugin (SOURCE).
- *
- * This file lives in the extension repo so the plugin and the extension travel as one
- * unit. `/plugins/worlds-apart/` is a generated COPY: run `node deploy-plugin.mjs` to
- * materialise it (see that script). Do not hand-edit the copy — edit here and redeploy.
- *
- * The retrieval math (tokenize / BM25 / centered cosine / top-K selection) is imported
- * from ./scoring.mjs, the single source shared with the extension and the offline
- * harnesses, so the reproductions cannot drift from what the server actually runs.
- *
- * Adds a mean-centered vector query over the collections the Worlds Apart client
- * extension already populates through ST's own /api/vector/insert. Nothing here
- * modifies SillyTavern; it mounts at /api/plugins/worlds-apart.
- *
- * Why centering: in a single-story corpus every chunk shares a large common direction
- * (the recurring cast, the narrative register). Measured on a real lorebook the corpus
- * mean vector had norm 0.71 — roughly 70% of every embedding was that shared direction —
- * which compresses all similarities into a narrow band near 0.6. Subtracting the mean
- * before comparing removes that offset and leaves the topical variance that actually
- * discriminates.
- *
- * Note: this imports ST internals (src/vectors/*) by relative path resolved from the
- * DEPLOYED location (/plugins/worlds-apart/). That is not a public API and may move
- * between ST versions; the client falls back to the stock endpoint when this plugin is
- * unavailable.
- */
+// server.js — Worlds Apart server plugin (source); /plugins/worlds-apart/ is the generated copy, so edit here and
+// `node deploy-plugin.mjs`. Mounts at /api/plugins/worlds-apart; imports ST internals (src/vectors/*) by relative path.
 
 import path from 'node:path';
 import fs from 'node:fs';
@@ -32,22 +7,26 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import sanitize from 'sanitize-filename';
 import { LocalIndex } from 'vectra';
+import { getTransformersVector } from '../../src/vectors/embedding.js';
 import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
+import { getVllmVector } from '../../src/vectors/vllm-vectors.js';
+import { getOpenAIVector } from '../../src/vectors/openai-vectors.js';
+import { getCohereVector } from '../../src/vectors/cohere-vectors.js';
+import { getLlamaCppVector } from '../../src/vectors/llamacpp-vectors.js';
+import { getNomicAIVector } from '../../src/vectors/nomicai-vectors.js';
+import { getExtrasVector } from '../../src/vectors/extras-vectors.js';
+import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-vectors.js';
+import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
-import { DEFAULT_K1, DEFAULT_B, buildLexical } from './lexical.mjs';
-// Same matcher and text fold the extension uses for keyword hits — shared, not copied, so a chat scan and a
-// live keyword match can never disagree about what a key matches.
-import { buildAutomaton, scanAutomaton, fold } from './automaton.mjs';
+// Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
+import { countChatHits, dropTags, setBoundaryMode } from './matcher.mjs';
 import { norm, corpusMean } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
-// This file sits at <root>/plugins/worlds-apart/index.js once deployed.
+// Deployed location: <root>/plugins/worlds-apart/index.js.
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
-// SillyTavern root: /ping hands this to the extension so its settings panel can show a fully-
-// absolute deploy command (the browser only knows the URL path, not the server's filesystem root).
 const ST_ROOT = path.resolve(PLUGIN_DIR, '..', '..');
-// Fingerprint of this deployed copy, computed from its own files. The extension compares it against
-// the same hash over its source files to detect a /plugins copy that wasn't redeployed after a change.
+// The deployed copy's own fingerprint; the extension compares it with the same hash over its source files.
 const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
 const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => readDeployed(deployed)));
 
@@ -57,62 +36,83 @@ export const info = {
     description: 'Mean-centered vector search for World Info retrieval.',
 };
 
-/**
- * Cached corpus statistics (items included — listItems() re-parses the whole index file, so it
- * only runs when index.json's mtime changes), keyed by index path.
- * @type {Map<string, { items: object[], mean: Float64Array, lexical: object, mtimeMs: number, size: number }>}
- */
+/** Corpus statistics per index path, reloaded when index.json's mtime or size changes.
+ *  @type {Map<string, { items: object[], mean: Float64Array, mtimeMs: number, size: number }>} */
 const meanCache = new Map();
 
-/**
- * Embeds the query. Only the providers listed here are supported for centered
- * search; anything else should fall back to ST's own endpoint client-side.
- * @param {string} source Vector source
- * @param {object} sourceSettings Provider settings
- * @param {string} text Text to embed
- * @param {object} directories User directories
- * @returns {Promise<number[]>} Embedding
- */
-async function embed(source, sourceSettings, text, directories) {
+/** Embeds the QUERY for every source ST can address — a mirror of ST's module-private `getVector` and `getSourceSettings`
+ *  (src/endpoints/vectors.js); eval/embed-sources-check.mjs fails when ST's SOURCES outgrows this switch. `request` is the
+ *  plugin's own Express request, which Google's vectors read credentials off. */
+async function embed(source, s, text, directories, request) {
+    const openAiish = (urlOverride = null) => getOpenAIVector(text, source, directories, String(s.model), urlOverride);
     switch (source) {
-        case 'ollama':
-            return await getOllamaVector(
-                text,
-                sourceSettings.apiUrl,
-                sourceSettings.model,
-                Boolean(sourceSettings.keep),
-                directories,
-            );
+        case 'transformers': return await getTransformersVector(text);
+        case 'nomicai':      return await getNomicAIVector(text, source, directories);
+        case 'extras':       return await getExtrasVector(text, s.extrasUrl, s.extrasKey);
+        case 'palm':         return await getMakerSuiteVector(text, String(s.model), request);
+        case 'vertexai':     return await getVertexVector(text, String(s.model), request);
+        // isQuery is true: this only ever embeds the QUERY.
+        case 'cohere':       return await getCohereVector(text, true, directories, String(s.model));
+        case 'llamacpp':     return await getLlamaCppVector(text, s.apiUrl, directories);
+        case 'vllm':         return await getVllmVector(text, s.apiUrl, String(s.model), directories);
+        case 'ollama':       return await getOllamaVector(text, s.apiUrl, String(s.model), Boolean(s.keep), directories);
+        case 'siliconflow':  return await openAiish(s.siliconflow_endpoint === 'cn' ? 'https://api.siliconflow.cn/v1' : null);
+        case 'workers_ai': {
+            const accountId = String(s.workers_ai_account_id || '').trim();
+            return await openAiish(accountId
+                ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1`
+                : null);
+        }
+        case 'webllm': case 'koboldcpp':
+            // Vector Storage embeds these in the browser; thrown so the client falls back.
+            throw new Error(`Worlds Apart: source "${source}" embeds in the browser — the plugin cannot embed a query for it.`);
+        case 'openai': case 'togetherai': case 'mistral': case 'chutes': case 'electronhub': case 'nanogpt': case 'openrouter':
+            return await openAiish();
         default:
-            throw new Error(`Worlds Apart: centered search does not support source "${source}"`);
+            throw new Error(`Worlds Apart: no embedding route for source "${source}" — `
+                + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
     }
 }
 
-/**
- * Resolves the on-disk index path, matching ST's own layout.
- * @param {object} directories User directories
- * @param {string} collectionId Collection ID
- * @param {string} source Vector source
- * @param {string} model Model name
- * @returns {string} Index path
- */
+/** The model scope ST wrote the collection under (`getSourceSettings(source).model`); several sources resolve it SERVER-SIDE, so the client's field alone names a directory ST never wrote. */
+function modelScope(source, s) {
+    switch (source) {
+        case 'transformers': return getConfigValue('extensions.models.embedding', '');
+        case 'mistral':      return 'mistral-embed';
+        case 'nomicai':      return 'nomic-embed-text-v1.5';
+        case 'palm': case 'vertexai': return String(s.model || 'text-embedding-005');
+        case 'electronhub': case 'nanogpt': return String(s.model || 'text-embedding-3-small');
+        case 'openrouter':   return String(s.model) || 'openai/text-embedding-3-large';
+        case 'chutes':       return String(s.model || 'chutes-qwen-qwen3-embedding-8b');
+        case 'siliconflow':  return String(s.model || 'Qwen/Qwen3-Embedding-0.6B');
+        case 'workers_ai':   return String(s.model || '@cf/baai/bge-m3');
+        case 'llamacpp': case 'extras': return '';
+        default:             return String(s.model);
+    }
+}
+
 function getIndexPath(directories, collectionId, source, model) {
-    // Must match src/endpoints/vectors.js getIndex() exactly, or we'd read a different
-    // directory than the one ST wrote to.
+    // Must match src/endpoints/vectors.js getIndex() exactly, or this reads a directory ST never wrote to.
     return path.join(directories.vectors, sanitize(source), sanitize(collectionId), sanitize(String(model ?? '')));
 }
 
-/**
- * Loads an index's items and its cached corpus mean.
- * The mean is recomputed when index.json changes on disk, which covers inserts
- * and deletes without needing an explicit invalidation hook.
- * @param {string} indexPath Path to the index
- * @returns {Promise<{items: object[], mean: Float64Array, lexical: object} | null>}
- */
+/** The centroid over `uids` (absent or empty = all), memoised on the loaded object; an empty subset falls back to the full mean rather than NaN. */
+function centroidFor(loaded, uids) {
+    if (!Array.isArray(uids) || !uids.length) return loaded.mean;
+    const key = uids.join(',');
+    loaded.subsetMeans ??= new Map();
+    const hit = loaded.subsetMeans.get(key);
+    if (hit) return hit;
+    const wanted = new Set(uids.map(Number));
+    const subset = loaded.items.filter(it => wanted.has(Number(it.metadata?.index)));
+    const mean = subset.length ? corpusMean(subset) : loaded.mean;
+    loaded.subsetMeans.set(key, mean);
+    console.log(`[Worlds Apart] centroid over ${subset.length}/${loaded.items.length} chunks (${wanted.size} entries define the corpus)`);
+    return mean;
+}
+
+/** An index's items and corpus mean, cached per path on mtime AND size: two writes can share an mtime tick. */
 async function loadCentered(indexPath) {
-    // Validity key is mtime AND size: two rapid writes can land in one mtime tick (or a
-    // coarse-mtime mount can hide one entirely), and serving a stale item set from that would
-    // silently drop chunks from retrieval. Size catches the realistic case (chunk count changed).
     const stat = fs.statSync(path.join(indexPath, 'index.json'), { throwIfNoEntry: false });
     const mtimeMs = stat?.mtimeMs ?? 0;
     const size = stat?.size ?? 0;
@@ -135,18 +135,14 @@ async function loadCentered(indexPath) {
     }
 
     const mean = corpusMean(items);
-    const lexical = buildLexical(items);
-    const loaded = { items, mean, lexical, mtimeMs, size };
+    const loaded = { items, mean, mtimeMs, size };
 
     meanCache.set(indexPath, loaded);
-    console.log(`[Worlds Apart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}, ${lexical.postings.size} lexical terms, avg ${lexical.avgdl.toFixed(0)} tokens/chunk`);
+    console.log(`[Worlds Apart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}`);
 
     return loaded;
 }
 
-/**
- * @param {import('express').Router} router Plugin router
- */
 export async function init(router) {
     router.post('/query-multi', async (request, response) => {
         try {
@@ -157,24 +153,18 @@ export async function init(router) {
             }
 
             const topK = Number(request.body.topK) || 10;
-            const settings = sourceSettings ?? {};
+            const settings = { ...sourceSettings, model: modelScope(String(source), sourceSettings ?? {}) };
+            // Lexical fields a client may still send (threshold, bm25K1, bm25B, termWeights, stopwordDf) are ignored, not rejected: a stricter reading turns redeploy skew into a 400.
             const opts = {
                 centered: request.body.centered !== false,
-                threshold: request.body.threshold === 'auto' ? 'auto' : (Number(request.body.threshold) || 0),
-                queryText: String(searchText),
-                k1: Number(request.body.bm25K1) > 0 ? Number(request.body.bm25K1) : DEFAULT_K1,
-                b: Number.isFinite(Number(request.body.bm25B)) ? Number(request.body.bm25B) : DEFAULT_B,
-                termWeights: request.body.termWeights && typeof request.body.termWeights === 'object' ? request.body.termWeights : null,
-                stopwordDf: Number(request.body.stopwordDf) || 0,
-                commonWordWeight: Number.isFinite(Number(request.body.commonWordWeight)) ? Number(request.body.commonWordWeight) : 1,
-                uncenteredGate: Number(request.body.uncenteredGate) || 0,
             };
+            // `{ collectionId: [uid, ...] }` defining each collection's centroid; absent means every chunk, which is what an older client sends.
+            const centroidUids = request.body.centroidUids ?? {};
 
-            // The disk loads and the embed round-trip are independent — run them concurrently.
             const loading = Promise.all(collectionIds.map(collectionId =>
                 loadCentered(getIndexPath(request.user.directories, String(collectionId), String(source), settings.model))));
             loading.catch(() => {});   // surfaced by the await below; without this an embed failure leaves an unhandled rejection
-            const queryVector = await embed(String(source), settings, String(searchText), request.user.directories);
+            const queryVector = await embed(String(source), settings, String(searchText), request.user.directories, request);
             const results = [];
             const loadedAll = await loading;
 
@@ -186,14 +176,11 @@ export async function init(router) {
                     continue;
                 }
 
-                // Score this collection with the shared math: centered cosine + BM25, keeping
-                // any chunk either signal likes (score >= threshold OR bm25 > 0).
-                results.push(...scoreCollection(String(collectionId), loaded, queryVector, opts));
+                const mean = centroidFor(loaded, centroidUids[String(collectionId)]);
+                results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
             }
 
-            // Pool each entry's best chunk FIRST, then union the top-K of each ranking, so a record that
-            // only one signal likes still reaches the client and can win on fusion. Pooling before the cut
-            // is what makes topK a count of entries and the per-entry maxima exact — see poolEntries.
+            // Pool to entries FIRST, then cut, so topK counts entries.
             return response.send(selectTopK(poolEntries(results), topK));
         } catch (error) {
             console.error('[Worlds Apart] query failed:', error);
@@ -201,20 +188,9 @@ export async function init(router) {
         }
     });
 
-    /**
-     * Scan chat histories for a set of literal keys, returning only counts.
-     *
-     * WHY SERVER-SIDE. The client can do this itself by fetching each chat, and for a localhost install that
-     * is fine — but the chats are the largest thing SillyTavern owns (measured: 190 chats, 1.2GB, individual
-     * files 12-17MB) and a served instance would pull all of it over the network to answer a question whose
-     * answer is a few hundred integers. The keys go up, the counts come back, the histories never move.
-     *
-     * Streams line by line: a chat is JSONL, so this never holds a whole history in memory, and one
-     * Aho-Corasick pass per message keeps the cost O(text) regardless of how many keys are checked.
-     *
-     * Body: { keys: string[], chats: [{ dir, file }] }  — dir is the character directory (avatar minus .png)
-     * Reply: { counts: { key: n }, messages, scanned, missing }
-     */
+    /** Counts of MESSAGES containing each key across chat histories, read line by line server-side so no chat crosses the
+     *  wire (P1). Every key kind: countChatHits is the shipped matcher, deployed beside this file.
+     *  Body `{ keys: string[], chats: [{ dir, file }], wordBoundary }` (dir is the character directory), reply `{ counts, messages, scanned, missing }`. */
     router.post('/scan-chats', async (request, response) => {
         try {
             const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String).filter(Boolean) : [];
@@ -222,13 +198,19 @@ export async function init(router) {
             if (!keys.length || !chats.length) {
                 return response.status(400).send({ error: 'keys and chats are required' });
             }
+            // The caller's setting, required: a default here would disagree with the browser silently.
+            // ponytail: boundaryMode is module-level in matcher.mjs and this handler awaits, so a second user's scan can
+            // land between the set and the count. Pass the mode through countKey before two tenants ever share an install.
+            const wordBoundary = String(request.body?.wordBoundary ?? '');
+            if (!wordBoundary) return response.status(400).send({ error: 'wordBoundary is required' });
+            setBoundaryMode(wordBoundary);
+            // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
+            const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
+            // The elements WA strips from every message it reads live, so the audit counts the same text the runtime does.
+            const dropChatTags = String(request.body?.dropChatTags ?? '').trim();
 
-            // Deduped by FOLDED form: two keys can fold together, and the automaton indexes the list it is given.
-            const folded = [...new Set(keys.map(fold))];
-            const idxOf = new Map(folded.map((f, i) => [f, i]));
-            const automaton = buildAutomaton(folded);
-            const totals = new Map();
-            let messages = 0, scanned = 0, missing = 0;
+            const totals = new Map(), typedTotals = new Map();
+            let messages = 0, scanned = 0, missing = 0, unit = 'message';
 
             for (const entry of chats) {
                 const dir = sanitize(String(entry?.dir ?? ''));
@@ -237,31 +219,110 @@ export async function init(router) {
                 const full = path.join(request.user.directories.chats, dir, file.endsWith('.jsonl') ? file : `${file}.jsonl`);
                 if (!fs.existsSync(full)) { missing++; continue; }
                 scanned++;
+                const texts = [];
                 await new Promise(resolve => {
                     const rl = readline.createInterface({ input: fs.createReadStream(full), crlfDelay: Infinity });
                     rl.on('line', line => {
                         if (!line) return;
-                        let text = '';
-                        try { text = String(JSON.parse(line)?.mes ?? ''); } catch { return; }   // line 0 is metadata
-                        if (!text) return;
-                        messages++;
-                        for (const [i, n] of scanAutomaton(automaton, fold(text))) totals.set(i, (totals.get(i) ?? 0) + n);
+                        let m;
+                        try { m = JSON.parse(line); } catch { return; }   // line 0 is metadata
+                        // Hidden messages are not scanned live (C3), so they are not counted here.
+                        if (m?.is_system || !String(m?.mes ?? '')) return;
+                        texts.push({ name: m.name, mes: dropChatTags ? dropTags(String(m.mes), dropChatTags) : String(m.mes) });
                     });
                     rl.on('close', resolve);
                     rl.on('error', resolve);   // an unreadable chat is skipped, not fatal
                 });
+                // One file at a time, then merged: a hit is per message, so where the scan is split cannot change the total.
+                const got = countChatHits(keys, texts, unitOpts);
+                for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
+                for (const [k, n] of got.typedWith) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
+                messages += got.messages;
+                unit = got.unit;
             }
 
-            const counts = {};
-            for (const k of keys) counts[k] = totals.get(idxOf.get(fold(k))) ?? 0;
-            return response.send({ counts, messages, scanned, missing });
+            // Null-prototype: the keys are the caller's, and `counts['__proto__'] = n` on a plain object hits the setter and is dropped from the reply.
+            const counts = Object.create(null), typed = Object.create(null);
+            for (const k of keys) {
+                counts[k] = totals.get(k) ?? 0;
+                if (typedTotals.has(k)) typed[k] = typedTotals.get(k);
+            }
+            return response.send({ counts, typed, messages, unit, scanned, missing });
         } catch (error) {
             console.error('Worlds Apart: /scan-chats failed', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     });
 
-    router.post('/ping', (_request, response) => response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT }));
+    /** `[{ dir, file, world_info, size }]` for EVERY chat, `world_info` null when line 0 names no book; line 0 is all
+     *  that is read (P1). Every chat, not only the bound ones: a book attached through the character or globally
+     *  reaches chats whose own metadata names nothing. */
+    router.post('/chat-bindings', async (request, response) => {
+        try {
+            const root = request.user.directories.chats;
+            if (!fs.existsSync(root)) return response.send({ bindings: [], chats: 0 });
+            const bindings = [];
+            let chats = 0;
+            for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
+                if (!dir.isDirectory()) continue;
+                const dirPath = path.join(root, dir.name);
+                for (const file of fs.readdirSync(dirPath)) {
+                    if (!file.endsWith('.jsonl')) continue;
+                    chats++;
+                    const full = path.join(dirPath, file);
+                    const world = await new Promise(resolve => {
+                        const stream = fs.createReadStream(full);
+                        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+                        let done = false;
+                        // destroy, not just rl.close(): close only pauses the stream, and a stream paused at line 0 never autocloses its fd.
+                        const finish = v => { if (!done) { done = true; rl.close(); stream.destroy(); resolve(v); } };
+                        // Line 0 is the metadata header; stop there.
+                        rl.on('line', line => { try { finish(JSON.parse(line)?.chat_metadata?.world_info ?? null); } catch { finish(null); } });
+                        rl.on('close', () => finish(null));
+                        rl.on('error', () => finish(null));
+                    });
+                    let size = null;
+                    try { size = fs.statSync(full).size; } catch { /* unreadable: listed without a size */ }
+                    bindings.push({ dir: dir.name, file, world_info: world ? String(world) : null, size });
+                }
+            }
+            return response.send({ bindings, chats });
+        } catch (error) {
+            console.error('Worlds Apart: /chat-bindings failed', error);
+            return response.status(500).send({ error: String(error?.message ?? error) });
+        }
+    });
+
+    // Every WA collection on disk (`vectors/<source>/wa_<hash>/<model>/`), size and mtime only; reports, never deletes.
+    router.post('/collections', (request, response) => {
+        try {
+            const root = request.user.directories.vectors;
+            const out = [];
+            for (const source of fs.readdirSync(root, { withFileTypes: true })) {
+                if (!source.isDirectory()) continue;
+                const sourceDir = path.join(root, source.name);
+                for (const coll of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+                    if (!coll.isDirectory() || !coll.name.startsWith('wa_')) continue;
+                    const collDir = path.join(sourceDir, coll.name);
+                    for (const model of fs.readdirSync(collDir, { withFileTypes: true })) {
+                        if (!model.isDirectory()) continue;
+                        const index = path.join(collDir, model.name, 'index.json');
+                        const stat = fs.statSync(index, { throwIfNoEntry: false });
+                        if (!stat) continue;
+                        out.push({ source: source.name, collectionId: coll.name, model: model.name, bytes: stat.size, mtimeMs: stat.mtimeMs });
+                    }
+                }
+            }
+            return response.send(out);
+        } catch (error) {
+            console.error('[Worlds Apart] collections failed:', error);
+            return response.status(500).send({ error: String(error?.message ?? error) });
+        }
+    });
+
+    router.post('/ping', (request, response) => {
+        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT });
+    });
 
     console.log('[Worlds Apart] server plugin ready at /api/plugins/worlds-apart');
 }

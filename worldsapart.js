@@ -1,77 +1,58 @@
-/**
- * Worlds Apart — takes over World Info selection, ranking and budget.
- *
- * Core still does the mechanical scanning (keywords, constant, sticky, recursion)
- * and the prompt assembly (positions, depth, roles, outlets, regex, Author's Note).
- * This extension decides which entries survive, in what order, and how many tokens
- * they may spend, by hooking three sanctioned points:
- *
- *   1. WORLDINFO_ENTRIES_LOADED — suppress keyword matching on vectorized entries.
- *   2. generate_interceptor      — chunked vector retrieval, force-activate the winners.
- *   3. WORLDINFO_SCAN_DONE       — rank everything activated, apply budget, rewrite `order`.
- *
- * Prompt order is set at assembly time by sorting on `entry.order` (world-info.js),
- * and the unshift-based build means the FINAL prompt order is ascending `order`.
- */
+// worldsapart.js — the ST-coupled half: hooks WORLDINFO_ENTRIES_LOADED, generate_interceptor and
+// WORLDINFO_SCAN_DONE to take World Info selection, ranking and budget over from core.
 
 import {
     eventSource,
     event_types,
     getRequestHeaders,
     getMaxPromptTokens,
-    generateRaw,
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
+    extension_prompt_types,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
-import { getSortedEntries, getWorldInfoPrompt, loadWorldInfo, saveWorldInfo, reloadEditor, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../world-info.js';
+import { t } from '../../../i18n.js';
+
+import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
-import { ConnectionManagerRequestService } from '../../shared.js';
-import { getStringHash, escapeHtml, getCharaFilename, download } from '../../../utils.js';
+import { getStringHash, escapeHtml, getCharaFilename } from '../../../utils.js';
 import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
-import * as ranking from './extension/ranking.mjs';
+import { admitCeiling } from './plugin/scoring.mjs';
+import * as query from './extension/query.mjs';
+import * as entity from './extension/entity.mjs';
+import * as matcher from './extension/matcher.mjs';
 import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
-import { getTokenCountAsync } from '../../../tokenizers.js';
+import * as layout from './extension/layout.mjs';
+import * as delivery from './extension/delivery.mjs';
+import { getTokenCountAsync, getTokenizerModel } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
-import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
-import { PRESENTATION_ALIAS, SORT_FNS, normPresentation, presentationBaseLabel, presentationLabel, reconcileTiers, tierRank, wiTitleOf } from './extension/sort.mjs';
+import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { buildSample, bundleSamples, captureParams, GRADE_ANCHORS, isScaffolding, mergeGrades, normalizeSample, rowKey, sampleFile, searchedBook, splitGraded, trimBook, unionArms } from './extension/grading.mjs';
+import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './extension/capture-ui.mjs';
+import { isDurable } from './extension/grading.mjs';
+import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
+import { packStore, fetchIndex, fetchPack } from './extension/lang-store.mjs';
 
-/** The grading scale in one caption line, shared by both grading popups. */
-const gradeAnchorLine = () => `Grade 0–4: ${GRADE_ANCHORS.map((a, g) => `${g} = ${a.split(';')[0].toLowerCase()}`).join(' · ')}.`;
-// Chunking is WA's own, not ST's: it is unreachable under node and it determines every stored vector, so an
-// upstream edit would silently invalidate existing indexes. See extension/chunking.mjs.
 import { chunkEntry } from './extension/chunking.mjs';
+import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, fitKey, queryPrefix, postDates, UNFITTED_FALLBACK } from './extension/relevance.mjs';
 
-/** Base value for the rewritten `order` sequence. WA rewrites every activated entry's order, so only
- * the relative index matters and the base is free. It is parked far above any plausible authored value
- * for two reasons: an order in the 99000s is unmistakably WA's when inspecting activated entries, and it
- * cannot collide with authored blocks (lorebooks commonly use `order` as coarse bands — constants in one
- * range, keyword entries in another, memory-index chronology in a third) or with ST's own default of 100,
- * which a late force-activation from another extension would still carry into assembly. */
+/** Base of the rewritten `order` sequence, parked above any authored value and ST's default of 100. */
 const ORDER_BASE = 99000;
 
-// ---------------------------------------------------------------------------
-// Vector backend — reuses Vector Storage's provider config and ST's own endpoints.
-// ---------------------------------------------------------------------------
+// Vector backend — Vector Storage's provider config and ST's own endpoints.
 
-/**
- * Builds the request body for /api/vector/*, borrowing Vector Storage's provider settings.
- * ponytail: model key is derived by `${source}_model` convention, which covers every
- * provider except the special cases below. Add a case if a new one breaks the pattern.
- * @param {object} args Extra body fields
- * @returns {object} Request body
- */
+/** Request body for /api/vector/*, from Vector Storage's provider settings.
+ *  ponytail: the model key is `${source}_model` except for the cases below; add a case when a provider breaks the pattern. */
 function vectorRequestBody(args = {}) {
     const v = extension_settings.vectors ?? {};
     const source = v.source || 'transformers';
@@ -122,12 +103,12 @@ function vectorRequestBody(args = {}) {
     return body;
 }
 
-/** Mirrors Vector Storage's current embed endpoint + model into the Vector Match panel. Read-only;
- * reuses vectorRequestBody() so the per-provider derivation stays in one place. */
+/** Mirrors Vector Storage's embed endpoint and model into the Vector Match panel. */
 function updateEmbedInfo() {
     const b = vectorRequestBody();
     const endpoint = b.apiUrl || b.extrasUrl || b.siliconflow_endpoint || b.source;
-    $('#wa_embed_info').text(`Embed: ${endpoint} · ${b.model || '(provider default)'}`);
+    const model = b.model || t`(provider default)`;
+    $('#wa_embed_info').text(t`Embed: ${endpoint} · ${model}`);
 }
 
 async function vectorPost(route, args) {
@@ -147,18 +128,16 @@ async function vectorPost(route, args) {
 }
 
 
-/**
- * Checks once whether the Worlds Apart server plugin is loaded. It only exists if
- * enableServerPlugins is on in config.yaml, so absence is expected, not an error.
- * @returns {Promise<boolean>} True if the plugin responded
- */
+/** Whether the WA server plugin is loaded, checked once; absent is the stock install, not an error. */
 async function hasPlugin() {
     if (runState.pluginAvailable !== null) {
         return runState.pluginAvailable;
     }
 
     try {
-        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders() });
+        // The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not.
+        const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
+        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
         runState.pluginAvailable = response.ok;
         if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
     } catch {
@@ -169,47 +148,36 @@ async function hasPlugin() {
     return runState.pluginAvailable;
 }
 
-/**
- * Fingerprints this extension's SOURCE plugin files (fetched from its own served directory) with the
- * same hash the running plugin applies to its DEPLOYED files. Comparing the two spots a /plugins copy
- * that drifted from source — no hand-maintained version number. Cached after the first call.
- * @returns {Promise<string|null>}
- */
+/** Fingerprint of this extension's source plugin files, hashed exactly as the plugin hashes its deployed copy; cached. */
 async function computeSourceFingerprint() {
     if (runState.sourceFP !== null) return runState.sourceFP;
     try {
         const texts = await Promise.all(
-            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url)).then(r => r.text())),
+            // `r.ok` checked, or a 404 hashes the error page: a fetch only rejects at the network layer, so a
+            // PLUGIN_FILES entry naming a missing file would fingerprint as drift for ever.
+            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url))
+                .then(r => { if (!r.ok) throw new Error(`${src}: ${r.status}`); return r.text(); })),
         );
         runState.sourceFP = pluginFingerprint(...texts);
-    } catch { runState.sourceFP = null; }
+    } catch (error) { console.warn('Worlds Apart: could not fingerprint the plugin source, drift unknown —', error); runState.sourceFP = null; }
     return runState.sourceFP;
 }
 
-/**
- * Fills the setup box under the mean-centered checkbox with copyable install commands.
- * The plugin ships inside this extension but ST loads server plugins separately, so a
- * fresh install needs: enable plugins in config → deploy the copy → restart. The deploy
- * path is derived from this module's own URL, so it's correct whatever the install folder
- * is named (ST clones into third-party/<repo-name>, which varies).
- */
+/** The deployed plugin is not the source this extension ships. A null fingerprint — a plugin predating the field, or a
+ *  source file that would not load — reads as no drift: the check cannot tell, and a false alarm is worse. */
+const pluginDrifted = () => Boolean(runState.pluginAvailable && runState.sourceFP && runState.pluginFP !== runState.sourceFP);
+
+/** Fills the plugin setup box with copyable install and redeploy commands, and the drift banner. */
 function renderPluginSetup() {
     const box = $('#wa_plugin_setup');
     if (!box.length) return;
     const extDir = new URL('.', import.meta.url).pathname.replace(/\/+$/, '').split('/').pop();
-    // Absolute path when the plugin has reported the ST root (runs from any cwd); otherwise the
-    // ST-root-relative form with a note. Cross-platform: deploy-plugin.mjs also enables plugins in config.
-    // Absolute path once the plugin has reported the ST root (runs from any cwd) — this is the
-    // redeploy loop. Before first install the browser can't know the server's filesystem root
-    // (no plugin, and ST core exposes no path), so the fallback is the ST-root-relative command
-    // with an explicit "open a terminal there" instruction. Cross-platform; deploy also enables
-    // server plugins in config.yaml.
     const rel = `public/scripts/extensions/third-party/${extDir}/deploy-plugin.mjs`;
     const deployCmd = runState.pluginRoot ? `node "${runState.pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node ${rel}`;
     const row = (cmd) => {
         const r = $('<div class="flex-container alignItemsCenter flexnowrap" style="gap:6px;margin:3px 0;"></div>');
         const code = $('<code style="flex:1;overflow-x:auto;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--black30a,rgba(0,0,0,0.2));"></code>').text(cmd);
-        const btn = $('<div class="menu_button fa-solid fa-copy" title="Copy" style="margin:0;flex:0 0 auto;"></div>');
+        const btn = $('<div class="menu_button fa-solid fa-copy" title="Copy" data-i18n="[title]Copy" style="margin:0;flex:0 0 auto;"></div>');
         btn.on('click', async () => {
             try { await navigator.clipboard.writeText(cmd); } catch { /* clipboard blocked; user can select the text */ }
             btn.removeClass('fa-copy').addClass('fa-check');
@@ -217,64 +185,54 @@ function renderPluginSetup() {
         });
         return r.append(code, btn);
     };
-    // Drift is silent breakage (the deployed plugin runs code this extension no longer ships), so it
-    // also gets a banner at the top of WA settings — the setup box itself is two collapsed drawers deep.
-    // Every other state stays in the box: "not detected" is the expected stock install, not a problem.
     const alert = $('#wa_plugin_alert').empty();
+    // Top of the drawer, so neither state needs the setup box open to be seen.
+    const banner = (text, ...rest) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
+        .append($('<div style="color:var(--warning,#d80);"></div>').text(text), ...rest);
     box.empty();
-    if (runState.pluginAvailable === null) { box.text('Checking for server plugin…'); return; }
+    if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     if (runState.pluginAvailable) {
-        // Stale only when we have a source fingerprint to compare and it differs (a null runState.pluginFP is an
-        // older, pre-fingerprint build, which also differs → flagged). If the source fetch failed
-        // (runState.sourceFP null) we can't judge, so don't nag.
-        const stale = runState.sourceFP && runState.pluginFP !== runState.sourceFP;
+        const stale = pluginDrifted();
         if (stale) {
-            const warn = '⚠ Server plugin out of date — the deployed copy differs from this extension\'s source. Redeploy and restart:';
-            alert.append($('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, #e0a86c 15%, transparent);border:1px solid color-mix(in srgb, #e0a86c 45%, transparent);"></div>')
-                .append($('<div style="color:var(--warning,#d80);"></div>').text(warn), row(deployCmd)));
+            const warn = t`⚠ Server plugin out of date — the deployed copy differs from this extension's source. Redeploy and restart:`;
+            alert.append(banner(warn, row(deployCmd)));
             box.append($('<div style="color:var(--warning,#d80);"></div>').text(warn));
             box.append(row(deployCmd));
             return;
         }
-        box.append($('<div style="color:var(--active,#7ac);"></div>').text('✓ Server plugin active' + (runState.sourceFP ? ` — up to date (build ${runState.sourceFP}).` : '.')));
-        box.append($('<div style="margin-top:3px;"></div>').text('After editing plugin code, redeploy and restart SillyTavern:'));
+        box.append($('<div style="color:var(--active,#7ac);"></div>').text(runState.sourceFP ? t`✓ Server plugin active — up to date (build ${runState.sourceFP}).` : t`✓ Server plugin active.`));
+        box.append($('<div style="margin-top:3px;"></div>').text(t`After editing plugin code, redeploy and restart SillyTavern:`));
         box.append(row(deployCmd));
         return;
     }
-    box.append($('<div></div>').text('⚠ Not detected — mean-centered search is inactive (falling back to stock vector search). To install:'));
-    box.append($('<div style="margin-top:3px;"></div>').text('1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):'));
+    const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
+    alert.append(banner(absent));
+    box.append($('<div></div>').text(t`${absent} To install:`));
+    box.append($('<div style="margin-top:3px;"></div>').text(t`1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):`));
     box.append(row(deployCmd));
-    box.append($('<div style="margin-top:3px;">2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.</div>'));
+    box.append($('<div style="margin-top:3px;"></div>').text(t`2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.`));
 }
 
-/**
- * Runs a multi-collection query, preferring the plugin's mean-centered search.
- * Falls back to ST's endpoint if the plugin is absent or errors, so the extension
- * works on a stock install.
- * @param {object} args Query arguments
- * @returns {Promise<object>} Grouped results
- */
+/** Multi-collection query through the plugin's mean-centered search, or the no-plugin path (ST's own /api/vector)
+ *  when the plugin is absent or errors. */
 async function queryCollections(args) {
-    if (settings().meanCentered && await hasPlugin()) {
+    // The model's query prefix goes on here and only here: the caller's `searchText` also feeds queryTermWeights.
+    const prefix = queryPrefix(vectorRequestBody().model);
+    if (prefix) args = { ...args, searchText: prefix + args.searchText };
+
+    // The ceiling is chosen per path here, since the no-plugin path can fire mid-request. Gated on the plugin's
+    // presence, not on `meanCentered`, which is a plugin parameter.
+    if (await hasPlugin()) {
         try {
-            const body = vectorRequestBody(args);
-            // The plugin needs the provider settings under one key, as the server does.
+            const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
             const response = await fetch('/api/plugins/worlds-apart/query-multi', {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({
                     ...body,
                     centered: settings().meanCentered,
-                    uncenteredGate: Number(settings().uncenteredGate) || 0,
-                    bm25K1: settings().bm25K1,
-                    bm25B: settings().bm25B,
-                    termWeights: args.termWeights ?? null,
-                    stopwordDf: settings().stopwordDocFreq,
-                    // Down-weights general-English words in the lexical IDF. A measured wash under hybrid
-                    // fusion (vectors mask it) but a small win for BM25-only, so it's an internal global
-                    // keyed to the mode — not a setting. 0.7 for BM25-only, off (1) for hybrid/vector.
-                    commonWordWeight: settings().retrievalMode === 'lexical' ? 0.7 : 1,
-                    sourceSettings: { apiUrl: body.apiUrl, model: body.model, keep: body.keep },
+                    // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
+                    sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
                 }),
             });
 
@@ -282,46 +240,29 @@ async function queryCollections(args) {
                 return await response.json();
             }
 
-            console.warn(`Worlds Apart: plugin query failed (${response.status}), falling back`, await response.text());
+            console.warn(`Worlds Apart: plugin query failed (${response.status}), taking the no-plugin path`, await response.text());
         } catch (error) {
-            console.warn('Worlds Apart: plugin query threw, falling back', error);
+            console.warn('Worlds Apart: plugin query threw, taking the no-plugin path', error);
         }
     }
 
-    // Stock ST can't quantile ('auto' resolves in the plugin) — pin the old centered default; on raw
-    // scores it's permissive and client-side selection narrows.
-    if (args.threshold === 'auto') args = { ...args, threshold: 0.1 };
-    return await vectorPost('query-multi', args) ?? {};
+    // No threshold and no server-side pooling here, so K counts chunks.
+    return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }) ?? {};
 }
 
-// ---------------------------------------------------------------------------
 // Retrieval
-// ---------------------------------------------------------------------------
 
 /** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
 const US = '';
 
-/**
- * Chunks entries and brings the collection in sync with them.
- * Chunking is for matching only — activation still emits the whole entry.
- * @param {string} world World name
- * @param {object[]} entries Entries belonging to that world
- * @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>}
- */
+/** Chunks a book's entries and brings its vector collection in sync with them.
+ *  @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>} owners: chunk hash -> `${world}.${uid}` */
 async function syncWorld(world, entries) {
     const collectionId = `wa_${getStringHash(world)}`;
     const saved = await vectorPost('list', { collectionId }) ?? [];
 
     const items = [];
-    /**
-     * Chunk hash -> owning `${world}.${uid}`(s). Hashes carry (text, uid), so within one world every hash
-     * has exactly one owner; it stays a LIST because identical (text, uid) in two attached books still
-     * collides after the cross-world merge in scoreActivated concats these maps. Resolving ownership here,
-     * off the hashes we just computed from the live entries, keeps it independent
-     * of how the collection happened to be built (fresh syncs store one row per entry, incremental ones one
-     * row total — see eval/reindex-check.mjs on path-dependence).
-     * @type {Map<number, string[]>}
-     */
+    /** @type {Map<number, string[]>} A list, because identical (text, uid) in two attached books collides once scoreEntriesUnsafe merges these. */
     const owners = new Map();
 
     for (const entry of entries) {
@@ -330,21 +271,9 @@ async function syncWorld(world, entries) {
             if (!text) {
                 continue;
             }
-            // Identity is (text, uid), not text alone: two entries can produce the same chunk, and
-            // hashing text alone made one hash stand for both of them. That broke three things at once
-            // — `wanted` below couldn't retire entry A's copy while B still produced the text, `owners`
-            // silently overwrote A with B, and the plugin's per-hash dedup dropped one of the two rows.
-            // ST core lists and deletes by hash only, so the pair has to live IN the hash.
+            // Identity is (text, uid): core lists and deletes by hash alone, so two entries sharing a chunk need distinct hashes.
             const hash = getStringHash(`${text}${entry.uid}`);
-            // DOT, not the US of CLAUDE.md's composite-key rule, and it must stay a dot: this is ST core's
-            // key format, not ours (world-info.js builds `${entry.world}.${entry.uid}` for
-            // allActivatedEntries and externalActivations). rankActivated is handed that map and looks its
-            // keys up in runState.lastScores, so a "tidier" separator here would silently return undefined
-            // for every score — and fuseRanks drops rows whose score is undefined, so the vector signal
-            // would vanish from the layout ranking with nothing thrown. Use grading.mjs's US-separated
-            // rowKey for anything that is ours alone.
-            // With uid in the hash, one world yields one owner per hash; still a LIST because identical
-            // (text, uid) in two attached books collides, and the cross-world merge concats owners.
+            // A dot, not US: this is core's own `${world}.${uid}` key, which onScanDone looks up in runState.lastScores.
             owners.set(hash, [`${entry.world}.${entry.uid}`]);
             items.push({ hash, text, index: entry.uid });
         }
@@ -356,7 +285,19 @@ async function syncWorld(world, entries) {
 
     if (newItems.length) {
         console.log(`Worlds Apart: embedding ${newItems.length} new chunks for "${world}"`);
-        await vectorPost('insert', { collectionId, items: newItems });
+        let announced = false;
+        const slow = setTimeout(() => {
+            announced = true;
+            toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'Worlds Apart', { timeOut: 15000 });
+        }, 3000);
+        const started = Date.now();
+        try {
+            await vectorPost('insert', { collectionId, items: newItems });
+        } finally {
+            clearTimeout(slow);
+        }
+        const secs = Math.round((Date.now() - started) / 1000);
+        if (announced) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'Worlds Apart', { timeOut: 5000 });
     }
 
     if (staleHashes.length) {
@@ -367,34 +308,213 @@ async function syncWorld(world, entries) {
     return { collectionId, owners };
 }
 
-// Entity filter (gazetteer + proper-noun-weighted term filter) lives in ranking.mjs — the tuning
-// layer, so it stays out of the plugin and its fingerprint. buildGazetteer is pure; buildTermWeights
-// takes the proper-noun boost from settings. Rationale/benchmarks are documented in ranking.mjs.
-const buildGazetteer = ranking.buildGazetteer;
-const buildTermWeights = (queryText, gazetteer) => ranking.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
+const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
+
+/** @type {Map<string, {fingerprint: string, index: object, nameDf: object|null}>} Per-book content-lexical and name indexes, rebuilt when the book's fingerprint moves. */
+const contentIndexes = new Map();
+
+/** Both per-book indexes over one book's entries behind one fingerprint; the name index only when `names` is set.
+ *  `buildContentIndex` excludes disabled entries and `buildNameDf` includes them, and their N differ, so neither may be read for the other. */
+function bookIndexes(world, entries, { names = false } = {}) {
+    const fingerprint = indexFingerprint(entries, settings());
+    const hit = contentIndexes.get(world);
+    if (hit?.fingerprint === fingerprint && (!names || hit.nameDf)) return hit;
+    const index = hit?.fingerprint === fingerprint ? hit.index : buildContentIndex(entries, settings());
+    const nameDf = names ? buildNameDf(entries) : hit?.fingerprint === fingerprint ? hit.nameDf : null;
+    const fresh = { fingerprint, index, nameDf };
+    contentIndexes.set(world, fresh);
+    if (hit?.fingerprint !== fingerprint) {
+        console.log(`Worlds Apart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
+    }
+    if (names && nameDf && nameDf !== hit?.nameDf) {
+        console.log(`Worlds Apart: name index for "${world}" — ${nameDf.ndoc} entries, ${nameDf.df.size} distinct names`);
+    }
+    return fresh;
+}
+
+/** Vector collections on disk that no lorebook in `world_names` hashes to, plus live books built under another
+ *  source or model. Reports, never deletes.
+ *  @returns {Promise<{unclaimed: object[], staleConfig: object[], live: object[], bytes: number}|null>} */
+async function findOrphanCollections() {
+    if (!await hasPlugin()) return null;
+    const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders() });
+    if (!response.ok) return null;
+    const all = await response.json();
+    const claimed = new Set((world_names ?? []).map(n => `wa_${getStringHash(n)}`));
+    const v = extension_settings.vectors ?? {};
+    const source = v.source || 'transformers';
+    // Per source, not a `??` chain: `ollama_model` carries a non-empty default, so a chain reads it under any source.
+    const model = String(({ ollama: v.ollama_model, vllm: v.vllm_model })[source] ?? v[`${source}_model`] ?? '');
+    const unclaimed = [], staleConfig = [], live = [];
+    for (const c of all) {
+        if (!claimed.has(c.collectionId)) unclaimed.push(c);
+        else if (c.source !== source || (model && c.model !== model)) staleConfig.push(c);
+        else live.push(c);
+    }
+    return { unclaimed, staleConfig, live, bytes: all.reduce((a, c) => a + c.bytes, 0) };
+}
+
+const mib = b => `${(b / 1048576).toFixed(1)} MiB`;
+
+/** Prints the orphan report and returns a one-line summary for the panel. */
+async function reportOrphanCollections() {
+    const found = await findOrphanCollections();
+    if (!found) return t`Needs the server plugin.`;
+    const { unclaimed, staleConfig, live, bytes } = found;
+    const table = rows => rows.map(c => ({ collection: c.collectionId, source: c.source, model: c.model, size: mib(c.bytes), lastWritten: new Date(c.mtimeMs).toISOString().slice(0, 10) }));
+    console.log(`%cWorlds Apart · vector collections — ${mib(bytes)} total`, 'font-weight: bold');
+    if (live.length) { console.log(`in use by a book you still have, at the current source/model (${live.length}):`); console.table(table(live)); }
+    if (staleConfig.length) { console.log(`the book still exists, but these were built under another source or model (${staleConfig.length}) — switching back would use them again:`); console.table(table(staleConfig)); }
+    if (unclaimed.length) { console.log(`NO lorebook hashes to these (${unclaimed.length}) — renamed or deleted books. Nothing will ever read them again:`); console.table(table(unclaimed)); }
+    const dead = unclaimed.reduce((a, c) => a + c.bytes, 0);
+    const stale = staleConfig.reduce((a, c) => a + c.bytes, 0);
+    const n = live.length + staleConfig.length + unclaimed.length;
+    return unclaimed.length || staleConfig.length
+        ? t`${mib(bytes)} in ${n} collections — ${mib(dead)} unclaimed, ${mib(stale)} on another source/model. Listed in the console; delete by hand from data/<user>/vectors/.`
+        : t`${mib(bytes)} in ${live.length} collection(s), all claimed.`;
+}
+
+/** Per-tier relevance fits for the current embedding model — fetched, never a JSON import; `null` is cached so a 404 is not re-fetched. */
+const relevanceModel = { promise: null, value: null, key: null };
+
+function loadRelevanceModel() {
+    // Keyed by embedding model: Vector Storage switches model without a page load.
+    const key = fitKey(vectorRequestBody());
+    if (relevanceModel.key !== key) {
+        relevanceModel.key = key;
+        relevanceModel.promise = null;
+        relevanceModel.value = null;
+    }
+    // One fit per tier, never shared: the coefficients differ in sign across tiers (F19).
+    relevanceModel.promise ??= Promise.all(['memory', 'reference'].map(tier =>
+        fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url))
+            .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+            .then((file) => {
+                // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, retrieval outage).
+                const m = file?.byModel?.[key] ?? file?.byModel?.[UNFITTED_FALLBACK] ?? file?.noCosine ?? null;
+                if (m) m.noCosine = file?.noCosine ?? null;
+                if (m && !file?.byModel?.[key]) {
+                    console.warn(`Worlds Apart: no ${tier} relevance fit for embedding model "${key}" — `
+                        + `scoring through "${UNFITTED_FALLBACK}"'s (have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}). `
+                        + 'Fit this one with eval/relevance-regress.mjs --emit-model.');
+                }
+                if (!m) {
+                    console.warn(`Worlds Apart: no ${tier} relevance model for embedding model "${key}" `
+                        + `(have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}) — that tier's E[credit] will not be scored, `
+                        + `so nothing is cut on relevance. Fit one with eval/relevance-regress.mjs --emit-model.`);
+                    return [tier, null];
+                }
+                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, fitted under ${m.embedModel} (its own best cutoff was ${m.cutoff}; the cut runs at the relevanceCutoff setting)`);
+                return [tier, m];
+            })
+            .catch((e) => {
+                console.warn(`Worlds Apart: no ${tier} relevance model, that tier's E[credit] will not be scored —`, e.message);
+                return [tier, null];
+            })))
+        .then((pairs) => {
+            // Kept resolved: the synchronous paramSnapshot names the fits a capture's eCredit column came out of.
+            relevanceModel.value = Object.fromEntries(pairs);
+            return relevanceModel.value;
+        });
+    return relevanceModel.promise;
+}
+
+/** Every entry of every book in the scan, grouped by book — the population the per-book statistics are of. */
+const entriesByWorld = async (entries = null) => Map.groupBy(entries ?? await getSortedEntries(), e => e.world);
 
 /**
- * Builds the entity-filter term weights for a query — or null when the filter is off, or when the
- * query is a summary (already salience-selected, so filtering it only loses context).
- *
- * ONE owner, because two callers drifted. Retrieval filtered the query; the /wa-query probe did not,
- * and /wa-debug's stage-1 "vector candidates" table IS that probe. So the table reported BM25 from a
- * different term set than the retrieval it was explaining — and since its `gap` and `kept` columns come
- * from fusing those scores, the cutoff it showed could differ from the one live retrieval actually
- * applied. Measured on a real scene, unfiltered BM25 ran ~2x the filtered value (101.06 vs 46.11), which
- * reorders the ranking the cutoff reads. Anything that scores a query goes through here.
- *
- * @param {string} searchText Query text
- * @param {object} [opts]
- * @param {boolean} [opts.log] Log the kept-term count and (in a verbose run) the surviving terms
- * @returns {Promise<Record<string, number>|null>} Term weights, or null to leave the query unfiltered
+ * Fills the stage-4 relevance column: `properNouns`, `density`, then `E[credit]` per entry. Cuts nothing.
+ * @param {Function} windowFor The scan window builder; eval/scene.mjs `haystackFor` calls the same one with the same inputs
  */
-async function queryTermWeights(searchText, { log = true } = {}) {
-    if (!settings().entityFilter || settings().queryMode === 'summary') {
+async function scoreRelevanceColumn(items, windowFor, entries = null) {
+    const models = await loadRelevanceModel();
+    if (!models || !windowFor) return;
+
+    const byWorld = await entriesByWorld(entries);
+
+    const depth = Number(settings().messageDepth || world_info_depth);
+    const windowNames = properNames(windowFor(depth, {}).join('\n'));
+
+    for (const item of items) {
+        const book = bookIndexes(item.entry.world, byWorld.get(item.entry.world) ?? [], { names: true }).nameDf;
+        const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content);
+        item.properNouns = book ? properShared(names, windowNames, book) : 0;
+        item.density = properDensity(item.entry.content);
+    }
+
+    // Per tier: a tier only ever meets its own coefficients.
+    for (const [tier, model] of Object.entries(models)) {
+        if (!model) continue;
+        const rows = items.filter(it => (isMemory(it.entry) ? 'memory' : 'reference') === tier);
+        if (!rows.length) continue;
+        // Chosen against the rows, not settings: the plugin can fall back mid-request.
+        const fit = rows.some(it => Number.isFinite(it.score)) ? model : (model.noCosine ?? model);
+        const col = it => ({
+            cosine: Number.isFinite(it.score) ? it.score : 0,
+            text: Number(it.textScore) || 0,
+            keys: Number(it.keywordScore) || 0,
+            properNouns: Number(it.properNouns) || 0,
+            density: Number(it.density) || 0,
+        });
+        // The fit's own population (`standardise`), minus constants, as both calibration sites build it.
+        const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !it.entry?.constant).map(col);
+        const eCredit = scoreRelevance(fit, rows.map(col), population);
+        rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
+    }
+
+    if (runState.verboseRun) {
+        const scored = items.filter(it => Number.isFinite(it.eCredit));
+        const cuts = Object.entries(models).filter(([, m]) => m).map(([t]) => `${t} >= ${settings().relevanceCutoff}`).join(', ');
+        console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
+        console.table([...scored]
+            .sort((a, b) => b.eCredit - a.eCredit)
+            .map(it => ({
+                entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
+                tier: it.eCreditTier,
+                eCredit: Number(it.eCredit.toFixed(4)),
+                clears: it.eCredit >= settings().relevanceCutoff,
+                cosine: Number.isFinite(it.score) ? Number(it.score.toFixed(4)) : null,
+                text: Number((it.textScore ?? 0).toFixed(3)),
+                properNouns: Number(it.properNouns.toFixed(3)),
+                density: Number(it.density.toFixed(2)),
+            })));
+    }
+}
+
+/** BM25 of the query against every entry's content — the stage-3 text signal.
+ *  @returns {Promise<Map<string, number>>} `${world}.${uid}` -> best chunk score; empty when unavailable */
+async function contentTextScores(query, entries = null) {
+    if (!query) return new Map();
+    entries ??= await getSortedEntries();
+    const byWorld = await entriesByWorld(entries);
+    if (!byWorld.size) return new Map();
+
+    const s = settings();
+    const termWeights = await queryTermWeights(query, { log: false, entries });
+    const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq };
+    const out = new Map();
+    for (const [world, entries] of byWorld) {
+        for (const [key, score] of scoreContent(bookIndexes(world, entries).index, query, opts)) {
+            const prev = out.get(key);
+            if (prev === undefined || score > prev) out.set(key, score);
+        }
+    }
+    return out;
+}
+
+/** The entity-filter term weights for a query, or null when the filter is off. Nothing else derives them (R19).
+ *  @param {boolean} [opts.log] Log the kept-term count and, in a verbose run, the surviving terms
+ *  @returns {Promise<Record<string, number>|null>} */
+async function queryTermWeights(searchText, { log = true, entries = null } = {}) {
+    if (!settings().entityFilter) {
         return null;
     }
 
-    const gazetteer = buildGazetteer(await getSortedEntries());
+    // The authored keys, not the takeover's blanks: getSortedEntries fires WORLDINFO_ENTRIES_LOADED. A local view, never a write-back.
+    const authored = entry => (entry.waKeys || entry.waSecondary)
+        ? { ...entry, key: entry.key?.length ? entry.key : (entry.waKeys ?? []), keysecondary: entry.keysecondary?.length ? entry.keysecondary : (entry.waSecondary ?? []) }
+        : entry;
+    const gazetteer = entity.buildGazetteer((entries ?? await getSortedEntries()).map(authored));
     const termWeights = buildTermWeights(searchText, gazetteer);
 
     if (log) {
@@ -410,46 +530,23 @@ async function queryTermWeights(searchText, { log = true } = {}) {
     return termWeights;
 }
 
-// Query building lives in ranking.mjs; inject depth + ST's substituteParams.
-const buildQuery = (chat) => ranking.buildQuery(chat, { depth: settings().messageDepth, substituteParams });
-
-/**
- * Runs chunked retrieval and force-activates the winning entries.
- * @param {object[]} chat Chat messages
- */
-/**
- * Scores every vectorized entry against arbitrary query text.
- * Shared by real retrieval and by /wa-query, so calibration exercises the same path
- * generation does rather than an approximation of it.
- * @param {string} searchText Text to search with
- * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
- */
-/**
- * Serializes retrieval so a second call can't query a half-built index while the
- * first is still inserting. Changing chunk settings triggers a long re-embed, and
- * results read during one are meaningless.
- * @type {Promise<any>}
- */
+/** Serialises retrieval so a query cannot read a half-built index. */
 let retrievalQueue = Promise.resolve();
 
-/**
- * @param {string} searchText Text to search with
- * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
- */
-function scoreEntries(searchText, termWeights = null) {
-    const run = () => scoreEntriesUnsafe(searchText, termWeights);
+/** Scores every entry with content against arbitrary query text; shared by retrieval and /wa-query.
+ *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>} */
+function scoreEntries(searchText) {
+    const run = () => scoreEntriesUnsafe(searchText);
     const result = retrievalQueue.then(run, run);
+    // The catch is on the queue, not on `result`: `return result.catch(...)` would make a failure look like retrieve()'s empties.
     retrievalQueue = result.catch(() => {});
     return result;
 }
 
-/**
- * @param {string} searchText Text to search with
- * @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>}
- */
-async function scoreEntriesUnsafe(searchText, termWeights = null) {
+async function scoreEntriesUnsafe(searchText) {
     const allEntries = await getSortedEntries();
-    const targets = allEntries.filter(x => x.vectorized && !x.disable && x.content);
+    // Every entry with content, not only the vectorized: `vectorized` decides what stage 1 retrieves, a cosine is a column stage 3 reads (F35).
+    const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
 
@@ -457,388 +554,281 @@ async function scoreEntriesUnsafe(searchText, termWeights = null) {
         return { targets, scores };
     }
 
-    const byWorld = {};
-    for (const entry of targets) {
-        (byWorld[entry.world] ??= []).push(entry);
-    }
+    const byWorld = Map.groupBy(targets, e => e.world);
 
     const collectionIds = [];
-    /**
-     * `${collectionId}${US}${hash}` -> every owning `${world}.${uid}` in THAT collection (see syncWorld).
-     *
-     * SCOPED BY COLLECTION, because a score only means something inside the corpus it was computed in. A
-     * collection is one book: the plugin centers each one on its own centroid and derives its own BM25 IDF
-     * (plugin/vector.mjs, plugin/lexical.mjs), so two books sharing a paragraph score it differently and
-     * neither number transfers. Keyed by hash alone, a row scored in Foxbridge also credited the Sommers
-     * entry holding the same text, and the max-pooling below handed each of them whichever book flattered
-     * the chunk more — which defeats IDF exactly where it does its job: a phrase that is boilerplate in a
-     * 400-chunk book looks rare in a 10-chunk one, and the max takes the rare reading. Both entries still
-     * get credited when both books are attached; each is now credited from its own corpus.
-     * @type {Map<string, string[]>}
-     */
+    /** @type {Map<string, string[]>} `${collectionId}${US}${hash}` -> owning `${world}.${uid}`s; keyed by collection too, since by hash alone the pooling below would credit an owner with another book's score. */
     const owners = new Map();
 
-    for (const world of Object.keys(byWorld)) {
-        const synced = await syncWorld(world, byWorld[world]);
+    for (const [world, entries] of byWorld) {
+        const synced = await syncWorld(world, entries);
         collectionIds.push(synced.collectionId);
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
 
-    // ENTRIES to request, not chunks — the plugin pools each entry's best chunk before it cuts (see
-    // plugin/scoring.mjs poolEntries), so this is now a count of the thing the cutoff actually operates on.
-    //
-    // It used to be `maxVectorEntries * 20`, undocumented since the initial commit, because topK had to
-    // cover two unrelated depths at once: how many entries the user wants activated, and how deep the chunk
-    // list must run for each entry's best chunk to survive. Measured over the three graded corpora
-    // (eval/eval-data): chunks/entry mean 9.1-10.3 (max 27-56), reaching 20 distinct entries took 18/31/18
-    // chunks, but the per-entry maxima didn't stabilise until K ~= 150-300 — a corpus property, not a user
-    // preference. So x20 over-asked by ~13x for the entry count while still being the only thing keeping
-    // pooling honest, and at the shipped 400 it returned essentially the whole book (112/115, 96/96, 70/70).
-    // Pooling server-side makes the maxima exact at any K, which leaves only the entry count to size.
-    //
-    // The floor of 100 is the ELBOW's requirement, not pooling's, and it is deliberately a constant rather
-    // than a multiple of the cap — that conflation is exactly what was just removed. elbowSensitivity is a
-    // multiple of the MEAN gap across the retrieved list, so a short list has a coarse mean and the cliff
-    // fires early. Measured on the three graded scenes (eval/graded-scene-grid.mjs --topk, absolute F1 over
-    // grade>=3, mean of 3):
-    //
-    //   topK (entries)      40      60     100     400    4000
-    //   elbow sens 1.5   0.575   0.632   0.623   0.623   0.623
-    //   count max=10     0.607   0.540   0.540   0.540   0.540
-    //
-    // The elbow's window saturates by 60 and is flat to 4000; 100 sits inside that plateau without being the
-    // argmax of a 3-scene sweep. count/10 reads better at 40 for an unrelated reason worth knowing: RRF ranks
-    // within the candidate set, so a narrower topK reorders the top 10 as well as truncating the tail.
-    //
-    // ponytail: a constant, so a corpus with a much longer relevance tail than these three would want more.
-    // The knob to derive it from is the retrieved list's gap distribution, not any user setting.
-    //
-    // Read from settings(), NOT effectiveCutoff(): /wa-grade widens the CUT, and if that widening also moved
-    // retrieval depth the graded ranking would not be the live one — RRF ranks within the candidate set, so
-    // a different topK reorders the top as well as lengthening the tail (see above).
-    const topK = Math.max(100, settings().maxVectorEntries * 2);
+    // The centroid is the memory tier, per collection; measured flat against `vectorized` (F44).
+    const centroidUids = {};
+    for (const [world, entries] of byWorld) {
+        centroidUids[`wa_${getStringHash(world)}`] = entries.filter(isMemory).map(e => Number(e.uid));
+    }
+
     const results = await queryCollections({
         collectionIds,
         searchText,
-        topK,
-        threshold: settings().scoreThreshold,
-        termWeights,
+        centroidUids,
     });
 
-    // The plugin now returns one pooled record per entry, so this loop's max-taking is a no-op against a
-    // current plugin. It stays because it is also what unpacks the response into `scores` at all, and because
-    // it keeps an un-redeployed plugin (which still returns raw chunks) pooling correctly rather than letting
-    // the last chunk of each entry win. `score` is only present if the backend returns it; without that patch
-    // we fall back to rank position, which is still correctly ordered within a collection.
-    // ENTRIES, not values: the collectionId is the key, and it is half the owner lookup — a chunk's score is
-    // only meaningful against the corpus it was computed in (see `owners`).
+    // The max is a no-op against a current plugin (one pooled record per entry) and keeps an un-redeployed one, which
+    // still returns raw chunks, pooling. `rankOnly` counts chunks with no score: the no-plugin path answered.
+    let rankOnly = 0;
     for (const [collectionId, group] of Object.entries(results)) {
         const metadata = group?.metadata ?? [];
         metadata.forEach((item, index) => {
-            // EVERY owner of the chunk within this collection, not one. The store keeps at most one row per
-            // hash on an incremental sync, so two entries in the same book sharing a chunk come back once;
-            // crediting only one of them made the other unreachable through that text. This is not
-            // over-crediting — each of these entries genuinely contains the chunk — and the max-pooling
-            // below means an entry with a better chunk of its own still wins on that one.
+            // Every owner of the chunk, not one: the store keeps one row per hash.
             const chunkOwners = owners.get(`${collectionId}${US}${Number(item?.hash)}`);
             if (!chunkOwners?.length) {
                 return;
             }
 
-            const score = typeof item?.score === 'number' ? item.score : 1 - (index / Math.max(1, metadata.length));
-            const bm25 = typeof item?.bm25 === 'number' ? item.bm25 : 0;
+            // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit (H12).
+            const score = typeof item?.score === 'number' ? item.score : null;
+            if (score === null) { rankOnly++; return; }
 
             for (const owner of chunkOwners) {
                 const previous = scores.get(owner);
 
-                // Vector and lexical are pooled independently: an entry's best semantic
-                // chunk and its best lexical chunk need not be the same one.
                 if (!previous || previous.score < score) {
-                    scores.set(owner, {
-                        score,
-                        chunk: String(item?.text ?? ''),
-                        bm25: Math.max(bm25, previous?.bm25 ?? 0),
-                    });
-                } else if (bm25 > previous.bm25) {
-                    previous.bm25 = bm25;
+                    scores.set(owner, { score, chunk: String(item?.text ?? '') });
                 }
             }
         });
     }
 
+    if (rankOnly) {
+        console.warn(`Worlds Apart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
+            + 'The relevance model is running on text, proper nouns and density alone. Check that the server plugin is loaded and that its query is not failing.');
+    }
+
     return { targets, scores };
 }
 
-/** Summaries keyed by the hash of the raw text they condense. @type {Map<number, string>} */
-const summaryCache = new Map();
-
-/**
- * Condenses raw chat text into a scene description, so the query sits at the same
- * level of abstraction as the entries. Cached on the chat state AND every setting that
- * affects the output, so repeated dry runs and rerolls are free but any change that
- * would alter the summary produces a fresh one.
- * @param {string} rawText Raw query text
- * @returns {Promise<string>} Summary, or the raw text if summarization fails
- */
-async function summarizeQuery(rawText) {
-    const prompt = `${rawText}\n\n${settings().summaryPrompt}`;
-    // Key on everything that changes the output, not just the prompt — otherwise editing
-    // the temperature, switching profile, or toggling the preset silently reuses the old
-    // summary. Anything that would produce a different answer must be in the key.
-    const s = settings();
-    const key = getStringHash(`${prompt}${s.summaryProfile}${s.summaryTemperature}${s.summaryBypassPreset}${s.summaryLength}`);
-
-    if (summaryCache.has(key)) {
-        console.log('Worlds Apart: reusing cached summary');
-        return summaryCache.get(key);
-    }
-
-    try {
-        const profileId = settings().summaryProfile;
-        const profile = profileId
-            ? (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === profileId)
-            : null;
-
-        const includePreset = !settings().summaryBypassPreset;
-
-        // Empty means "don't send it" — the preset (or the backend default when the
-        // preset is bypassed) decides. Only reachable on the profile path; generateRaw
-        // takes no generation parameters, so the current-API path can't honour it.
-        const temperature = String(settings().summaryTemperature ?? '').trim();
-        const overridePayload = temperature === '' ? {} : { temperature: Number(temperature) };
-
-        if (temperature !== '' && !profile) {
-            console.warn(`Worlds Apart: summary temperature ${temperature} ignored — it needs a summary profile. The current API's preset governs instead.`);
-        }
-
-        console.log(`Worlds Apart: summarizing ${prompt.length} chars via ${profile ? `profile "${profile.name}"${includePreset ? ` with preset "${profile.preset ?? 'none'}"` : ' (preset bypassed)'}` : 'the current API'}${profile && temperature !== '' ? `, temperature ${temperature}` : ''}`);
-
-        // The full prompt is the instruction plus the whole chat slice — thousands of
-        // tokens. Only dump it on a debug run, and as an object so devtools collapses it.
-        if (runState.verboseRun) {
-            console.log('%cWorlds Apart · summarizer prompt', 'font-weight: bold', { prompt });
-        }
-
-        let summary;
-
-        if (profile) {
-            const result = await ConnectionManagerRequestService.sendRequest(profileId, prompt, settings().summaryLength, { includePreset }, overridePayload);
-            summary = String(result?.content ?? '').trim();
-
-            // Reasoning models put everything in `reasoning` and return empty content.
-            // The reasoning is meta-commentary about the task, so it's not usable as a
-            // query even when it contains the right answer — say so rather than guess.
-            if (!summary && result?.reasoning) {
-                throw new Error(`profile "${profile.name}" is a reasoning model: it returned ${String(result.reasoning).length} chars of reasoning and no content. Pick a profile without ":thinking".`);
-            }
-        } else {
-            summary = String(await generateRaw({
-                prompt,
-                responseLength: settings().summaryLength,
-            })).trim();
-        }
-
-        if (!summary) {
-            throw new Error('empty summary');
-        }
-
-        // ponytail: unbounded cache. Chats end long before this matters.
-        summaryCache.set(key, summary);
-        return summary;
-    } catch (error) {
-        console.warn('Worlds Apart: summarization failed, using raw messages', error);
-        return rawText;
-    }
-}
-
-/**
- * Ranks retrieval results by fusing the vector and lexical rankings.
- *
- * Shared by retrieval and by /wa-query so the calibration view can't disagree with
- * what actually gets activated — sorting the probe by vector score alone hid strong
- * lexical matches at the bottom of the table.
- *
- * The arithmetic lives in ranking.mjs (like fuseRanks below) so the offline cutoff harnesses
- * cut the real ranking rather than a copy; this wrapper only injects settings.
- *
- * @param {Map<string, {score: number, bm25?: number, chunk: string}>} scores Per-entry results
- * @returns {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} Fused ranking
- */
-const fuseRetrieval = (scores) => ranking.fuseRetrieval(scores, {
-    rrfK: settings().rrfK,
-    retrievalMode: settings().retrievalMode,
-    lexicalWeight: settings().lexicalWeight,
-    // No keywordWeight here on purpose: this is the RETRIEVAL ranking the cutoff cuts, and it scores vector
-    // + chunk-text only. Keys never enter it — they exist in the layout ranking (fuseRanks) alone.
-});
-
-/**
- * Prints the vector-candidates table: the retrieved ranking, the gap the cutoff reads, and where it fell.
- *
- * Takes a ranking rather than computing one. /wa-debug used to render this by calling the /wa-query probe,
- * which scored the query a SECOND time — a replay that could disagree with the retrieval it was explaining
- * (it did: the probe skipped the entity filter). Now retrieval hands over the very objects it selected on,
- * so the table is a view of what happened, not a re-enactment. /wa-query still calls it for arbitrary text.
- *
- * @param {Array<{key: string, value: object, fused: number, vectorRank?: number, textRank?: number}>} ranked fuseRetrieval output
- * @param {number} cut How many entries cutRetrieved kept
- * @param {object[]} targets Vectorized entries, for titles
- * @param {string} searchText The query, for the header
- */
-function reportVectorCandidates(ranked, cut, targets, searchText) {
+/** Prints /wa-query's table: every scored entry by cosine, with the gap between neighbours. */
+function reportVectorCandidates(scores, targets, searchText) {
     const byKey = new Map(targets.map(x => [`${x.world}.${x.uid}`, x]));
-    const spread = ranked[0].value.score - ranked[Math.min(4, ranked.length - 1)].value.score;
+    const rows = [...scores.entries()].sort((a, b) => b[1].score - a[1].score);
+    const spread = rows[0][1].score - rows[Math.min(4, rows.length - 1)][1].score;
 
-    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '…' : ''}" (${searchText.length} chars)`);
-    console.log(`Worlds Apart: ${ranked.length} entries retrieved, ${settings().retrievalMode} ranking, ${settings().vectorCutoff} cutoff kept ${cut}, top-5 vector spread ${spread.toFixed(5)}`);
-    console.log('%cWorlds Apart · vector candidates — the full ranked list of retrieved vectors, with the gap the cutoff reads (kept = above the cutoff)', 'font-weight: bold');
-    // Lead with the cutoff story — the gap the elbow reads, whether the row was kept,
-    // and which entry — so the boundary is legible without dragging columns. Per-signal
-    // scores and the matched chunk follow.
-    console.table(ranked.slice(0, Math.max(cut, settings().maxVectorEntries) * 2).map((row, index) => ({
-        // The gap this row opens below the one above — what the elbow cuts on.
-        gap: index > 0 ? Number((ranked[index - 1].fused - row.fused).toFixed(6)) : null,
-        kept: index < cut,
-        title: byKey.get(row.key)?.comment,
+    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '\u2026' : ''}" (${searchText.length} chars)`);
+    console.log(`Worlds Apart: ${rows.length} entries scored, cosine order, top-5 spread ${spread.toFixed(5)}`);
+    console.log('%cWorlds Apart \u00b7 /wa-query \u2014 every scored entry by cosine, best first', 'font-weight: bold');
+    console.table(rows.map(([key, value], index) => ({
+        gap: index > 0 ? Number((rows[index - 1][1].score - value.score).toFixed(6)) : null,
+        title: byKey.get(key)?.comment,
         '#': index + 1,
-        vec: Number(row.value.score.toFixed(5)),
-        vRank: row.vectorRank ?? null,
-        bm25: row.value.bm25 ? Number(row.value.bm25.toFixed(2)) : null,
-        kRank: row.textRank ?? null,
-        matchedChunk: row.value.chunk.slice(0, 70).replace(/\s+/g, ' '),
+        vec: Number(value.score.toFixed(5)),
+        matchedChunk: value.chunk.slice(0, 70).replace(/\s+/g, ' '),
     })));
 }
 
-/**
- * Runs retrieval against the chat and force-activates the winning entries.
- * @param {object[]} chat Chat messages
- */
+/** Retrieval over the chat; returns the vectorized entries that scored. The emit is selectAndActivate's. */
 async function retrieve(chat) {
     runState.lastScores.clear();
-    runState.lastTextScores.clear();
+    // Cleared, not just reassigned below: the no-query-text return sits ABOVE that assignment, so a turn with nothing
+    // to query on would otherwise leave the PREVIOUS turn's standing for contentTextScores to score BM25 against.
+    runState.lastQuery = '';
+    runState.lastQueryChat = [];
 
-    // One substitution pass over the chat serves both the query string and the /wa-grade stash below —
-    // queryMessages runs ST's macro engine over every message, so it must not run twice per generation.
-    const queryChat = ranking.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
-    const rawText = ranking.joinQueryMessages(queryChat);
+    // One substitution pass serves both the query and the /wa-grade stash: queryMessages must not run twice per generation.
+    const queryChat = query.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
+    const rawText = query.joinQueryMessages(queryChat);
 
     if (!rawText) {
         console.log('Worlds Apart: no query text, skipping retrieval');
-        return;
+        return [];
     }
 
-    const searchText = settings().queryMode === 'summary'
-        ? await summarizeQuery(rawText)
-        : rawText;
+    const searchText = rawText;
+    console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
 
-
-    if (settings().queryMode === 'summary') {
-        console.log(`Worlds Apart: summarized ${rawText.length} chars into ${searchText.length}: "${searchText}"`);
-    } else {
-        console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
-    }
-
-    const termWeights = await queryTermWeights(searchText);
-    const { targets, scores } = await scoreEntries(searchText, termWeights);
-
-    if (!scores.size) {
-        console.log(`Worlds Apart: nothing cleared the ${settings().scoreThreshold} threshold`);
-        return;
-    }
-
-    const ranked = fuseRetrieval(scores);
-    const kept = cutRetrieved(ranked);
-    const winnerKeys = new Set(kept.map(x => x.key));
-
-    // Recorded for /wa-grade, which bundles the query it graded rather than re-deriving it later.
+    // Before the empties below: a keyword-only scene is still gradeable against the query.
     runState.lastQuery = searchText;
-    runState.lastCutKept = kept.length;
-    // The MESSAGES the query was built from, macros already resolved, in ST's own {name, mes} shape so
-    // ranking.buildQuery can be re-run over them offline at any depth <= this one. This is what makes a
-    // depth ablation possible from a single capture: capture wide, then narrow. It cannot be recovered by
-    // splitting `lastQuery`, because messages contain blank lines and the join separator is '\n\n'.
+    // ST's own {name, mes} shape, so query.buildQuery can re-run offline at any depth <= this one; not recoverable by splitting `lastQuery`.
     runState.lastQueryChat = queryChat;
 
-    // /wa-debug's stage-1 table, rendered from the selection that just happened rather than a replay.
-    if (runState.verboseRun) {
-        reportVectorCandidates(ranked, kept.length, targets, searchText);
+    // No entity filter here: stage 1 has no BM25 to spend its terms on (plugin/scoring.mjs).
+    const { targets, scores } = await scoreEntries(searchText);
+
+    if (!targets.length) {
+        console.log('Worlds Apart: no entries with content in the active books, so retrieval has nothing to score');
+        return [];
+    }
+    if (!scores.size) {
+        console.log('Worlds Apart: the query scored no chunk in any collection');
+        return [];
     }
 
+    // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for stage 3.
+    const vectorizedKeys = new Set(targets.filter(x => x.vectorized).map(x => `${x.world}.${x.uid}`));
+    const winnerKeys = new Set([...scores.keys()].filter(k => vectorizedKeys.has(k)));
+
+    // Every scored entry, not the winners: stage 3 looks its cosine up here.
     for (const [key, value] of scores) {
-        if (winnerKeys.has(key)) {
-            runState.lastScores.set(key, value.score);
-            runState.lastTextScores.set(key, value.bm25 ?? 0);
+        runState.lastScores.set(key, value.score);
+    }
+
+    return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
+}
+
+/** The entries WA's own matcher activates over its window; candidacy and the verdict live in matcher.mjs activationAdds. */
+async function keywordActivations(chat) {
+    const candidates = await getSortedEntries();
+
+    // Live keys: waOwnsScan is false during this fetch, so onEntriesLoaded does not blank them. The SCAN_DONE feed rematches on these.
+    runState.waCandidates = candidates;
+
+    const { windowFor } = await scanWindowFor(chat);
+
+    // Register every key up front, secondaries included (K13): a first-seen key mid-loop rebuilds the automaton and drops every cached scan.
+    registerKeys(candidates.flatMap(e => {
+        const keys = e.disable ? [] : matcher.usableKeys(e.key);
+        return keys.length ? [...keys, ...matcher.secondaryKeys(e)] : [];
+    }));
+
+    return matcher.activationAdds(candidates, windowFor, activationOpts());
+}
+
+/** Distinct failures already surfaced this session, keyed stage␟message (US, never NUL — see CLAUDE.md). */
+const reportedFailures = new Set();
+
+/**
+ * Toasts a generation-time failure once per distinct message per session, with the top stack frame.
+ * @param {string} consequence What the user will observe this turn
+ * @param {'error'|'warning'} [severity]
+ */
+function reportFailure(stage, consequence, error, severity = 'error') {
+    console.error(`Worlds Apart: ${stage} — ${consequence}`, error);
+    const cause = String(error?.message ?? error);
+    const key = `${stage}${cause}`;
+    if (reportedFailures.has(key)) return;
+    reportedFailures.add(key);
+    const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
+    // ST sets toastr.options.escapeHtml = true globally, which collapses `\n`; opt out per toast and escape by hand.
+    toastr[severity](
+        [escapeHtml(consequence),
+            escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
+            t`See the browser console for the full trace.`].join('<br><br>'),
+        `Worlds Apart: ${stage}`,
+        { timeOut: 20000, extendedTimeOut: 15000, escapeHtml: false, closeButton: true },
+    );
+}
+
+/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently. */
+async function selectAndActivate(chat) {
+    chat = dropChatTags(chat);
+
+    // /wa-dry reaches here without the interceptor, so the replayed scan judges the chat it was handed.
+    runState.scanChat = chat.slice();
+
+    // waOwnsScan FALSE first: WA's own getSortedEntries calls below fire WORLDINFO_ENTRIES_LOADED, and the blanking must not eat the keys WA matches on.
+    runState.waOwnsScan = false;
+    runState.waMatched = new Set();
+    runState.waRecursionTexts = [];
+    runState.waRecursionDepth = 0;
+    runState.waMinSkew = 0;
+    runState.waCandidates = null;
+
+    let winners = [];
+    try {
+        winners = await retrieve(chat);
+    } catch (error) {
+        reportFailure(t`retrieval failed`,
+            t`No vectorized entry is activated this turn, so an entry with no keys is absent from the prompt rather than ranked lower. Every entry loses its cosine, and relevance falls back to the cosine-free fit. Keyword matching and constants are unaffected.`,
+            error);
+        runState.lastScores.clear();
+    }
+
+    let adds = [];
+    try {
+        adds = await keywordActivations(chat);
+    } catch (error) {
+        // Total: waOwnsScan is set below regardless, so core does not match either.
+        reportFailure(t`keyword activation failed`,
+            t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
+            error);
+    }
+
+    const winnerKeys = new Set(winners.map(e => `${e.world}.${e.uid}`));
+    const union = adds.filter(e => !winnerKeys.has(`${e.world}.${e.uid}`));
+
+    const activated = [...winners, ...union];
+    if (activated.length) {
+        console.log(`Worlds Apart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
+        await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
+    }
+
+    // TRUE last, after WA's own fetches: the next WORLDINFO_ENTRIES_LOADED is core's scan. Cleared on the final SCAN_DONE loop and at generation end.
+    for (const e of activated) runState.waMatched.add(`${e.world}.${e.uid}`);
+    runState.waOwnsScan = true;
+}
+
+// Hooks
+
+/** Generation interceptor. Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
+async function intercept(chat, _maxContext, _type) {
+    // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
+    runState.scanChat = chat.slice();
+    // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
+    runState.waOwnsScan = false;
+
+    if (!settings().enabled) {
+        return;
+    }
+
+    await selectAndActivate(chat);
+}
+
+
+/** Blinds core's keyword matcher on a scan WA owns — keys stashed on `waKeys`/`waSecondary`, then blanked — and takes
+ *  the budget off core. REASSIGN `key`, never mutate it: the array is loadWorldInfo's cache. */
+function onEntriesLoaded(loaded) {
+    if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
+    const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
+
+    showExemptCount(entries);
+
+    // Read here and nowhere else: this hook is the last place the `@@` lines still exist. Ungated, a promotion being a property of the entry.
+    for (const entry of entries) entry.waPromote = matcher.hasPromoteDecorator(entry);
+
+    // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
+    if (settings().enabled && !runState.generationIsDryRun) {
+        for (const entry of entries) {
+            entry.waIgnoreBudget = Boolean(entry.ignoreBudget);   // always set, so authorIgnoreBudget's `??` falls through only on the ungated paths
+            entry.ignoreBudget = true;
         }
     }
 
-    const activated = targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
-
-    console.log(`Worlds Apart: activating ${activated.length} entries`);
-    await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
-}
-
-// ---------------------------------------------------------------------------
-// Hooks
-// ---------------------------------------------------------------------------
-
-/**
- * Generation interceptor. Runs before the World Info scan.
- * @param {object[]} chat Chat messages
- * @param {number} _maxContext Max context size
- * @param {string} type Generation type
- */
-async function intercept(chat, _maxContext, type) {
-    if (!settings().enabled || type === 'quiet') {
+    if (!settings().enabled) {
         return;
     }
 
-    try {
-        await retrieve(chat);
-    } catch (error) {
-        console.error('Worlds Apart: retrieval failed, falling back to core behavior', error);
-        runState.lastScores.clear();
-    }
-}
-
-/**
- * Blanks keys on vectorized entries so the keyword scan skips them.
- * Entries here are freshly-spread objects, so REASSIGNING `key` is safe —
- * mutating the array in place would corrupt the cached world data.
- * @param {object} loaded Lore buckets
- */
-function suppressKeys(loaded) {
-    const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
-
-    // Free ride: this hook already sees every entry in scope, so count the exempt ones
-    // here rather than loading the lorebooks a second time.
-    showExemptCount(entries);
-
-    if (!settings().enabled || !settings().suppressVectorKeys) {
-        return;
-    }
-
-    for (const entry of entries) {
-        if (entry?.vectorized) {
-            // Stash before blanking so scoreVectorKeys can rank on the real keys after core is
-            // blinded to them. keywordScore only reads primary keys, so that's all we keep.
-            entry.waKeys = entry.key;
+    // Stashed, not deleted, and secondaries too: stage 3 scores the authored keys and gates on the authored condition.
+    if (runState.waOwnsScan && !runState.generationIsDryRun) {
+        for (const entry of entries) {
+            if (!entry || entry.waKeys) continue;   // already stashed and blanked this load
+            // Constants and @@activate keep their keys: core short-circuits both before matching, and the inclusion-group filter's getScore reads entry.key.
+            if (entry.constant || matcher.hasDecorator(entry, '@@activate')) continue;
+            // Copied, not aliased: `entry.key` is loadWorldInfo's cached array.
+            entry.waKeys = [...(entry.key ?? [])];
+            entry.waSecondary = [...(entry.keysecondary ?? [])];
             entry.key = [];
             entry.keysecondary = [];
         }
     }
 }
 
-/**
- * Reports how many entries are exempt from the caps, since that number changes what
- * the caps mean and is otherwise invisible — it lives on individual entries.
- * @param {object[]} entries All entries in scope
- */
+/** Shows how many entries are exempt from the caps, and refreshes the attached-book set. */
 function showExemptCount(entries) {
-    // These entries are ST's full active set for the chat (chat + character + globals), so
-    // their worlds are exactly the books "attached to the chat" — the scope of the priority
-    // feature. Refreshed on every WI load and chat/character change, authoritatively (a
-    // book-less chat clears it), and before the panel-open check so the /wa-debug book line
-    // stays correct with the panel closed.
+    // ST's full active set for the chat, so these worlds are the attached books. Before the panel check, so /wa-debug's book line is right with the panel closed.
     runState.attachedWorlds = new Set(entries.map(e => e?.world).filter(Boolean));
     renderWorldPriority();
 
@@ -848,19 +838,14 @@ function showExemptCount(entries) {
         return;
     }
 
-    const exempt = entries.filter(x => x?.ignoreBudget).length;
+    const exempt = entries.filter(delivery.authorIgnoreBudget).length;
 
-    // Nothing to say when there are none, which is the common case.
     field.text(exempt
-        ? `${exempt} of ${entries.length} entries are marked "ignore budget" — never cut, and not counted toward the entry caps.`
+        ? t`${exempt} of ${entries.length} entries are marked "ignore budget" — never cut, and not counted toward the entry caps.`
         : '');
 }
 
-/**
- * Renders the enumerated per-book priority list from settings. Books self-populate as WA
- * sees them (ensureWorldConfigs); this only reflects what's already stored. Weight/offset
- * inputs show only in interleaved mode — sequential uses list order alone.
- */
+/** Renders the current character's per-book priority list from settings. */
 function renderWorldPriority() {
     const $list = $('#wa_world_priority_list');
     if (!$list.length) {
@@ -869,34 +854,31 @@ function renderWorldPriority() {
 
     const mode = settings().worldPriorityMode;
     $('#wa_world_priority_mode').val(mode);
-    // Scoped to the current character's saved order, filtered to what's attached to this chat.
-    // data-i is the index in that stored list, so edits/reorders still land right.
+    // data-i is the index in the stored list, so edits and reorders land on the right element.
     const scoped = scopedPriority();
 
     if (scoped == null) {
-        $list.html('<small class="opacity50p">No character selected. Lorebook order is per-character — open a character to set one.</small>');
+        $list.empty().append($('<small class="opacity50p"></small>').text(t`No character selected. Lorebook order is per-character. Open a character to set one.`));
         return;
     }
     if (!scoped.length) {
-        $list.html('<small class="opacity50p">No lorebooks attached. Open a chat with a lorebook active, or run /wa-dry.</small>');
+        $list.empty().append($('<small class="opacity50p"></small>').text(t`No lorebooks attached. Open a chat with a lorebook active, or run /wa-dry.`));
         return;
     }
 
-    // Reorder matters only for sequential tiers; weight/offset only for interleaved. The
-    // per-book cap is a quota independent of priority, so it shows in every mode.
     const showOrder = mode === 'sequential';
     const showTuning = !showOrder;
     $list.empty();
     scoped.forEach(({ cfg, i, world }) => {
-        const label = cfg.world === 'chat' ? `${world} (current chat)` : world;
+        const label = cfg.world === 'chat' ? t`${world} (current chat)` : world;
         const row = $(`
             <div class="flex-container alignItemsCenter flexnowrap wa-world-row" data-i="${i}" style="gap:4px;margin-bottom:2px;">
-                <div class="menu_button fa-solid fa-chevron-up wa-world-up ${showOrder ? '' : 'displayNone'}" title="Higher priority"></div>
-                <div class="menu_button fa-solid fa-chevron-down wa-world-down ${showOrder ? '' : 'displayNone'}" title="Lower priority"></div>
+                <div class="menu_button fa-solid fa-chevron-up wa-world-up ${showOrder ? '' : 'displayNone'}" title="Higher priority" data-i18n="[title]Higher priority"></div>
+                <div class="menu_button fa-solid fa-chevron-down wa-world-down ${showOrder ? '' : 'displayNone'}" title="Lower priority" data-i18n="[title]Lower priority"></div>
                 <span class="flex1 wa-world-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                <label class="${showTuning ? '' : 'displayNone'}" title="Relevance multiplier for this book">×<input type="number" class="text_pole wa-world-weight" style="width:4em;" min="0" step="0.1"></label>
-                <label class="${showTuning ? '' : 'displayNone'}" title="Prompt-order offset for this book">±<input type="number" class="text_pole wa-world-offset" style="width:4.5em;" step="1"></label>
-                <label title="Max dynamic entries from this book (0 = no cap)">≤<input type="number" class="text_pole wa-world-cap" style="width:4em;" min="0" step="1"></label>
+                <label class="${showTuning ? '' : 'displayNone'}" title="Relevance multiplier for this book" data-i18n="[title]Relevance multiplier for this book">×<input type="number" class="text_pole wa-world-weight" style="width:4em;" min="0" step="0.1"></label>
+                <label class="${showTuning ? '' : 'displayNone'}" title="Prompt-order offset for this book" data-i18n="[title]Prompt-order offset for this book">±<input type="number" class="text_pole wa-world-offset" style="width:4.5em;" step="1"></label>
+                <label title="Max dynamic entries from this book (0 = no cap)" data-i18n="[title]Max dynamic entries from this book (0 = no cap)">≤<input type="number" class="text_pole wa-world-cap" style="width:4em;" min="0" step="1"></label>
             </div>`);
         row.find('.wa-world-name').text(label);
         row.find('.wa-world-weight').val(cfg.weight);
@@ -906,22 +888,8 @@ function renderWorldPriority() {
     });
 }
 
-// ---------------------------------------------------------------------------
-// Keyword scoring (BM25-style) and rank fusion
-// ---------------------------------------------------------------------------
-
-// Keyword occurrence counting lives in ranking.mjs (same signature, no injection).
-const countKey = ranking.countKey;
-
-/**
- * The non-chat texts core's scan buffer can also match against, per entry opt-in flags
- * (matchCharacterDescription, matchScenario, …). "Shane" living in a character card is
- * why an entry fires every turn with nothing in the chat — core scans these, so WA must.
- *
- * characterDepthPrompt is left empty, matching dryRun: it isn't cleanly reachable here
- * and is a rare match source. The rest come straight off the active character/persona.
- * @returns {object} Source texts keyed as core's globalScanData expects
- */
+/** The non-chat texts core's scan buffer also matches, per entry opt-in (matchCharacterDescription, …), keyed as
+ *  core's globalScanData expects. characterDepthPrompt is left empty, as core's dryRun leaves it. */
 function scanSources() {
     const context = getContext();
     const character = context.characters?.[context.characterId];
@@ -936,87 +904,77 @@ function scanSources() {
     };
 }
 
-/**
- * Text from extension prompts flagged for scanning (Author's Note with "Scan" on, and
- * any extension that injects with scan: true). Core adds these to the scan buffer for
- * every entry — so a keyword living only in the Author's Note fires each turn, and WA
- * has to scan it too or it scores 0.
- *
- * Mirrors core's loop in getWorldInfoPrompt: filter + macro handling come from
- * getExtensionPromptByName, so this is the same text core scanned.
- * @returns {Promise<string>} The scan-enabled inject text, joined
- */
+/** Scan-enabled extension prompts (Author's Note with Scan on, injects with scan: true) — the same text core scans.
+ *  @returns {Promise<Array<{key: string, text: string, ambient: boolean, depth: number}>>} `ambient`: no chat position, so no window bounds it (`upstream-st.md` #16) */
 async function scanInjects() {
     const prompts = getContext().extensionPrompts ?? {};
-    const parts = [];
+    const out = [];
 
     for (const key of Object.keys(prompts)) {
-        if (prompts[key]?.scan) {
-            const prompt = await getExtensionPromptByName(key);
-            if (prompt) {
-                parts.push(prompt);
-            }
-        }
+        if (!prompts[key]?.scan) continue;
+        const text = await getExtensionPromptByName(key);
+        if (!text) continue;
+        out.push({
+            key,
+            text,
+            // Only an IN_CHAT prompt has a chat position; the others' `depth` means nothing as a message index.
+            ambient: prompts[key].position !== extension_prompt_types.IN_CHAT,
+            depth: Number(prompts[key].depth) || 0,
+        });
     }
 
-    return parts.join('\n');
+    return out;
 }
 
-/** Maps each entry match-flag to the scanSources() field it pulls in, as core's buffer does. */
-const MATCH_SOURCE_FIELDS = {
-    matchPersonaDescription: 'personaDescription',
-    matchCharacterDescription: 'characterDescription',
-    matchCharacterPersonality: 'characterPersonality',
-    matchCharacterDepthPrompt: 'characterDepthPrompt',
-    matchScenario: 'scenario',
-    matchCreatorNotes: 'creatorNotes',
-};
-
-/**
- * Appends the extra scan sources an entry opted into, so WA scores keywords over the
- * same text core matched against — not just the chat window.
- * @param {string} chatWindow The depth-limited chat text
- * @param {object} entry World Info entry
- * @param {object} sources Output of scanSources()
- * @returns {string} chatWindow plus any opted-in source texts
- */
-function withMatchSources(chatWindow, entry, sources) {
-    let text = chatWindow;
-
-    for (const [flag, field] of Object.entries(MATCH_SOURCE_FIELDS)) {
-        if (entry[flag] && sources[field]) {
-            text += `\n${sources[field]}`;
-        }
-    }
-
-    return text;
+/** The one scan window builder for every site, with the ST-side inputs it was built from. is_system messages are
+ *  dropped before depth is counted, as core drops them.
+ *  @returns {Promise<{windowFor: Function, chat: object[], injects: object[], sources: object}>} */
+async function scanWindowFor(chat) {
+    const scanChat = chat.filter(x => x && !x.is_system);
+    const injects = await scanInjects();
+    const sources = scanSources();
+    return {
+        chat: scanChat,
+        injects,
+        sources,
+        windowFor: matcher.makeWindowFor(scanChat, {
+            injects,
+            sources,
+            matchWindow: settings().matchWindow,
+            includeNames: world_info_include_names,
+        }),
+    };
 }
 
-// Keyword scoring and RRF fusion live in ranking.mjs (the tuning layer). Inject the BM25 k1 + the
-// world-info match defaults for scoring, and the fusion weights for fusion — all from settings.
-const keywordScore = (entry, text, keys = entry.key) => ranking.keywordScore(entry, text, keys, {
-    k1: settings().bm25K1,
+/** Match defaults for both activation passes — live settings and ST globals, so it stays a function read at call time. */
+const activationOpts = () => ({
+    messageDepth: settings().messageDepth,
+    fallbackDepth: world_info_depth,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
 });
-const fuseRanks = (items) => ranking.fuseRanks(items, {
-    rrfK: settings().rrfK,
-    retrievalMode: settings().retrievalMode,
-    weightByOrder: settings().weightByOrder,
-    lexicalWeight: settings().lexicalWeight,
-    keywordWeight: settings().keywordWeight,
+
+/** The chat WA reads with the `dropChatTags` elements gone — the one strip, at intake. Copies, never an edit of ST's
+ *  live chat, and the file prefix is left alone so `extra.fileLength` still counts to the same place. */
+function dropChatTags(chat) {
+    const spec = settings().dropChatTags;
+    if (!spec?.trim()) return chat;
+    return chat.map(m => {
+        const mes = String(m?.mes ?? '');
+        const off = m?.extra?.fileLength || 0;
+        return { ...m, mes: mes.slice(0, off) + matcher.dropTags(mes.slice(off), spec) };
+    });
+}
+
+const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(entry, text, keys, {
+    k1: settings().bm25K1,
+    repeatCurve: settings().repeatCurve,
+    repeatR: settings().repeatR,
+    caseSensitiveDefault: world_info_case_sensitive,
+    wholeWordsDefault: world_info_match_whole_words,
 });
 
-/**
- * Ranks everything core activated, applies our budget, and rewrites `order`
- * so assembly emits entries in relevance order.
- * @param {object} args Scan state from world-info.js
- */
-/**
- * Stable per-character key for the priority order — survives switching chats/branches.
- * Null in a character-less context (nothing selected), which makes the feature inert.
- * Group chats key by group id (also stable, and their attached books are shared).
- */
+/** Stable per-character (or per-group) key for the priority order; null with nothing selected. */
 function priorityKey() {
     const ctx = getContext();
     if (ctx.groupId) return `group:${ctx.groupId}`;
@@ -1024,63 +982,22 @@ function priorityKey() {
     return getCharaFilename(ctx.characterId);
 }
 
-/**
- * Best-effort on-disk path of the current chat file, for a graded sample to record.
- *
- * Provenance, but load-bearing provenance: rebuilding the query at a different messageDepth is the one
- * sweep a frozen sample can't do from its own contents, and it needs the chat. Best-effort for the same
- * reason as vectorIndexPath — the browser can't see the data root or the user handle. Group chats live
- * under groupchats/ with no per-character folder.
- * @returns {string} Relative chat path
- */
-function chatFilePath() {
-    const ctx = getContext();
-    if (!ctx.chatId) {
-        return '';
-    }
-    return ctx.groupId
-        ? `data/default-user/groupchats/${ctx.chatId}.jsonl`
-        : `data/default-user/chats/${getCharaFilename(ctx.characterId)}/${ctx.chatId}.jsonl`;
-}
 
-/**
- * Best-effort on-disk path of a book's vector index, for a graded sample to record.
- *
- * Best-effort because the browser can't see the data root: the user handle is assumed to be
- * `default-user`. The collectionId is exact (same hash syncWorld uses), so a wrong path is a one-field
- * edit in the sample, and graded-scene-grid can also re-derive it from the book name.
- * @param {string} world Book name
- * @returns {string} Relative index path
- */
-function vectorIndexPath(world) {
-    const body = vectorRequestBody();
-    return `data/default-user/vectors/${body.source}/wa_${getStringHash(world)}/${body.model || 'default'}/index.json`;
-}
+
+/** Chat messages as `checkWorldInfo`/`getWorldInfoPrompt` want them: script.js's scan-site strings, most-recent-first. */
+const forWI = chat => chat.map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes)).reverse();
 
 /** The current chat's bound lorebook, or null. The `'chat'` sentinel resolves to this. */
 function chatBook() {
     return getContext().chatMetadata?.[METADATA_KEY] || null;
 }
 
-/**
- * The current character's saved priority list — the live, mutable reference. Seeded on first
- * access from the legacy global list so existing tuning carries over, then diverges per
- * character. Null when nothing is selected: without a character there is nowhere to store an
- * order, so the feature does nothing (the panel shows "no character selected").
- */
+/** The current character's saved priority list — the live, mutable reference; null with nothing selected. */
 function charPriority() {
     const key = priorityKey();
     if (key == null) return null;
     const byChar = (settings().worldPriorityByChar ??= {});
-    if (!byChar[key]) {
-        // Migration seed: copy the legacy global list once, abstracting the current chat's
-        // book to the 'chat' sentinel so the seeded order is already branch-stable.
-        const legacy = settings().worldPriority;
-        const book = chatBook();
-        byChar[key] = legacy?.length
-            ? structuredClone(legacy).map(w => (book && w.world === book ? { ...w, world: 'chat' } : w))
-            : [];
-    }
+    byChar[key] ??= [];
     return byChar[key];
 }
 
@@ -1089,13 +1006,8 @@ function resolvedName(entry) {
     return entry.world === 'chat' ? chatBook() : entry.world;
 }
 
-/**
- * The current character's priority entries, in order, each paired with its storage index (so
- * reorder/edit still target the right element) and its resolved book name. Scoped to the books
- * actually attached to this chat, so a book in the saved order but inactive here drops out.
- * Returns `null` when no character is selected — distinct from an empty list (character with
- * no attached books). The `'chat'` sentinel drops out when the chat has no bound book.
- */
+/** The current character's priority entries attached to this chat, each with its storage index `i` and resolved book
+ *  name; null with no character, as against an empty list. */
 function scopedPriority() {
     const list = charPriority();
     if (list == null) return null;
@@ -1104,11 +1016,7 @@ function scopedPriority() {
         .filter(x => x.world && runState.attachedWorlds.has(x.world));
 }
 
-/**
- * Default sequential-priority rank of a book by its ST binding source: global → persona → character
- * → chat, everything unclassified last. Only used to seed a FRESH list (see ensureWorldConfigs), so
- * it never reorders a hand-arranged one. First match wins if a book is bound in more than one place.
- */
+/** Default sequential rank of a book by its ST binding source: global → persona → character → chat → unclassified. Seeds a fresh list only. */
 function worldSourceRank(name) {
     if (selected_world_info?.includes(name)) return 0;                       // global (world editor)
     if (power_user.persona_description_lorebook === name) return 1;           // persona
@@ -1131,181 +1039,296 @@ function ensureWorldConfigs(worlds) {
     const known = new Set(list.map(resolvedName).filter(Boolean));
     const toAdd = [...worlds].filter(w => w != null && !known.has(w));
     if (!toAdd.length) return;
-    // A fresh (empty) list is seeded in source order; a populated one keeps its order (possibly
-    // hand-arranged) and just gets the new books appended. The chat's book is stored as the
-    // 'chat' sentinel so the order survives switching chats/branches.
+    // The chat's book is stored as the 'chat' sentinel, so the order survives switching chats.
     if (list.length === 0) toAdd.sort((a, b) => worldSourceRank(a) - worldSourceRank(b));
     for (const world of toAdd) list.push({ world: world === book ? 'chat' : world, weight: 1, offset: 0, cap: 0 });
     saveSettingsDebounced();
     renderWorldPriority();
 }
 
-async function rankActivated(args) {
+/** The per-loop feed on an owned scan: rematches the not-yet-emitted candidates over chat + all recursion content so
+ *  far and force-emits the winners; core's next loop admits them through its own gates. Never writes `state.next`
+ *  (core schedules the next loop itself in every case WA feeds) and never re-emits (externalActivations persists for the scan). */
+async function feedScanLoop(args) {
+    const activated = args.activated.entries;
+    // Already-activated entries never need an emit, and recording them keeps them out of every rematch.
+    for (const key of activated.keys()) runState.waMatched.add(key);
+
+    // preventRecursion filtered here, args.new.successful being the list before core's own filter. Inherits world_info_recursive.
+    const newTexts = world_info_recursive
+        ? (args?.new?.successful ?? [])
+            .filter(e => e && !e.preventRecursion)
+            .map(e => String(e.content ?? ''))
+            .filter(Boolean)
+        : [];
+    runState.waRecursionTexts.push(...newTexts);
+
+    // Mirrors core's advanceScan: one message wider per min-activation pass.
+    const skewed = args?.state?.next === scan_state.MIN_ACTIVATIONS;
+    if (skewed) runState.waMinSkew++;
+    // Depth is a property of the pass, not of the entry: a min-activations widening found its match in the chat.
+    else if (newTexts.length) runState.waRecursionDepth++;
+
+    if (!newTexts.length && !skewed) {
+        return;
+    }
+
+    const candidates = runState.waCandidates.filter(e => !runState.waMatched.has(`${e.world}.${e.uid}`));
+    if (!candidates.length) {
+        return;
+    }
+
+    const { windowFor } = await scanWindowFor(runState.scanChat ?? []);
+
+    const adds = matcher.activationAdds(candidates,
+        matcher.withExtraTexts(windowFor, runState.waRecursionTexts, settings().matchWindow),
+        { ...activationOpts(), depthSkew: runState.waMinSkew });
+
+    if (adds.length) {
+        for (const e of adds) {
+            runState.waMatched.add(`${e.world}.${e.uid}`);
+            e.waTriggerDepth = runState.waRecursionDepth;
+        }
+        console.log(`Worlds Apart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
+        await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
+    }
+}
+
+/** Records what core selected while WA stood down — core's shipped set, WORLDINFO_SCAN_DONE firing after its budget loop. */
+function recordCoreSet(activated, args, how) {
+    runState.lastCoreSet = {
+        at: (getContext().chat ?? []).length,
+        how,
+        budget: args?.budget?.current ?? null,
+        entries: [...activated.entries()].map(([key, entry]) => ({
+            key, uid: entry.uid, world: entry.world,
+            title: entry.comment || entry.key?.[0] || `uid ${entry.uid}`,
+            order: entry.waOriginalOrder ?? entry.order ?? 0,
+            constant: Boolean(entry.constant),
+        })),
+    };
+}
+
+/** What ST core selects for this turn with WA standing down: `inCoreProbe` makes onEntriesLoaded return before it blinds
+ *  core's keys or takes the budget, so checkWorldInfo reads the authored entries, and it suppresses re-entry via
+ *  WORLDINFO_SCAN_DONE. Nothing is saved and restored here: getSortedEntries hands every caller a fresh structuredClone,
+ *  so writing `ignoreBudget` on a local copy could not reach the set checkWorldInfo fetches for itself.
+ *  @returns {Promise<{entries: object[], viaVectors: boolean, vectorsRan: boolean}>} */
+async function coreSelection() {
+    const chat = (runState.scanChat ?? getContext().chat ?? []).filter(x => x && !x.is_system);
+    let core;
+    const viaVectors = Boolean(extension_settings.vectors?.enabled_world_info);
+    let vectorsRan = false;
+    runState.inCoreProbe = true;
+    try {
+        // A copy: an interceptor may rearrange what it is handed.
+        if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
+            try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
+            catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
+        }
+        // Strings, as `checkWorldInfo` takes them; `vectors_rearrangeChat` above wanted message objects.
+        core = await checkWorldInfo(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
+    } finally {
+        runState.inCoreProbe = false;
+    }
+    return { entries: [...(core?.allActivatedEntries ?? [])], viaVectors, vectorsRan };
+}
+
+
+async function onScanDone(args) {
     const activated = args?.activated?.entries;
 
-    if (!settings().enabled || !(activated instanceof Map)) {
+    // Silent except under /wa-dry, which otherwise could not tell an empty selection from a declined scan.
+    const skip = reason => { if (runState.dryRunInProgress) console.warn(`Worlds Apart: did not rank this scan — ${reason}.`); };
+
+    if (!(activated instanceof Map)) {
+        skip('the scan carried no activation map');
         return;
     }
-    // ST's dry-run generations (PromptManager token counts after every received message,
-    // chat load) skip generate interceptors, so retrieval never ran and the scan holds
-    // keyword activations only. Ranking it would overwrite the panel and the /wa-dry//wa-grade
-    // state with that keyword-only selection — leave the last real scan's state alone.
+    if (runState.inCoreProbe) return;   // core is answering for /wa-versus; ranking it would re-enter
+    if (!settings().enabled) {
+        recordCoreSet(activated, args, 'WA disabled — core in full, interceptors live');
+        return;
+    }
     if (runState.generationIsDryRun) {
+        skip('it is an ST dry generation');
+        // Recorded, never ranked: ranking a keyword-only scan would overwrite the panel and the /wa-dry state.
+        recordCoreSet(activated, args, 'ST dry run — keyword route only, interceptors skipped');
         return;
     }
+
+    // Before the size-0 return: a pass that activated nothing can still be followed by a min-activations widening.
+    if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
+        await feedScanLoop(args);
+    }
+
     if (activated.size === 0) {
-        runState.lastLayout = [];
-        if (!args?.state?.next) renderWiPanel([]);
+        skip('core activated nothing');
+        runState.lastPromptOrder = [];
+        runState.lastLayoutOrder = [];   // only written past this return, so without it the capture reads the PREVIOUS scan's population
+        if (!args?.state?.next) renderDeliveryPanel([]);
         return;
+    }
+
+    // One fetch for the whole loop: getSortedEntries hashes and structuredClones every entry and emits ENTRIES_LOADED,
+    // which re-enters WA's own handler, so three calls a scan was three of those.
+    const scanEntries = await getSortedEntries();
+    const contentText = await contentTextScores(runState.lastQuery, scanEntries);
+
+    // Here because onScanDone owns what survives into the prompt, so one filter covers both routes.
+    const at = settings().dropUnavailable ? (getContext().chat?.length ?? NaN) : NaN;
+    let postDated = 0;
+    for (const [key, entry] of [...activated.entries()]) {
+        if (postDates(entry, at)) { activated.delete(key); postDated++; }
+    }
+    if (postDated) {
+        console.log(`Worlds Apart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
     }
 
     const items = [...activated.entries()].map(([key, entry]) => {
-        // We overwrite `order` below, and this fires once per scan loop — stash the
-        // authored value on first sight so later loops don't sort by our own output.
+        // Stashed on first sight: `order` is overwritten below, and this fires once per scan loop.
         entry.waOriginalOrder ??= entry.order ?? 0;
-        return { key, entry, score: runState.lastScores.get(key), textScore: runState.lastTextScores.get(key) ?? 0 };
+        return {
+            key,
+            entry,
+            score: runState.lastScores.get(key),
+            textScore: contentText.get(key) ?? 0,
+            // Could have scored, not did: every entry carrying content.
+            textEligible: Boolean(String(entry.content ?? '').trim()),
+        };
     });
 
-    // Books contributing entries to this scan — the priority sorts below rank only among
-    // these, and this registers any unseen one so its config can be set. Doubles as the
-    // attached set for the ordering path (independent of the async UI-scoping refresh).
     const scanWorlds = new Set(items.map(it => it.entry.world));
     ensureWorldConfigs(scanWorlds);
 
-    if (settings().keywordScoring) {
-        const windows = new Map();
-        // Core removes hidden/system messages before it scans, then counts depth over
-        // what remains. WA must filter them too — otherwise a hidden message in the
-        // recent window costs WA a slot core didn't spend, so WA scans less real history
-        // and misses a keyword core matched one message further back.
-        // (Core also regex-scripts messages and appends file content; not mirrored here.)
-        const chat = (getContext().chat ?? []).filter(x => x && !x.is_system);
-        const sources = scanSources();
-        // Scanned once and shared across depths — core adds injects to the buffer for
-        // every entry regardless of scan depth.
-        const injectText = await scanInjects();
+    // One window, unconditional: the relevance column needs the chat window (eval/scene.mjs `haystackFor`); keyword scoring wraps it.
+    let windowFor = null;
+    {
+        // scanChat is core's transformed haystack; raw context chat only for a scan no WA entry point saw.
+        const built = await scanWindowFor(runState.scanChat ?? getContext().chat ?? []);
+        const { chat, injects, sources } = built;
+        // For the capture: the chat half alone, the injects beside it as their own list.
+        runState.lastInjects = injects;
+        // Raw; the gate (matcher.usedMatchSources) runs where the attached books are in scope.
+        runState.lastSources = sources;
+        windowFor = built.windowFor;
+        // Keyword scoring only: the buffer is text WA injected, so it must not enter the window properNouns is counted over.
+        // excludeRecursion honoured here because core's gate is not in this loop — stage 2 inherits it, stage 3 must not.
+        // An entry that fed the buffer must not match its OWN content there: that is the entry naming itself, not the
+        // conversation naming it, and core never self-matches because it activates an entry once.
+        const recursionTexts = runState.waRecursionTexts ?? [];
+        const keywordWindowFor = (depth, entry) => {
+            const others = entry?.excludeRecursion ? [] : recursionTexts.filter(x => x !== String(entry?.content ?? ''));
+            return others.length
+                ? matcher.withExtraTexts(windowFor, others, settings().matchWindow)(depth, entry)
+                : windowFor(depth, entry);
+        };
 
-        // Register every key this pass will score BEFORE the loop, so the smartkeys automaton is
-        // built once — a first-seen key mid-loop would rebuild it and throw away every cached scan.
-        registerKeys(items.flatMap(it => it.entry.key?.length ? it.entry.key
-            : (settings().scoreVectorKeys ? (it.entry.waKeys ?? []) : [])));
+        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (matcher-design.md, *Stage 3 — Scoring*).
+        const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
+        // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
+        const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
+            ? { ...entry, keysecondary: entry.waSecondary }
+            : entry;
+
+        // Registered before the loop, secondaries too, so the automaton is built once.
+        registerKeys(items.flatMap(it => {
+            const keys = scoreKeysOf(it.entry);
+            return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
+        }));
 
         for (const item of items) {
-            // Score keywords over the shared message depth. Per-entry scanDepth still wins
-            // (as in core), so an entry that declares its own window is honoured; otherwise
-            // the unified messageDepth, falling back to core's scan depth only if it's unset.
-            const depth = Number(item.entry.scanDepth) || settings().messageDepth || world_info_depth;
-            if (!windows.has(depth)) {
-                let window = ranking.scanWindow(chat, { depth, includeNames: world_info_include_names });
-                if (injectText) {
-                    window += `\n${injectText}`;
-                }
-                windows.set(depth, window);
-            }
-            // Append the character/persona/scenario texts this entry opted into scanning.
-            const scanText = withMatchSources(windows.get(depth), item.entry, sources);
-            // A blanked 🔗 entry has empty keys but its originals in waKeys; score those only
-            // when scoreVectorKeys is on. Any entry with live keys (non-vectorized, or 🔗 with
-            // suppress off) uses them as before.
-            const scoreKeys = item.entry.key?.length ? item.entry.key
-                : (settings().scoreVectorKeys ? (item.entry.waKeys ?? []) : []);
-            const scored = keywordScore(item.entry, scanText, scoreKeys);
-            item.keywordScore = scored.score;
+            // Per-entry scanDepth wins, as in core. Nullish, not `||`: 0 is core's authored "match nothing from chat".
+            const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
+            const scanText = keywordWindowFor(depth, item.entry);
+            const scoreKeys = scoreKeysOf(item.entry);
+            const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
+            // An entry reached at recursion pass d did not have the conversation name it (matcher-design.md, *Stage 3 — Scoring*).
+            item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
-            item.keywordScanText = scanText;
+            // Verbose runs only: where each key matched, for /wa-grade's why column. Flags mirror the keywordScore call above exactly.
+            item.keywordWhy = runState.verboseRun
+                ? scored.hits.slice(0, 4).map(h => {
+                    // Every place it landed; `excerpt` is contexts[0], not a second call, so the line and the hover cannot disagree.
+                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
+                    return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
+                })
+                : undefined;
+            // Resolved where `scoreKeys` is decided: an entry with no keys must not be divided by a weight it could not collect.
+            item.keysEligible = scoreKeys.length > 0;
         }
 
-        // The scan text WA actually searched, so a "WA scored 0" mystery is answered by
-        // looking: if the key isn't in here but core matched it, core scanned something
-        // WA doesn't mirror (a regex script, an attached file, an extension's inject
-        // buffer) or another extension force-activated the entry.
-        // The global-depth window, for /wa-grade's sample (per-entry scanDepth overrides also live here).
-        runState.lastScanText = windows.get(settings().messageDepth) ?? [...windows.values()][0] ?? '';
+        // The messages, not the joined window, so a reader can rebuild any window: `scanWindow(scanChat, {depth})`.
+        runState.lastScanChat = chat.slice(-Math.max(1, settings().messageDepth))
+            .map(x => ({ name: String(x?.name ?? ''), mes: String(x?.mes ?? '') }));
 
         if (runState.verboseRun) {
             console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
-            console.log(Object.fromEntries([...windows]));
+            console.log(Object.fromEntries([...windowFor.windows]));
+            console.log('%cWorlds Apart · recursion buffer — the entry contents stage 3 appended to every window', 'font-weight: bold');
+            console.log(runState.waRecursionTexts);
         }
     }
 
-    fuseRanks(items);
+    await scoreRelevanceColumn(items, windowFor, scanEntries);
 
-    // Budget walk order — NOT prompt order. Stickies and constants are always-on by
-    // authorial intent, so they go first and the budget can only ever cut into the
-    // retrieved block, weakest match first. Classification is by what an entry IS: a
-    // constant that also matched keywords is scaffolding, not a retrieval result.
-    const sticky = [];
-    const constant = [];
-    const results = [];
-
-    for (const item of items) {
-        if (args?.timedEffects?.isEffectActive('sticky', item.entry)) {
-            sticky.push(item);
-        } else if (item.entry.constant) {
-            constant.push(item);
-        } else {
-            results.push(item);
-        }
-    }
-
-    // Interleaved mode's per-book offset rides on the authored order, so it threads through
-    // every layout comparator (and the retention tiebreak) consistently. Sequential mode
-    // ignores offset — it groups the layout by book tier instead (below).
-    const priorityMode = settings().worldPriorityMode;
-    // Resolve the character's saved order (chat sentinel → live book) once, up front, so the
-    // sort comparators don't re-resolve per comparison. `cfgOf` defaults for unknown books.
+    // Ordering the dynamic block by anything but E[credit] breaks the prefix property applyBudget assumes.
     const priorityList = charPriority() ?? [];
-    const cfgByName = new Map(priorityList.map(w => [resolvedName(w), w]).filter(([n]) => n));
-    const cfgOf = name => cfgByName.get(name) ?? { weight: 1, offset: 0, cap: 0 };
-    // Tier rank scoped to the books in THIS scan only, in saved priority order — a book left
-    // over from another chat can neither occupy a tier nor shift the ones actually present.
-    const priorityOrder = [...cfgByName.keys()].filter(name => scanWorlds.has(name));
-    const rankOf = world => { const i = priorityOrder.indexOf(world); return i < 0 ? priorityOrder.length : i; };
-    const orderOf = it => it.entry.waOriginalOrder + (priorityMode === 'sequential' ? 0 : cfgOf(it.entry.world).offset);
-    const authored = (a, b) => orderOf(a) - orderOf(b);
-    // Insertion order draws from the shared sort vocabulary (SORT_FNS), same as the Studio. Order asc/desc
-    // keep the offset-aware `authored` (book offsets + priority modes) rather than plain SORT_FNS['order-*'];
-    // relevance (best-first/last) is prompt-only (needs the query-time fused score); everything else adapts
-    // SORT_FNS over item.entry, falling back to authored within equal keys so ties stay deterministic.
-    const orderKey = normPresentation(settings().presentationOrder);
-    const baseCompare =
-        orderKey === 'order-asc'  ? authored :
-        orderKey === 'order-desc' ? (a, b) => -authored(a, b) :
-        orderKey === 'best-first' ? (a, b) => (b.fused - a.fused) || authored(a, b) :
-        orderKey === 'best-last'  ? (a, b) => (a.fused - b.fused) || authored(a, b) :
-        SORT_FNS[orderKey]        ? (a, b) => SORT_FNS[orderKey](a.entry, b.entry) || authored(a, b) :
-        authored;
-    // Optional tiered grouping (default off — preserves existing output). Groups by tier first (shared
-    // config), base order within. Disabled entries never activate, so that tier is inert here.
-    const layoutTierCfg = reconcileTiers(settings().tierCfg);
-    const compare = settings().presentationTiered
-        ? (a, b) => (tierRank(a.entry, layoutTierCfg) - tierRank(b.entry, layoutTierCfg)) || baseCompare(a, b)
-        : baseCompare;
+    const priorityMode = settings().worldPriorityMode;
+    const { sticky, constant, promoted, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
+        isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)),
+        isPromoted: entry => Boolean(entry?.waPromote),
+        priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
+        priorityMode,
+        presentationOrder: settings().presentationOrder,
+        presentationTiered: settings().presentationTiered,
+        tierCfg: settings().tierCfg,
+    });
+    let results = dynamicRows;
 
-    // Retention order for the dynamic block. Sequential: book tier is the primary key, so a
-    // lower book only gets slots the higher books leave. Interleaved: a per-book weight
-    // scales fused, so a strong low-book entry can still out-rank a weak high-book one.
-    if (priorityMode === 'sequential') {
-        results.sort((a, b) => (rankOf(a.entry.world) - rankOf(b.entry.world)) || (b.fused - a.fused) || authored(a, b));
-    } else {
-        // Interleaved: per-book weight scales fused (weight 1 = plain relevance ranking).
-        results.sort((a, b) => (b.fused * cfgOf(b.entry.world).weight - a.fused * cfgOf(a.entry.world).weight) || authored(a, b));
+    // Before the cuts, so a capture holds every row this pass judged; survivors and losers cannot be re-interleaved afterwards.
+    runState.lastLayoutOrder = [...sticky, ...constant, ...promoted, ...results];
+
+    // On the last loop only: the population grows with each recursion loop, and cutting once it is complete is what
+    // keeps the delivered set independent of recursion depth.
+    const cutoffs = relevanceModel.value ?? {};
+    const { cut: relevanceCutRows } = args?.state?.next ? { cut: [] } : selection.relevanceCut(results, {
+        scoreOf: it => it.eCredit,
+        cutoffOf: it => (cutoffs[isMemory(it.entry) ? 'memory' : 'reference'] ? settings().relevanceCutoff : NaN),
+    });
+    const cutByRelevance = new Set(relevanceCutRows);
+    results = results.filter(it => !cutByRelevance.has(it));
+    // Deleted from core's map here: the budget walk deletes only what it walks, and a cut row left behind ships.
+    for (const it of relevanceCutRows) {
+        activated.delete(it.key);
     }
-    let ranked = [...sticky.sort(authored), ...constant.sort(authored), ...results];
+    if (relevanceCutRows.length) {
+        console.log(`Worlds Apart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
+            + (promoted.length ? ` (${promoted.length} promoted entr${promoted.length === 1 ? 'y was' : 'ies were'} exempt)` : ''));
+    }
+
+    let walk = delivery.walkOrder({ sticky, constant, promoted, results });
 
     const maxTokens = effectiveTokenBudget();
     const maxTotal = settings().maxTotalEntries;
     const maxDynamic = settings().maxDynamicEntries;
+    const maxVectorEntries = settings().maxVectorEntries;
     const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w), w.cap]).filter(([n]) => n));
 
-    if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || bookCaps.size) {
+    if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
-        const { survivors, counted, skipped, dropped, budgeted, inPrompt } = await applyBudget({
-            ranked,
+        const promotedSet = new Set(promoted);
+        const { survivors, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
+            walk,
             isDynamic: item => dynamicSet.has(item),
+            // Capacity's population is dynamic plus promoted: promotion exempts from relevance, not from the caps.
+            isCapped: item => dynamicSet.has(item) || promotedSet.has(item),
+            // The tag, not retrieval provenance.
+            isVector: item => Boolean(item.entry?.vectorized),
             maxTokens,
             maxTotal,
             maxDynamic,
+            maxVectorEntries,
             capOf: item => bookCaps.get(item.entry.world) ?? 0,
             tokensOf: item => (maxTokens > 0 ? getTokenCountAsync(item.entry.content ?? '') : 0),
             exemptIsBudgeted: settings().maxTokensIncludesExempt,
@@ -1313,7 +1336,7 @@ async function rankActivated(args) {
             slackOnce: settings().budgetSlackMode !== 'all',
         });
 
-        for (const item of ranked) {
+        for (const item of walk) {
             if (!survivors.has(item)) {
                 activated.delete(item.key);
             }
@@ -1321,7 +1344,8 @@ async function rankActivated(args) {
 
         if (dropped) {
             const caps = [
-                maxDynamic > 0 ? `dynamic ${results.filter(x => survivors.has(x) && !x.entry.ignoreBudget).length}/${maxDynamic}` : null,
+                maxVectorEntries > 0 ? `vector ${vector}/${maxVectorEntries}` : null,
+                maxDynamic > 0 ? `dynamic ${dynamic}/${maxDynamic}` : null,
                 maxTotal > 0 ? `total ${counted}/${maxTotal}` : null,
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
             ].filter(Boolean).join(', ');
@@ -1330,237 +1354,174 @@ async function rankActivated(args) {
         }
 
         runState.lastSkipped = skipped;
-        runState.lastDropped = ranked.filter(x => !survivors.has(x));
-        ranked = ranked.filter(x => survivors.has(x));
+        walk = walk.filter(x => survivors.has(x));
     } else {
         runState.lastSkipped = [];
-        runState.lastDropped = [];
     }
 
-    // Selection is done; now lay the survivors out — one flat sort over everything, so
-    // a lorebook that uses `order` to build tiers (reference material above memories,
-    // say) keeps those tiers. The blocks above are a budget policy, not a layout: they
-    // decide what gets cut, never where the survivors sit.
-    //
-    // Rewriting `order` rather than leaving it alone keeps entries that share an order
-    // value in a deterministic sequence instead of at the mercy of core's tiebreak.
-    // Sequential mode groups the whole prompt by book tier — book1's survivors, then
-    // book2's — with the chosen layout order applied within each book.
-    const layout = priorityMode === 'sequential'
-        ? [...ranked].sort((a, b) => (rankOf(a.entry.world) - rankOf(b.entry.world)) || compare(a, b))
-        : [...ranked].sort(compare);
+    // Prompt order, not layout order: one flat sort over every survivor.
+    const promptOrder = priorityMode === 'sequential'
+        ? [...walk].sort((a, b) => (bookTierOf(a.entry.world) - bookTierOf(b.entry.world)) || compare(a, b))
+        : [...walk].sort(compare);
 
-    // Assembly sorts descending by `order` then unshifts, so the prompt reads
-    // in ASCENDING order value. Index 0 of `layout` therefore lands first. WA owns the
-    // whole `order` space (it rewrites every activated entry), so the base is a fixed
-    // pad, not a setting — nothing else writes here to collide with.
-    layout.forEach((item, index) => {
+    // Assembly sorts descending by `order` then unshifts, so the prompt reads ascending and index 0 lands first.
+    promptOrder.forEach((item, index) => {
         item.entry.order = ORDER_BASE + index;
     });
 
-    // Stash for /wa-dry. Classification is recomputed nowhere else, so record it here.
+    // Stash for /wa-dry; classification is recomputed nowhere else.
     const blockOf = new Map([
         ...sticky.map(x => [x, 'sticky']),
         ...constant.map(x => [x, 'constant']),
+        // Named, not folded into 'dynamic': a harness would read the row as answering to a cut it never reached. Still gradeable.
+        ...promoted.map(x => [x, 'promoted']),
         ...results.map(x => [x, 'dynamic']),
     ]);
-    runState.lastLayout = layout.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
-    runState.lastDropped = runState.lastDropped.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
+    runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
-    // Reflect the final selection in the active-entries panel. Fires once per scan
-    // loop; only the last one (no further state) is the real prompt.
-    if (!args?.state?.next) renderWiPanel(runState.lastLayout);
+    // Only the last loop (no further state) is the real prompt.
+    if (!args?.state?.next) renderDeliveryPanel(runState.lastPromptOrder);
 
-    // A plain /wa-dry has its own selected table below; this one is the selection candidates
-    // — everything activated, ranked, before caps cut into it. Only /wa-debug wants this much.
-    // Built whenever a debug-class run is in flight, and stashed: /wa-grade grades THESE rows rather than
-    // recomputing a ranking, so the grades attach to the selection that actually happened.
     if (runState.verboseRun) {
-        const rows = ranked.map((x, i) => ({
-            // Columns lead like the selected table — title, then block, sticky, score, uid,
-            // wiOrder — then the per-signal scores under the same names (cosine, text, keys), each
-            // with its rank. `block` is the RUNTIME budget class (constant / sticky-active /
-            // dynamic); `sticky` is the entry's CONFIGURED sticky value (0 = off). The two differ:
-            // an entry with sticky configured still shows block `dynamic` on the turn it keyword-
-            // activates, and dry runs (/wa-debug) never arm the effect at all — so the eval tiers
-            // scaffolding off constant-or-`sticky`, not off the runtime block, which it can't observe.
-            // Numeric fields stay numeric so the copied JSON is computable: `null` for "no
-            // signal" (distinct from a real 0), rounded (not toFixed strings) for a readable
-            // grid, and `sticky` is the count itself (0 = off). Only `block` is categorical.
+        // The pre-cut, pre-budget population, `cut`/`cutBy` recording which side each row fell on. candidates=N caps
+        // gradeable rows only — durable rows are listed ungraded — and never drops a row that shipped.
+        const kept = new Set(walk);
+        let gradeableSeen = 0;
+        const gradeDepth = runState.gradeCutoff?.maxVectorEntries ?? 0;
+        const population = (runState.lastLayoutOrder ?? walk)
+            .filter(x => !gradeDepth || isDurable({ block: blockOf.get(x) ?? 'dynamic' }) || ++gradeableSeen <= gradeDepth || kept.has(x));
+        // Why a row was cut, not just that it was: "ordered too low" and "would not fit" are different facts.
+        const blockedOf = new Map(
+            (runState.lastSkipped ?? []).map(s => [s.item ?? s, (s.blockedBy ?? []).map(b => b.cap).join('+')]),
+        );
+        // Counted here, not reused from tokensOf, which short-circuits to 0 when maxTokens is 0. Content only, matching applyBudget.
+        const tokens = await Promise.all(population.map(x => getTokenCountAsync(x.entry.content ?? '')));
+        const rows = population.map((x, i) => ({
+            // `block` is the runtime budget class; `sticky` is the configured value, which is what the eval side reads
+            // durable off. Numeric fields stay numeric, `null` meaning no signal — never a truthiness test.
             title: x.entry.comment,
             block: blockOf.get(x) ?? 'dynamic',
             sticky: x.entry.sticky || 0,
-            score: x.fused ? Number(x.fused.toFixed(5)) : null,
+            score: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(5)) : null,
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
-            vRank: x.vectorRank ?? null,
-            // BM25 over chunk text — the signal doing the work for vectorized entries.
-            text: x.textScore ? Number(x.textScore.toFixed(2)) : null,
-            tRank: x.textRank ?? null,
-            // BM25 over entry keys — only ever non-zero for non-vectorized entries.
-            keys: x.keywordScore ? Number(x.keywordScore.toFixed(2)) : null,
-            kRank: x.keywordRank ?? null,
-            '#': i,
+            pn: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
+            dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
+            // Gated as cosine is: an entry with no chunks in the collection has no text score, and the scorer's 0 is a default.
+            text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
+            // Gated on eligibility, not the value: 0 is both a miss and no scorable keys (H12).
+            keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
+            tokens: tokens[i],
+            cut: !kept.has(x),
+            // 'tokens' means it did not FIT, a different fact from ranking too low.
+            cutBy: blockedOf.get(x) || null,
+            // `index`, matching the bundle candidate's field.
+            index: i,
         }));
 
-        // uid alone is ambiguous across books, so carry the world for the grader and the eval.
-        runState.lastCandidates = rows.map((row, i) => ({ ...row, world: ranked[i].entry.world }));
-        runState.lastCandidateEntries = ranked.map(x => x.entry);
+        // `book` from here on, never `world`: the row, the key and the schema all say book.
+        runState.lastCandidates = rows.map((row, i) => ({ ...row, book: population[i].entry.world, why: population[i].keywordWhy }));
+        runState.lastCandidateEntries = population.map(x => x.entry);
 
-        console.log('%cWorlds Apart · selection candidates — every activated entry with its per-signal scores, before caps or layout', 'font-weight: bold');
+        console.log('%cWorlds Apart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit]; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
         console.table(rows);
     }
 
-    // Live generations get the same "what was selected and why" table /wa-dry prints —
-    // it answers the question you actually have when watching a real turn. Only on the
-    // final loop (this fires once per scan loop, earlier ones are provisional), and never
-    // on ST's dry runs — those fire on every chat load and would spam the console.
+    // Final loop only, and never on ST's dry runs, which fire on every chat load.
     if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun && !args?.state?.next) {
         await reportLayout(false, maxTokens > 0);
     }
 }
 
-// ---------------------------------------------------------------------------
 // Dry run
-// ---------------------------------------------------------------------------
 
-/**
- * Runs retrieval and a full World Info scan without generating anything.
- *
- * Safe to spam: `setTimedEffects` and `setTimedEffect` both bail on dry runs
- * (WorldInfoTimedEffects.js), so sticky and cooldown state is untouched, and
- * WORLD_INFO_ACTIVATED isn't emitted (world-info.js:900) so other extensions
- * stay quiet. It does refresh the Author's Note extension prompt, which the
- * next real generation overwrites anyway.
- *
- * @returns {Promise<string>} Empty string — output goes to the console table
- */
+/** Runs retrieval and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED. */
 async function dryRun(verbose = false) {
     const context = getContext();
-    const chat = context.chat ?? [];
+    // is_system first: ST filters them out of `coreChat` before any interceptor, so production never sees them (G9).
+    const rawChat = context.chat ?? [];
+    const chat = rawChat.filter(x => x && !x.is_system);
 
-    if (!chat.length) {
-        toastr.warning('No chat to scan.', 'Worlds Apart');
+    // The only gate on this path: with WA off a dry run would half-run, force-activating into a scan WA does not own.
+    if (!settings().enabled) {
+        toastr.warning(t`Worlds Apart is disabled — turn it on to run a dry run.`, 'Worlds Apart');
         return '';
     }
 
-    console.log(`%cWorlds Apart: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
+    if (!chat.length) {
+        toastr.warning(rawChat.length ? t`Every message in this chat is hidden.` : t`No chat to scan.`, 'Worlds Apart');
+        return '';
+    }
+
+    console.log(`%cWorlds Apart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
+    // Version and fingerprints stay out of paramSnapshot: a bundle carries them in SHARED_FIELDS, and recording them twice would let the two disagree.
+    console.log(`Worlds Apart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
+    const identity = await extensionIdentity();
+    if (identity) console.log(`Worlds Apart: ${identity}`);
 
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
+    // This scan is not ST's, and nothing else clears the flag: GENERATION_ENDED never fires for a dry Generate.
+    runState.generationIsDryRun = false;
 
-    // Cleared so a scan that activates nothing reports nothing, rather than last run's. The /wa-grade
-    // capture is in here too: a stale candidate list would be graded as if it belonged to this scene,
-    // and its `if (!rows.length)` guard cannot see the difference.
-    runState.lastLayout = [];
-    runState.lastDropped = [];
+    // Cleared so a scan that activates nothing reports nothing rather than last run's; the /wa-grade capture too.
+    runState.lastPromptOrder = [];
     runState.lastSkipped = [];
     runState.lastCandidates = [];
     runState.lastCandidateEntries = [];
     runState.lastQuery = '';
-    runState.lastScanText = '';
+    runState.lastScanChat = [];
     runState.lastQueryChat = [];
-    runState.lastCutKept = null;
+    runState.lastLayoutOrder = [];
 
-    const chatForWI = chat
-        .map(x => (world_info_include_names ? `${x.name}: ${x.mes}` : x.mes))
-        .reverse();
-
-    // Print in pipeline order: retrieval → activation ranking → final selection.
-    // Stage 1 — vector candidates — is printed by retrieve() below, from the ranking it actually selected
-    // on. This used to re-run scoring through the /wa-query probe, which scored WITHOUT the entity filter
-    // and so could report a different cutoff than the one that ran; a debug view has to reuse production's
-    // result, not re-derive one. /wa-query keeps the probe for scoring arbitrary text.
-    // retrieve() is inside the try: it hits the network (plugin, Ollama), and a throw outside the finally
-    // would leave verboseRun/dryRunInProgress stuck true for every later live generation.
+    // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
-        await retrieve(chat);
+        await selectAndActivate(chat);
 
-        // Stage 2 — the scan; rankActivated prints the selection candidates (verbose) as it runs.
-        await getWorldInfoPrompt(chatForWI, getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
+        await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
-        // Stage 3 — selection: what survived caps and layout.
         await reportLayout(verbose);
     } finally {
         runState.verboseRun = false;
         runState.dryRunInProgress = false;
+        // An exception before the scan's last loop would otherwise leave the takeover flag armed.
+        runState.waOwnsScan = false;
     }
 
     return '';
 }
 
-/** Key in more than this fraction of active entries' content fires almost always — no
- * discrimination, recommend pruning. Flagging is per-key on the key's own text occurrence (df) and
- * does NOT consider whether the key is shared across entries — so a ubiquitous recurring name can be
- * flagged too-common; whitelist it (ban icon) if it's a deliberate continuity trigger. Dead keys
- * (never appearing in any entry's text) are also flagged. */
-
-
-/**
- * Every setting that can change a result, grouped by pipeline stage, as a plain object.
- *
- * Logged as a JSON object so it collapses in the console and copies cleanly into bug
- * reports (right-click → Copy object). `nonDefaults` lists the scalar settings that differ
- * from the shipped defaults, replacing the old `*` markers — the interesting ones at a glance.
- *
- * @returns {object} Settings snapshot, keyed by pipeline stage
- */
+/** Every setting that can change a result, as a plain object logged as JSON. */
 function paramSnapshot() {
     const s = settings();
-    // Scoped to the books attached to this chat — the same set the priority actually acts on.
     const attached = (scopedPriority() ?? []).map(x => x.cfg);
-    const nonDefaults = Object.keys(defaultSettings)
-        .filter(k => typeof s[k] !== 'object' && s[k] !== defaultSettings[k]);
-
-
-    // Keys are the real setting names so grouped values, `nonDefaults`, and the UI bindings all
-    // line up — makes a logged snapshot greppable straight back to the code. Derived rollups
-    // (`maxTokens`, `attached`, `presentationOrder` label) have no single backing setting.
+    // Every setting, never an allowlist; it includes `raterId`.
     const snap = {
-        // commonWordWeight is an internal global derived from the mode (0.7 BM25-only, 1 otherwise), not a
-        // setting; logged as the value in effect. It modifies the plugin's BM25 IDF on every query.
-        // keywordWeight is logged even when null, because null is a real value here ("follow lexicalWeight")
-        // and its absence would read as an older capture rather than as a deliberate setting.
-        scoring: { retrievalMode: s.retrievalMode, rrfK: s.rrfK, lexicalWeight: s.lexicalWeight, keywordWeight: s.keywordWeight ?? null, weightByOrder: s.weightByOrder, bm25K1: s.bm25K1, bm25B: s.bm25B, commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1 },
-        // The entity filter only runs on raw-message queries — a summary is already
-        // salience-selected — so in summary mode its params are inert and omitted.
-        matchText: {
-            queryMode: s.queryMode, messageDepth: s.messageDepth,
-            ...(s.queryMode === 'summary' ? {} : { entityFilter: s.entityFilter, properNounBoost: s.properNounBoost, stopwordDocFreq: s.stopwordDocFreq }),
+        // Structured settings are storage, not knobs, and are left out; `derived.attached` carries this character's list scoped to the chat.
+        settings: Object.fromEntries(Object.keys(defaultSettings)
+            .filter(k => defaultSettings[k] === null || typeof defaultSettings[k] !== 'object')
+            .map(k => [k, s[k]])),
+        // Values with no single backing setting.
+        derived: {
+            maxTokens: tokenBudgetLabel(),
+            // The entry maxes and per-book caps are not repeated: recording them twice would let the two disagree.
+            maxTokensEffective: effectiveTokenBudget(),
+            tokenizer: getTokenizerModel(),
+            insertionOrder: presentationBaseLabel(s.presentationOrder),
+            attached,
+            // Which fit the eCredit column came out of; `null` marks the file failing to load.
+            relevanceModel: Object.fromEntries(Object.entries(relevanceModel.value ?? {})
+                .map(([tier, m]) => [tier, m
+                    ? { features: m.features, cutoff: m.cutoff, heldOutAuc: m.heldOutAuc, fittedOn: m.fittedOn }
+                    : null])),
         },
-        // Acquisition: what vectra gives back — the DB-side similarity gate, mean-centering, and
-        // how the vectorized text is chunked. Paired with `cutoff` (WA-side selection) below.
-        vectors: { scoreThreshold: s.scoreThreshold, uncenteredGate: s.uncenteredGate || 0, meanCentered: s.meanCentered, chunkMode: s.chunkMode, chunkSize: s.chunkSize, minChunkSize: s.minChunkSize, suppressVectorKeys: s.suppressVectorKeys },
-        // Selection: the WA-side cliff detector, floor/ceiling, and keyword scoring applied to
-        // what was acquired. Mode leads, then the active mode's threshold and floor.
-        cutoff: {
-            vectorCutoff: s.vectorCutoff,
-            ...(s.vectorCutoff === 'elbow' ? { elbowSensitivity: s.elbowSensitivity, minVectorEntries: s.minVectorEntries } : {}),
-            ...(s.vectorCutoff === 'dropoff' ? { dropoffThreshold: s.dropoffThreshold, minVectorEntries: s.minVectorEntries } : {}),
-            maxVectorEntries: s.maxVectorEntries, keywordScoring: s.keywordScoring, scoreVectorKeys: s.scoreVectorKeys,
-        },
-        budget: { maxTotalEntries: s.maxTotalEntries || null, maxDynamicEntries: s.maxDynamicEntries || null, maxTokens: tokenBudgetLabel(), maxTokensIncludesExempt: s.maxTokensIncludesExempt, budgetSlackMode: s.budgetSlackMode, budgetSlackPercent: s.budgetSlackPercent || 0 },
-        layout: { insertionOrder: presentationBaseLabel(s.presentationOrder), tiered: !!s.presentationTiered },
-        books: { worldPriorityMode: s.worldPriorityMode, attached },
     };
 
-    if (s.queryMode === 'summary') {
-        const profile = (extension_settings.connectionManager?.profiles ?? []).find(x => x.id === s.summaryProfile);
-        snap.summary = { summaryProfile: profile ? profile.name : 'current API', endpoint: profile ? (profile['api-url'] || profile.api || '—') : '—', summaryTemperature: s.summaryTemperature || 'preset', summaryLength: s.summaryLength, summaryBypassPreset: s.summaryBypassPreset };
-    }
-
-    snap.nonDefaults = nonDefaults;   // last — the flat exact-name diff list, after the grouped view
     return snap;
 }
 
-/**
- * Names the signal that won an entry its place, for the `why` column.
- * @param {object} item Ranked item
- * @param {string} block Which block it was classified into
- * @returns {string} Short explanation
- */
 function tokenBudgetLabel() {
     const s = settings();
     const parts = [
@@ -1573,45 +1534,32 @@ function tokenBudgetLabel() {
         return '—';
     }
 
-    // Resolve only when a percentage is in play — otherwise "2048 = 2048" is noise.
     return s.maxTokensPercent > 0 ? `${parts.join(' & ')} = ${effective}` : parts.join(' & ');
 }
 
-/**
- * Names the signal that won an entry its place, for the `why` column.
- * @param {object} item Ranked item
- * @param {string} block Which block it was classified into
- * @returns {string} Short explanation
- */
+/** Names the signal that won an entry its place, for the `why` column. */
 function whySelected(item, block) {
-    if (block !== 'dynamic') {
+    if (isDurable({ block })) {
         return 'always-on';
     }
-
+    // A promoted row still won its place on a signal: the author waived the cut, not the scoring.
     const parts = [
-        item.vectorRank ? `vec#${item.vectorRank}` : null,
-        item.textRank ? `text#${item.textRank}` : null,
-        item.keywordRank ? `keys#${item.keywordRank}` : null,
+        Number.isFinite(item.eCredit) ? `E[credit] ${item.eCredit.toFixed(3)}` : null,
+        Number.isFinite(item.score) ? `vec ${item.score.toFixed(3)}` : null,
+        item.textScore ? `text ${item.textScore.toFixed(2)}` : null,
+        item.keywordScore ? `keys ${item.keywordScore.toFixed(2)}` : null,
     ].filter(Boolean);
 
     if (parts.length) {
         return parts.join(' · ');
     }
 
-    // No WA signal at all, yet it is here — so core activated it, not WA. Distinguish the
-    // ways that happen, because they need different fixes and look identical otherwise.
-
-    // @@activate fires unconditionally, before keyword matching — so an entry with this
-    // decorator was never keyword-activated, and scoring it 0 is correct, not a miss.
+    // No WA signal, so core activated it. @@activate applies before keyword matching, so its 0 is correct, not a miss.
     if (Array.isArray(item.entry.decorators) && item.entry.decorators.includes('@@activate')) {
         return 'core (@@activate)';
     }
 
-    // Has keys but WA scored 0. Core matched on evidence WA didn't reproduce. When Min
-    // Activations is on, the likely cause is core backfilling below its Scan Depth to
-    // hit the entry quota — a region WA never scans — so name that. Otherwise it is a
-    // matcher difference (whole-word/regex/case), or a keysecondary/selective-logic hit
-    // WA doesn't evaluate, or recursion if it's on.
+    // Keys, but WA scored 0: with min activations on, core likely backfilled below Scan Depth; otherwise a matcher difference.
     const hasKeys = Array.isArray(item.entry.key) && item.entry.key.length > 0;
 
     if (!hasKeys) {
@@ -1623,20 +1571,11 @@ function whySelected(item, block) {
         : 'core keyword (WA scored 0)';
 }
 
-/**
- * Turns a rejection into the change that would undo it.
- * @param {object[]} blockedBy Caps that rejected the entry
- * @returns {string} What to do about it
- */
-function describeFix(blockedBy, tail = false) {
+/** Turns a rejection into the change that would undo it. */
+function describeFix(blockedBy) {
     return blockedBy.map((block) => {
         switch (block.cap) {
             case 'tokens':
-                // In the tail the budget is spent, so per-entry advice is misleading —
-                // shortening one entry when nothing more fits changes nothing.
-                if (tail) {
-                    return `budget spent, ${block.remaining} left`;
-                }
                 return block.slackSpent
                     ? `${block.shortfall} tokens over; slack already used this scan (set slack to "all"?)`
                     : `+${block.shortfall} tokens, or ${block.slackNeeded}% slack, or shorten the entry`;
@@ -1644,6 +1583,8 @@ function describeFix(blockedBy, tail = false) {
                 return 'raise the total entry cap';
             case 'dynamic':
                 return 'raise the dynamic entry cap';
+            case 'vector':
+                return 'raise the vector entry cap';
             case 'book':
                 return `raise "${block.world}" book cap (at ${block.limit})`;
             default:
@@ -1655,15 +1596,9 @@ function describeFix(blockedBy, tail = false) {
 /** Human names for `world_info_position`, which is a bare enum on the entry. */
 const POSITION_NAMES = ['before char', 'after char', 'AN top', 'AN bottom', '@depth', 'EM top', 'EM bottom', 'outlet'];
 
-/**
- * Prints what the last scan decided: which entries reach the prompt, in prompt order.
- *
- * Entries are grouped by `position` first, because core assembles each position into its
- * own block — `order` only sequences entries WITHIN a position. A single global ranking
- * across mixed positions does not produce one linear prompt.
- */
+/** Prints the last scan's selection in prompt order, grouped by `position` first: core assembles each position into its own block. */
 async function reportLayout(verbose = false, countTokens = true) {
-    if (!runState.lastLayout.length) {
+    if (!runState.lastPromptOrder.length) {
         console.log('Worlds Apart: nothing activated.');
         return;
     }
@@ -1671,34 +1606,29 @@ async function reportLayout(verbose = false, countTokens = true) {
     const rows = [];
     let total = 0;
 
-    for (const { item, block } of runState.lastLayout) {
+    for (const { item, block } of runState.lastPromptOrder) {
         const entry = item.entry;
-        // Skipped on live generations unless a token cap already made us count: this
-        // runs before every turn when debugLog is on, and a remote tokenizer would turn
-        // a debug table into one HTTP round trip per entry of added latency.
+        // Not counted on live generations unless a token cap already made us: a remote tokenizer is one round trip per entry.
         const tokens = countTokens ? await getTokenCountAsync(entry.content ?? '') : null;
         total += tokens ?? 0;
 
-        // Column order IS insertion order in console.table. Lead with what identifies a
-        // selection — title, composite score, uid, order — so the table is readable
-        // without dragging columns; push layout metadata and per-signal scores to the
-        // right. `_pos` is a numeric sort key only, stripped before printing.
-        // Numeric fields stay numeric (rounded for readability, `null` for "no signal") so the
-        // logged JSON is computable — matching the candidates table. `score` is always the fused
-        // number now; what used to overload it with the block name lives in the `block` column.
+        // Column order is insertion order; `_pos` is a sort key only, stripped before printing. Numeric fields stay numeric, `null` for no signal.
         rows.push({
             title: entry.comment || `uid ${entry.uid}`,
-            score: item.fused ? Number(item.fused.toFixed(5)) : null,
+            score: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
             uid: entry.uid,
-            // wiOrder is the entry's own WI `order` field (what "WI Order" layout sorts
-            // by); waOrder is the value WA writes to control the final prompt sequence.
+            // wiOrder is the entry's own WI `order`; waOrder is what WA wrote.
             wiOrder: entry.waOriginalOrder,
             waOrder: entry.order,
             ...(verbose ? {
                 cosine: item.score !== undefined ? Number(item.score.toFixed(5)) : null,
                 text: item.textScore ? Number(item.textScore.toFixed(2)) : null,
                 keys: item.keywordScore ? Number(item.keywordScore.toFixed(2)) : null,
-                // Which keys actually matched, strongest first: "Kyle×3 · pool". Textual by nature.
+                // Full precision: a harness run is compared against these to show the runtime and the fit agree.
+                properNouns: Number.isFinite(item.properNouns) ? item.properNouns : null,
+                density: Number.isFinite(item.density) ? item.density : null,
+                eCredit: Number.isFinite(item.eCredit) ? item.eCredit : null,
+                // Which keys matched, strongest first: "Kyle×3 · pool".
                 hits: item.keywordHits?.length
                     ? item.keywordHits.map(h => (h.count > 1 ? `${h.key}×${h.count}` : h.key)).join(' · ')
                     : null,
@@ -1707,14 +1637,12 @@ async function reportLayout(verbose = false, countTokens = true) {
             why: whySelected(item, block),
             position: POSITION_NAMES[entry.position] ?? `position ${entry.position}`,
             depth: entry.position === 4 ? (entry.depth ?? 4) : null,
-            exempt: Boolean(entry.ignoreBudget),
+            exempt: delivery.authorIgnoreBudget(entry),
             tokens: tokens ?? null,
             _pos: Number(entry.position) || 0,
         });
     }
 
-    // Position first (each is a separate block in the assembled prompt), then `order`
-    // within it — the same two-level sequence core produces.
     rows.sort((a, b) => a._pos - b._pos || a.waOrder - b.waOrder);
     rows.forEach(row => delete row._pos);
 
@@ -1722,8 +1650,6 @@ async function reportLayout(verbose = false, countTokens = true) {
     console.table(rows);
 
     if (runState.lastSkipped.length) {
-        // Near-misses first: these are the ones where an edit or a nudge to a cap would
-        // actually change the outcome. The tail is reported as a block below.
         const nearMiss = runState.lastSkipped.filter(x => !x.tail);
         const tail = runState.lastSkipped.filter(x => x.tail);
 
@@ -1732,9 +1658,8 @@ async function reportLayout(verbose = false, countTokens = true) {
             console.table(nearMiss.map(({ item, tokens, blockedBy }) => ({
                 blockedBy: blockedBy.map(x => x.cap).join(' + '),
                 tokens,
-                // What would admit it, so the log points at the fix rather than the symptom.
                 fix: describeFix(blockedBy),
-                fused: item.fused ? Number(item.fused.toFixed(5)) : null,
+                eCredit: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
                 entry: item.entry.comment || `uid ${item.entry.uid}`,
                 uid: item.entry.uid,
             })));
@@ -1745,9 +1670,7 @@ async function reportLayout(verbose = false, countTokens = true) {
             const sum = tail.reduce((total, x) => total + x.tokens, 0);
             const caps = [...new Set(tail.flatMap(x => x.blockedBy.map(y => y.cap)))].join(' + ');
 
-            // Everything after the last admission sees the same leftover room, so any
-            // token-blocked tail entry carries it. Fitting the whole tail costs its total
-            // MINUS that leftover — quoting the raw sum would overstate it.
+            // Every tail entry sees the same leftover room, so fitting the whole tail costs its sum minus that.
             const remaining = tail.find(x => x.blockedBy.some(y => y.cap === 'tokens'))
                 ?.blockedBy.find(y => y.cap === 'tokens')?.remaining;
             const toFitAll = remaining === undefined ? null : Math.max(0, sum - remaining);
@@ -1755,7 +1678,7 @@ async function reportLayout(verbose = false, countTokens = true) {
             console.log(`%cWorlds Apart · cut (exhausted) — ${caps} used up, nothing here fits: ${tail.length} entries, smallest is ${smallest} tokens, ${sum.toLocaleString()} in total${toFitAll === null ? '' : ` (raise the budget by ${toFitAll.toLocaleString()} to fit them all)`}`, 'font-weight: bold');
             console.table(tail.map(({ item, tokens }) => ({
                 tokens,
-                fused: item.fused ? Number(item.fused.toFixed(5)) : null,
+                eCredit: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
                 entry: item.entry.comment || `uid ${item.entry.uid}`,
                 uid: item.entry.uid,
             })));
@@ -1763,705 +1686,29 @@ async function reportLayout(verbose = false, countTokens = true) {
     }
 }
 
-/**
- * Scores entries against arbitrary text and prints the result. Activates nothing.
- * Lets you compare query formulations — raw messages vs. a hand-written summary —
- * against the same corpus.
- * @param {object} _named Named arguments (unused)
- * @param {string} text Query text
- * @returns {Promise<string>} Empty string — output goes to the console table
- */
-async function probeQuery(_named, text, { unfiltered = false } = {}) {
+/** /wa-query: scores entries against arbitrary text and prints the result; activates nothing. */
+async function probeQuery(_named, text) {
     const searchText = String(text ?? '').trim();
 
     if (!searchText) {
-        toastr.warning('Provide query text: /wa-query your text here', 'Worlds Apart');
+        toastr.warning(t`Provide query text: /wa-query your text here`, 'Worlds Apart');
         return '';
     }
 
-    // Same entity filter retrieval applies, or the probe scores a query nothing else will. `unfiltered`
-    // is for probing a SUMMARY: the filter is deliberately never applied to summarized queries (they are
-    // already salience-selected), so filtering one here would show a combination retrieval never runs.
-    const termWeights = unfiltered ? null : await queryTermWeights(searchText);
-    const { targets, scores } = await scoreEntries(searchText, termWeights);
+    const { targets, scores } = await scoreEntries(searchText);
 
     if (!scores.size) {
-        console.log(`Worlds Apart: nothing cleared the ${settings().scoreThreshold} threshold for "${searchText.slice(0, 60)}…"`);
+        console.log(`Worlds Apart: the query scored no chunk for "${searchText.slice(0, 60)}…"`);
         return '';
     }
 
-    const ranked = fuseRetrieval(scores);
-    reportVectorCandidates(ranked, cutRetrieved(ranked).length, targets, searchText);
+    reportVectorCandidates(scores, targets, searchText);
 
     return '';
 }
 
-/**
- * Default sample name: the chat plus the message the scene ends on.
- *
- * A date is the wrong identity — grade two scenes in one afternoon and both are `scene-<today>`, so the
- * NAME collides even though the browser numbers the downloaded files apart, and every report keys on the
- * name. Chat + last-message index is what actually identifies a scene: distinct across chats, distinct
- * across scenes within a chat, stable if you re-grade the same point, and legible in a results table.
- * @returns {string} Sample name
- */
-function defaultSampleName() {
-    const ctx = getContext();
-    const chat = String(ctx.chatId ?? getCharaFilename(ctx.characterId) ?? 'scene');
-    // Chat ids carry timestamps and punctuation ("Isekai - 2026-03-04@14h45"); keep it filesystem- and
-    // table-friendly, and short enough to read.
-    const slug = chat.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
-    return `${slug || 'scene'}-msg${Math.max(0, (ctx.chat?.length ?? 1) - 1)}`;
-}
 
-/**
- * Grades the current scene and writes a self-contained sample for eval/graded-scene-grid.mjs.
- *
- * Runs the real /wa-debug pipeline first, then grades the rows it produced — so the grades attach to the
- * selection that actually happened, at settings that are recorded rather than remembered. n=1 is the
- * standing limitation on every tuning claim in this extension; this exists to make n>1 cheap.
- *
- * Scaffolding rows (constants, configured stickies) are listed but not gradeable: they are always-on or
- * persist-on-trigger, so relevance never chose them and grading them would drag nDCG down for entries the
- * ranking isn't responsible for.
- *
- * @param {object} named Named args: name, books (full|meta|none), notes
- * @returns {Promise<string>} Empty string — output is a downloaded file
- */
-async function gradeScene(named) {
-    const bookMode = String(named?.books ?? 'full').toLowerCase();
-
-    if (!['full', 'meta', 'none'].includes(bookMode)) {
-        toastr.warning('books= must be full, meta or none', 'Worlds Apart');
-        return '';
-    }
-
-    // Widen the cut for the grading run only, so the candidate list is deep enough to assess every cutoff
-    // mode offline (see effectiveCutoff). The live setting is recorded in the sample either way.
-    const live = { mode: settings().vectorCutoff, maxVectorEntries: settings().maxVectorEntries };
-    const wanted = Math.max(1, Number(named?.candidates ?? 20));
-    runState.gradeCutoff = { mode: 'count', maxVectorEntries: wanted };
-
-    let rows = [];
-    let entries = [];
-    try {
-        // The debug run IS the measurement: same retrieval, same ranking — only the cut is widened.
-        await dryRun(true);
-        rows = runState.lastCandidates ?? [];
-        entries = runState.lastCandidateEntries ?? [];
-    } finally {
-        runState.gradeCutoff = null;
-    }
-
-    if (!rows.length) {
-        toastr.warning('Nothing was activated — nothing to grade.', 'Worlds Apart');
-        return '';
-    }
-
-    // A keyword-only scene (retrieval cleared nothing) has rows but no query; the harness scores against
-    // the frozen query, so the sample would be unrunnable garbage. Refuse rather than freeze ''.
-    if (!runState.lastQuery) {
-        toastr.warning('Retrieval activated nothing — the sample would have no query to score offline. Grade a scene where retrieval ran.', 'Worlds Apart');
-        return '';
-    }
-
-    const gradeable = rows.map((row, i) => ({ row, entry: entries[i], i })).filter(x => !isScaffolding(x.row));
-    const scaffold = rows.length - gradeable.length;
-    const esc = s => escapeHtml(String(s ?? ''));
-
-    const wrap = document.createElement('div');
-    wrap.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene</h3>'
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${gradeable.length} retrieved entries${scaffold ? `; ${scaffold} constant/sticky row(s) listed but not graded — always-on, so relevance didn't choose them` : ''}.</small>`
-        + '<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">Query text — what retrieval actually matched on '
-        + `(${runState.lastQuery.length} chars, depth ${settings().messageDepth})</summary>`
-        + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
-        + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
-        + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:4em;">fused</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
-        + rows.map((row, i) => {
-            const scaff = isScaffolding(row);
-            const num = n => (n == null ? '·' : String(n));
-            const cell = scaff
-                ? `<span style="opacity:0.5;font-size:0.85em;">${row.block === 'constant' ? 'const' : 'sticky'}</span>`
-                : `<input type="number" class="wa-grade text_pole" data-i="${i}" min="0" max="4" step="1" value="0" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
-            return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${scaff ? 'opacity:0.6;' : ''}">`
-                + `<td>${cell}</td>`
-                + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
-                + `<td>${num(row.score)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
-                + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
-        }).join('')
-        + '</tbody></table>';
-
-    // Reuses the Studio's entry viewer rather than a second renderer.
-    wrap.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
-        event.preventDefault();
-        const entry = entries[Number(button.dataset.i)];
-        if (entry) showEntryText(entry);
-    }));
-
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: 'Save sample', cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
-    const result = await popup.show();
-
-    if (result !== POPUP_RESULT.AFFIRMATIVE) {
-        return '';
-    }
-
-    const grades = [...wrap.querySelectorAll('.wa-grade')].map(input => {
-        const row = rows[Number(input.dataset.i)];
-        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
-    });
-
-    // Every attached book, at the requested fidelity — so a later lorebook edit can't move the numbers.
-    const books = {};
-    for (const world of runState.attachedWorlds) {
-        const data = await loadWorldInfo(world);
-        if (data?.entries) {
-            books[world] = trimBook(data.entries, bookMode);
-        }
-    }
-
-    // Which collection the harness must load. Taken from the ranking (see searchedBook), because the chat's
-    // bound book is an ST binding, not a statement about what was retrieved: a book with no entries never
-    // appears in attachedWorlds at all, so trusting it here keyed samples to a collection that doesn't
-    // exist. The chat book stays the fallback for a keyword-only scene, where nothing was retrieved.
-    const primaryBook = searchedBook(rows) ?? chatBook() ?? Object.keys(books)[0] ?? '';
-    const sample = buildSample({
-        name: named?.name || defaultSampleName(),
-        notes: named?.notes,
-        query: runState.lastQuery,
-        queryChat: runState.lastQueryChat,
-        scanText: runState.lastScanText,
-        depth: settings().messageDepth,
-        pluginFP: runState.pluginFP,
-        sourceFP: runState.sourceFP,
-        chat: chatFilePath(),
-        book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
-        index: primaryBook ? vectorIndexPath(primaryBook) : '',
-        primaryBook,
-        embedModel: vectorRequestBody().model || '',
-        params: captureParams(settings(), {
-            caseSensitive: world_info_case_sensitive,
-            wholeWords: world_info_match_whole_words,
-            includeNames: world_info_include_names,
-        }),
-        snapshot: paramSnapshot(),
-        candidates: rows,
-        books,
-        bookMode,
-        priority: (scopedPriority() ?? []).map(x => x.cfg),
-        grades,
-        cutoff: {
-            // What the LIVE settings would have done — the configuration being assessed.
-            live,
-            // What this grading run actually used, and how many rows the grader was therefore shown. The
-            // harness must not evaluate a cutoff that keeps more than gradedCandidates.
-            gradingOverride: { mode: 'count', maxVectorEntries: wanted },
-            kept: runState.lastCutKept ?? null,
-            minVectorEntries: settings().minVectorEntries,
-            elbowSensitivity: settings().elbowSensitivity,
-            dropoffThreshold: settings().dropoffThreshold,
-        },
-        gradedCandidates: gradeable.length,
-        now: new Date().toISOString().slice(0, 10),
-    });
-
-    const { filename, content } = sampleFile(sample);
-    download(content, filename, 'application/json');
-    const graded = grades.filter(g => g.grade > 0).length;
-    toastr.success(`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
-    console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) at fidelity "${bookMode}"`, sample);
-
-    return '';
-}
-
-/**
- * The arms /wa-super-grade captures: configurations that change WHICH ENTRIES GET SURFACED.
- *
- * NOT a grid, and deliberately not a complete one. An arm's only job is to put entries into the judged pool
- * that the shipped configuration never surfaces, because an unjudged entry scores 0 and any configuration
- * that promotes it is penalised for surfacing something nobody looked at. That is pool bias, and it is what
- * makes a defaults review scored against a single capture's pool indefensible.
- *
- * SO MOST PARAMETERS DO NOT BELONG HERE. k1, b, lexicalWeight, rrfK, properNounBoost, stopwordDocFreq and
- * every cutoff mode are re-derived offline by graded-scene-grid.mjs from the frozen query and the embedded
- * books, over whatever pool exists — running them live would cost an embed and a full WI scan each and return
- * a near-identical population. messageDepth is likewise ablatable from `queryChat`. What earns an arm is
- * being unable to compute the population offline:
- *
- *   no-filter   entityFilter off moves the surviving query terms, so it moves BM25, the retrieval ranking,
- *               and what the cut keeps.
- *   vector      \ retrievalMode changes which signal orders the candidates, so a different set survives
- *   lexical     / into the top of the ranking.
- *   loose-thr   scoreThreshold gates whether a chunk is admitted at all — the one knob that can add entries
- *               no reordering could reach.
- *   keys-live   suppressVectorKeys off lets ST CORE keyword-match vectorized entries. Core's activation
- *               (secondary keys, inclusion groups, recursion, min-activations, probability rolls) is the one
- *               thing this project cannot recompute offline at all, so it can only be sampled live.
- *   summary     queryMode 'summary' asks a model for the query text. Not reproducible from a frozen sample
- *               by construction, and it retrieves against genuinely different text.
- *
- * ARM COUNT IS NOT A DESIGN CONSTANT. Add an entry here whenever graded-scene-grid.mjs reports a
- * configuration whose top rows are not fully judged; that number is the stopping rule, not this list's
- * length. `arms=` runs a subset when a round only needs to close one gap.
- */
-const POOL_ARMS = {
-    shipped: {},
-    'no-filter': { entityFilter: false },
-    vector: { retrievalMode: 'vector' },
-    lexical: { retrievalMode: 'lexical' },
-    'loose-thr': { scoreThreshold: 0 },
-    'keys-live': { suppressVectorKeys: false },
-    summary: { queryMode: 'summary' },
-};
-
-/**
- * Runs one debug capture under temporarily-overridden settings.
- *
- * The override is a plain assign-and-restore over the live settings object: every module reads through
- * `settings()` at call time, so this reaches the whole pipeline without a parallel injection path, and
- * nothing in the retrieval or scan path calls saveSettingsDebounced, so nothing persists. captureParams and
- * paramSnapshot are read INSIDE the window — they must describe the arm, not the restored baseline.
- *
- * ponytail: the override is live across awaits, so a real generation firing mid-capture would use the arm's
- * settings. Acceptable for a dev eval command driven by hand; the fix if it ever bites is a per-run settings
- * object threaded through retrieve(), which is a much larger change than this feature justifies.
- *
- * @param {object} overrides Settings to force for this run
- * @param {number} wanted Candidate depth (the cut is widened to a plain count, as /wa-grade does)
- * @returns {Promise<object>} The capture: rows, entries, and everything the sample needs to freeze it
- */
-async function captureArm(overrides, wanted) {
-    const s = settings();
-    const saved = {};
-    for (const k of Object.keys(overrides)) saved[k] = s[k];
-    Object.assign(s, overrides);
-    runState.gradeCutoff = { mode: 'count', maxVectorEntries: wanted };
-
-    try {
-        await dryRun(true);
-        return {
-            rows: runState.lastCandidates ?? [],
-            entries: runState.lastCandidateEntries ?? [],
-            query: runState.lastQuery,
-            queryChat: runState.lastQueryChat,
-            scanText: runState.lastScanText,
-            depth: s.messageDepth,
-            params: captureParams(s, {
-                caseSensitive: world_info_case_sensitive,
-                wholeWords: world_info_match_whole_words,
-                includeNames: world_info_include_names,
-            }),
-            snapshot: paramSnapshot(),
-            // What this arm's own settings would have cut to, had the grading override not widened it.
-            live: { mode: s.vectorCutoff, maxVectorEntries: s.maxVectorEntries },
-            kept: runState.lastCutKept ?? null,
-            minVectorEntries: s.minVectorEntries,
-            elbowSensitivity: s.elbowSensitivity,
-            dropoffThreshold: s.dropoffThreshold,
-        };
-    } finally {
-        Object.assign(s, saved);
-        runState.gradeCutoff = null;
-    }
-}
-
-/**
- * Captures several arms, unions what they surfaced, and grades only what no earlier round has judged.
- *
- * WHY NOT JUST RUN /wa-grade N TIMES. Two reasons, and the second is the load-bearing one. The arms overlap
- * heavily, so N separate gradings re-judge the same entries N times. And more importantly a pool assembled
- * from one configuration systematically penalises every configuration far from it (see POOL_ARMS), so the
- * defaults review the pool is meant to support cannot be run against it.
- *
- * Round 2 onwards, load the previous round's samples into the file picker: those grades are subtracted, so
- * only genuinely new entries need a human, and the written samples carry the accumulated grade set. That is
- * what lets the arm list grow without the grading cost growing with it.
- *
- * Writes ONE SAMPLE PER ARM, each with its own captureParams, its own candidate rows and its own recorded
- * cutoff — a merged row would carry one arm's signals under another's parameters. They share only the grades.
- *
- * Books default to 'full' despite N samples meaning N copies. 'meta' is lossless for how the harness scores
- * TODAY and 20x smaller, which made it the obvious default — until the samples started being things other
- * people send you. A sample is only re-scorable by someone who has the vector index, and nobody but the
- * author does; what makes a third-party dump usable is REBUILDING the index from the sample, which needs
- * entry content (plus the chunk params in paramSnapshot and the recorded embedModel, both already carried).
- * 'meta' drops content and so permanently forecloses that. Size is recoverable later; a dump captured at
- * 'meta' is not.
- *
- * @param {object} named Named args: name, books, candidates, arms, notes
- * @returns {Promise<string>} Empty string — output is downloaded files
- */
-/**
- * The super-grade grading popup, extracted so /wa-super-grade (live captures) and /wa-super-eval (a graded
- * file, no chat required) share one shell: query blocks, prior loading, the editable union table, and the
- * merged-grade result. Callers own what happens to the grades afterwards.
- *
- * @param {object} args
- * @param {Array<{arm: string, rows: object[], entries: object[], query: string, depth?: number|string}>} args.captures Per-arm captures
- * @param {{rows: object[], entries: object[]}} args.union unionArms() output over those captures
- * @param {(world: string, uid: number) => object|undefined} args.entryOf Entry resolver for the text viewer
- * @param {object[]} [args.prior] Pre-loaded prior grades (pre-filled, editable)
- * @param {string} [args.subtitle] Extra context line under the title (escaped here)
- * @param {string} [args.okButton] Confirm-button label
- * @returns {Promise<{grades: object[], prior: object[]}|null>} Merged grades, or null on cancel
- */
-async function superGradePopup({ captures, union, entryOf, prior: prior0 = [], subtitle = '', okButton = 'Save samples' }) {
-    const esc = s => escapeHtml(String(s ?? ''));
-    let prior = [...prior0];
-
-    const wrap = document.createElement('div');
-    const head = document.createElement('div');
-    const body = document.createElement('div');
-    wrap.append(head, body);
-
-    // THE QUERY TEXT THE MACHINE ACTUALLY MATCHED ON. Grading drifts without it: the human remembers the
-    // scene, but relevance was decided against this text, and the two diverge (a scene's emotional centre is
-    // often a paragraph the query window never reached). Grouped by distinct text rather than shown once,
-    // because the arms do NOT share a query — the summary arm retrieves against model-written text while the
-    // rest use raw messages, and an entry can be a fair hit for one and a miss for the other.
-    const byQuery = new Map();
-    for (const cap of captures) {
-        if (!cap.query) continue;
-        const hit = byQuery.get(cap.query) ?? [];
-        hit.push(cap.arm);
-        byQuery.set(cap.query, hit);
-    }
-    const queryBlocks = [...byQuery.entries()].map(([text, arms]) => {
-        const label = byQuery.size === 1 ? 'Query text — what retrieval actually matched on' : `Query text (${esc(arms.join(', '))})`;
-        return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${label} `
-            + `(${text.length} chars, depth ${captures[0].depth})</summary>`
-            + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
-    }).join('');
-
-    head.innerHTML = '<h3 style="margin:0 0 0.25em;">Grade this scene — pooled across arms</h3>'
-        + `${subtitle ? `<small style="display:block;opacity:0.7;margin-bottom:0.25em;">${esc(subtitle)}</small>` : ''}`
-        + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${gradeAnchorLine()} ${union.rows.length} distinct entries from ${captures.length} arm(s): ${esc(captures.map(c => c.arm).join(', '))}.</small>`
-        + queryBlocks
-        + `${byQuery.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${byQuery.size} arms retrieved against different text — judge relevance to the SCENE, not to any one query.</small>` : ''}`
-        // A bare <input type="file"> inherits nothing from ST's theme and reads as a paragraph of text, so it
-        // went unnoticed. Drive it from a real menu_button instead, and keep a PERSISTENT status line: a
-        // toast that has already faded is no way to confirm the priors loaded, and grading a round without
-        // them silently means re-judging everything the last round already covered.
-        + '<div style="margin:0.6em 0;display:flex;align-items:center;gap:0.6em;flex-wrap:wrap;">'
-        + '<div class="menu_button wa-sg-pick" style="width:auto;padding:0.3em 0.8em;">Load earlier samples / pool requests…</div>'
-        + `<small class="wa-sg-loaded" style="opacity:0.7;">${prior0.length ? `${prior0.length} grade(s) pre-loaded, shown in the table` : 'nothing loaded — grading everything from scratch'}</small>`
-        + '<input type="file" class="wa-sg-prior" accept=".json,application/json" multiple style="display:none;">'
-        + '</div>'
-        + '<small style="display:block;opacity:0.6;margin-bottom:0.5em;">Earlier rounds\' samples: their grades are subtracted so you only judge what is new. Pool requests from eval/pool-extend.mjs: their entries are added.</small>';
-
-    // Repaint rather than patch: loading priors changes which rows are gradeable at all. Only grades the
-    // user actually EDITED (data-dirty, set below) are carried across — every row is an input now, so
-    // carrying pristine "0"s would shadow the prior grades a freshly loaded file is supposed to pre-fill.
-    const paint = () => {
-        const typed = new Map([...body.querySelectorAll('.wa-grade')].filter(i => i.dataset.dirty).map(i => [i.dataset.key, i.value]));
-        const { fresh, known, priorOf } = splitGraded(union.rows, prior);
-
-        body.innerHTML = `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${fresh.length} to grade`
-            + `${known.length ? `; ${known.length} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)` : ''}.</small>`
-            + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr style="text-align:left;">'
-            + '<th style="width:4em;">Grade</th><th>Entry</th><th style="width:9em;">surfaced by</th><th style="width:4em;">best#</th><th style="width:4em;">cos</th><th style="width:4em;">text</th><th style="width:4em;">keys</th><th style="width:4em;"></th></tr></thead><tbody>'
-            + union.rows.map((row, i) => {
-                const key = rowKey(row);
-                const num = n => (n == null ? '·' : String(n));
-                const done = priorOf.has(key);
-                // Prior rows are inputs too, pre-filled with the (remapped) earlier grade: an edit re-emits
-                // the row as a fresh grade and mergeGrades is last-wins, so the edit overrides the prior.
-                // A carried-over edit stays dirty across repaints, or the next repaint would revert it.
-                const cell = `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(key) : '0'))}" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
-                return `<tr style="border-top:1px solid var(--SmartThemeBorderColor);${done ? 'opacity:0.55;' : ''}">`
-                    + `<td>${cell}</td>`
-                    + `<td>${esc(row.title)}<br><small style="opacity:0.5;">${esc(row.world)} · uid ${num(row.uid)}</small></td>`
-                    // Which arms surfaced a row is the pooling diagnostic: rows only one arm found are where
-                    // the overlap assumption is failing, and they are why that arm is in the list.
-                    + `<td><small style="opacity:0.7;">${esc(row.arms.join(', '))}</small></td>`
-                    + `<td>${num(row.bestRank)}</td><td>${num(row.cosine)}</td><td>${num(row.text)}</td><td>${num(row.keys)}</td>`
-                    + `<td><button class="menu_button wa-viewtext" data-i="${i}" style="padding:2px 6px;font-size:0.85em;">text</button></td></tr>`;
-            }).join('')
-            + '</tbody></table>';
-
-        body.querySelectorAll('.wa-viewtext').forEach(button => button.addEventListener('click', event => {
-            event.preventDefault();
-            const entry = union.entries[Number(button.dataset.i)];
-            if (entry) showEntryText(entry);
-        }));
-        // A user edit marks the input dirty; only dirty values survive a repaint (see `typed` above).
-        body.querySelectorAll('.wa-grade').forEach(input => input.addEventListener('input', () => { input.dataset.dirty = '1'; }));
-    };
-
-    head.querySelector('.wa-sg-pick').addEventListener('click', () => head.querySelector('.wa-sg-prior').click());
-    head.querySelector('.wa-sg-prior').addEventListener('change', async event => {
-        const loaded = [];
-        let added = 0;
-        const names = [];
-        for (const file of event.target.files ?? []) {
-            try {
-                const parsed = JSON.parse(await file.text());
-                // Two shapes through one picker: a previous round's sample/bundle (subtract its grades) or an
-                // offline pool request (ADD its entries). Told apart by which array is present.
-                if (Array.isArray(parsed?.pending)) {
-                    for (const row of parsed.pending) {
-                        const key = rowKey(row);
-                        if (union.rows.some(r => rowKey(r) === key)) continue;
-                        const entry = entryOf(row.world, row.uid);
-                        union.rows.push({
-                            title: entry?.comment || row.title, world: row.world, uid: row.uid,
-                            block: 'dynamic', sticky: 0, score: null, cosine: null, text: null, keys: null,
-                            // Labelled so the grader can see this row came from a rebuilt index rather than a
-                            // live arm — it is being judged for a configuration this machine isn't running.
-                            arms: [`offline: ${(row.doses ?? []).length || '?'} dose(s)`],
-                            bestRank: row.bestRank ?? null,
-                        });
-                        union.entries.push(entry);
-                        added++;
-                    }
-                } else if (Array.isArray(parsed?.grades)) {
-                    // Remaps legacy 0-5 grades to the 0-4 scale (no-op on current-scale files), so the
-                    // pre-filled inputs below show the value that will actually be saved.
-                    loaded.push(...normalizeSample(parsed).grades);
-                } else {
-                    toastr.warning(`${file.name} has neither "grades" nor "pending" — ignored`, 'Worlds Apart');
-                    continue;
-                }
-                names.push(file.name);
-            } catch {
-                toastr.warning(`Could not parse ${file.name} — ignored`, 'Worlds Apart');
-            }
-        }
-        prior = mergeGrades(prior, loaded);
-        head.querySelector('.wa-sg-loaded').textContent = names.length
-            ? `${names.length} file(s): ${prior.length} prior grade(s)${added ? `, ${added} entry(ies) requested offline` : ''}`
-            : 'no usable files — nothing loaded';
-        toastr.info(`${prior.length} prior grade(s)${added ? `, ${added} entr(y/ies) requested offline` : ''}`, 'Worlds Apart', { timeOut: 3000 });
-        paint();
-    });
-
-    paint();
-
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton, cancelButton: 'Cancel', large: true, wide: true, allowVerticalScrolling: true });
-    if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
-        return null;
-    }
-
-    const fresh = [...body.querySelectorAll('.wa-grade')].map(input => {
-        const row = union.rows[Number(input.dataset.i)];
-        return { title: row.title, grade: Number(input.value) || 0, world: row.world, uid: row.uid };
-    });
-    return { grades: mergeGrades(prior, fresh), prior };
-}
-
-async function superGradeScene(named) {
-    const bookMode = String(named?.books ?? 'full').toLowerCase();
-    if (!['full', 'meta', 'none'].includes(bookMode)) {
-        toastr.warning('books= must be full, meta or none', 'Worlds Apart');
-        return '';
-    }
-    // Sharable dumps need content to be re-indexable by anyone but their author (see above), so a downgrade
-    // is allowed but never silent.
-    if (bookMode !== 'full') {
-        toastr.warning(`books=${bookMode} drops entry content, so nobody without your vector index can re-score these samples`, 'Worlds Apart', { timeOut: 8000 });
-    }
-
-    const wanted = Math.max(1, Number(named?.candidates ?? 30));
-    const picked = String(named?.arms ?? '').trim()
-        ? String(named.arms).split(/[,\s]+/).filter(Boolean)
-        : Object.keys(POOL_ARMS);
-    const unknown = picked.filter(a => !POOL_ARMS[a]);
-    if (unknown.length) {
-        toastr.warning(`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'Worlds Apart');
-        return '';
-    }
-
-    const captures = [];
-    for (const [n, arm] of picked.entries()) {
-        toastr.info(`Arm ${n + 1}/${picked.length}: ${arm}`, 'Worlds Apart', { timeOut: 2500 });
-        // Sequential, not Promise.all: the arms share one live settings object and one retrieval pipeline.
-        const cap = await captureArm(POOL_ARMS[arm], wanted);
-        if (!cap.rows.length) {
-            console.warn(`Worlds Apart: arm "${arm}" activated nothing — skipped`);
-            continue;
-        }
-        // Keyword-only under this arm: a sample without a query can't be scored offline (see gradeScene).
-        if (!cap.query) {
-            console.warn(`Worlds Apart: arm "${arm}" retrieved nothing (no query to freeze) — skipped`);
-            continue;
-        }
-        captures.push({ arm, ...cap });
-    }
-
-    if (!captures.length) {
-        toastr.warning('No arm activated anything — nothing to grade.', 'Worlds Apart');
-        return '';
-    }
-
-    const union = unionArms(captures);
-    if (!union.rows.length) {
-        toastr.warning('Every activated row was constant/sticky — relevance chose nothing to grade.', 'Worlds Apart');
-        return '';
-    }
-
-    // Loaded BEFORE the popup, not after: an offline pool request names entries no arm surfaced, so the
-    // grading table has to resolve them from the book to show their text.
-    const books = {};
-    for (const world of runState.attachedWorlds) {
-        const data = await loadWorldInfo(world);
-        if (data?.entries) {
-            books[world] = trimBook(data.entries, bookMode);
-        }
-    }
-    const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
-
-    const done = await superGradePopup({ captures, union, entryOf });
-    if (!done) {
-        return '';
-    }
-    const { grades, prior } = done;
-
-    const base = named?.name || defaultSampleName();
-    const built = [];
-    for (const cap of captures) {
-        // Per arm, because a lexical-only arm can retrieve from a different book than the hybrid one — and the
-        // harness loads exactly one collection, so getting this wrong keys a sample to a collection that
-        // contributed nothing.
-        const primaryBook = searchedBook(cap.rows) ?? chatBook() ?? Object.keys(books)[0] ?? '';
-        const sample = buildSample({
-            name: `${base}--${cap.arm}`,
-            notes: named?.notes || `Arm "${cap.arm}" of a ${captures.length}-arm pooled grading (${captures.map(c => c.arm).join(', ')}); ${grades.length} grades pooled across arms and rounds.`,
-            query: cap.query,
-            queryChat: cap.queryChat,
-            scanText: cap.scanText,
-            depth: cap.depth,
-            pluginFP: runState.pluginFP,
-            sourceFP: runState.sourceFP,
-            chat: chatFilePath(),
-            book: primaryBook ? `data/default-user/worlds/${primaryBook}.json` : '',
-            index: primaryBook ? vectorIndexPath(primaryBook) : '',
-            primaryBook,
-            embedModel: vectorRequestBody().model || '',
-            params: cap.params,
-            snapshot: cap.snapshot,
-            candidates: cap.rows,
-            books,
-            bookMode,
-            priority: (scopedPriority() ?? []).map(x => x.cfg),
-            grades,
-            cutoff: {
-                live: cap.live,
-                gradingOverride: { mode: 'count', maxVectorEntries: wanted },
-                kept: cap.kept,
-                minVectorEntries: cap.minVectorEntries,
-                elbowSensitivity: cap.elbowSensitivity,
-                dropoffThreshold: cap.dropoffThreshold,
-            },
-            // Every non-scaffolding row of every arm is in the union, and the union is graded in full — so
-            // unlike /wa-grade this is an exact count of judged rows rather than a conservative proxy.
-            gradedCandidates: cap.rows.filter(r => !isScaffolding(r)).length,
-            now: new Date().toISOString().slice(0, 10),
-        });
-        built.push({ arm: cap.arm, sample });
-    }
-
-    // ONE download. The arms share the grades and — overwhelmingly the bulk of the bytes — the embedded book
-    // copies, so N files meant N browser download prompts and N duplicates of a 300-entry lorebook.
-    const bundle = bundleSamples(built);
-    const { filename, content } = sampleFile({ ...bundle, name: base });
-    download(content, filename, 'application/json');
-    console.log(`Worlds Apart: ${built.length}-arm bundle -> ${filename}`, bundle);
-
-    const above = grades.filter(g => g.grade > 0).length;
-    toastr.success(
-        `Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0. `
-        + 'Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.',
-        'Worlds Apart', { timeOut: 12000 },
-    );
-    return '';
-}
-
-/** Opens the browser file picker for one JSON file. Resolves null when the user cancels. */
-const pickJsonFile = () => new Promise(resolve => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json,application/json';
-    input.addEventListener('change', () => resolve(input.files?.[0] ?? null), { once: true });
-    input.addEventListener('cancel', () => resolve(null), { once: true });
-    input.click();
-});
-
-/**
- * /wa-super-eval — chat-independent review of a graded sample/bundle: the super-grade shell, fed entirely
- * from the file. Nothing live is read — no chat, no attached books, no settings — so a scene captured
- * offline (or by someone else, or by an LLM judge) can be reviewed without loading the chat it came from.
- * Entry text resolves from the bundle's embedded books, the stored grades arrive pre-filled and editable
- * (legacy 0-5 remapped on load), and Save downloads the SAME bundle with only `grades`/`gradeScale`
- * updated — arms, captures, params and books are preserved untouched.
- */
-async function superEvalScene() {
-    const file = await pickJsonFile();
-    if (!file) {
-        return '';
-    }
-    let manifest;
-    try {
-        manifest = JSON.parse(await file.text());
-    } catch {
-        toastr.warning(`Could not parse ${file.name}`, 'Worlds Apart');
-        return '';
-    }
-    const armsRaw = Array.isArray(manifest?.arms) ? manifest.arms : (Array.isArray(manifest?.candidates) ? [manifest] : []);
-    if (!armsRaw.length || !Array.isArray(manifest?.grades)) {
-        toastr.warning(`${file.name} is not a graded sample/bundle (needs "grades" and captured candidates)`, 'Worlds Apart');
-        return '';
-    }
-
-    const books = manifest.books ?? {};
-    const entryOf = (world, uid) => Object.values(books[world] ?? {}).find(e => Number(e.uid) === Number(uid));
-    const captures = armsRaw.map(a => ({
-        arm: a.arm ?? manifest.name ?? 'capture',
-        rows: a.candidates ?? [],
-        entries: (a.candidates ?? []).map(r => entryOf(r.world, r.uid) ?? null),
-        query: a.query ?? '',
-        depth: a.depth ?? manifest.depth ?? '?',
-    }));
-    const union = unionArms(captures);
-    if (!union.rows.length) {
-        toastr.warning('No gradeable candidate rows in this file.', 'Worlds Apart');
-        return '';
-    }
-
-    const done = await superGradePopup({
-        captures,
-        union,
-        entryOf,
-        prior: normalizeSample(manifest).grades,
-        subtitle: `Reviewing ${file.name} (${manifest.createdBy ?? 'unknown grader'}) — loaded from file, no chat required.`,
-        okButton: 'Save updated bundle',
-    });
-    if (!done) {
-        return '';
-    }
-
-    // Same bundle out, grades swapped — never rebuilt, so captures/params/books stay byte-identical.
-    // ONE file carries both raters: `grade` is authoritative (the harness scores it; this review edits it),
-    // `llmGrade` is the LLM judge's original, preserved across reviews for IRR. The shell's fresh rows drop
-    // extra fields, so llmGrade is re-attached here from the loaded manifest.
-    const llmOf = new Map(manifest.grades.filter(g => g.llmGrade !== undefined).map(g => [rowKey(g), g.llmGrade]));
-    const grades = done.grades.map(g => (llmOf.has(rowKey(g)) ? { ...g, llmGrade: llmOf.get(rowKey(g)) } : g));
-    const updated = { ...manifest, grades, gradeScale: 4 };
-    const { filename, content } = sampleFile(updated);
-    download(content, filename, 'application/json');
-    const rel = grades.filter(g => g.grade >= 3).length;
-    // When both raters are present, the save toast doubles as the agreement report.
-    const both = grades.filter(g => g.llmGrade !== undefined);
-    const irr = both.length
-        ? ` LLM agreement: ${both.filter(g => g.grade === g.llmGrade).length}/${both.length} exact, ${both.filter(g => Math.abs(g.grade - g.llmGrade) <= 1).length}/${both.length} within 1.`
-        : '';
-    toastr.success(`Saved ${filename} — ${grades.length} grades, ${rel} relevant (>=3).${irr} Replace the old file in eval/eval-data/.`, 'Worlds Apart', { timeOut: 10000 });
-    return '';
-}
-
-/**
- * Resolves the token budget from the percentage and absolute settings.
- * Both are optional and both apply; the tighter one wins. 0 means no token budget.
- * @returns {number} Effective budget in tokens
- */
+/** The token budget from the percentage and absolute settings; both apply and the tighter wins, 0 = none. */
 function effectiveTokenBudget() {
     const percent = Number(settings().maxTokensPercent) || 0;
     const absolute = Number(settings().maxTokens) || 0;
@@ -2471,385 +1718,146 @@ function effectiveTokenBudget() {
     return limits.length ? Math.min(...limits) : 0;
 }
 
-/**
- * Applies the entry and token caps.
- *
- * The populations are nested — vector ⊆ dynamic ⊆ all — so these are three constraints
- * on one walk rather than three competing policies, and none of them changes what
- * another means. Any cap at 0 is off.
- *
- *   maxDynamic  caps keyword and vector entries; constants and stickies are unaffected
- *   maxTotal    caps everything, so constants consume it before the dynamic entries
- *   maxTokens   caps context usage, which is only meaningful over everything
- *
- * `ranked` must walk stickies and constants first, which makes every cap a prefix cut:
- * once the dynamic count is used up there is nothing but dynamic entries left to reject.
- * Leaving maxTotal at 0 is what guarantees an always-on entry is never dropped.
- *
- * Entries marked ignoreBudget are outside the budgeted population entirely — neither
- * capped nor counted — so the entry caps read as "this many on top of the mandatory
- * ones". They do still spend tokens; see the note at the accounting.
- *
- * @param {object} args Budget arguments
- * @returns {Promise<{survivors: Set, counted: number, dropped: number, budgeted: number, inPrompt: number}>}
- */
-async function applyBudget({ ranked, isDynamic, maxTokens, maxTotal, maxDynamic, tokensOf, capOf = () => 0, exemptIsBudgeted = true, slack = 0, slackOnce = true }) {
-    const survivors = new Set();
-    let counted = 0;
-    let dynamic = 0;
-    // Per-book quota: a ceiling on how many dynamic entries each book may contribute, so a
-    // relevance flood in one book can't crowd the others out. Counts dynamic only — a book's
-    // constants are always-on and not subject to it, same as maxDynamic.
-    const perWorld = new Map();
-    // budgeted: tokens the caps enforce against. inPrompt: tokens actually reaching the
-    // prompt. They diverge when exempt entries are not budgeted, and conflating them is
-    // how a cap ends up reporting a ceiling the prompt has already gone through.
-    //
-    // Deliberately no spend/charge/cost vocabulary here: the only thing that literally
-    // costs anything is the API call, and these numbers are not that. They count World
-    // Info tokens only — no chat, system prompt, persona or examples.
-    let budgeted = 0;
-    let inPrompt = 0;
-    let slackSpent = false;
-    let lastAdmitted = -1;
-    let index = -1;
-    const skipped = [];
 
-    const ceiling = maxTokens > 0 ? maxTokens * (1 + slack) : 0;
-
-    for (const item of ranked) {
-        index += 1;
-        const itemTokens = await tokensOf(item);
-        const exempt = Boolean(item.entry.ignoreBudget);
-
-        // An entry over the budget but within the slack is admitted anyway, so the
-        // entry genuinely next in line keeps the last slot instead of yielding it to
-        // whatever happens to be small enough to squeeze in.
-        const pastBudget = maxTokens > 0 && budgeted + itemTokens > maxTokens;
-        const rescuable = pastBudget
-            && slack > 0
-            && budgeted + itemTokens <= ceiling
-            && !(slackOnce && slackSpent);
-
-        // Every cap that would reject this entry, not just the first — an entry blocked
-        // by two caps needs both raised, and reporting one sends the user round twice.
-        const blockedBy = [];
-
-        if (pastBudget && !rescuable) {
-            blockedBy.push({
-                cap: 'tokens',
-                // What it would take to admit this entry: the extra budget, or the slack
-                // percentage that would have covered the overhang.
-                shortfall: budgeted + itemTokens - maxTokens,
-                slackNeeded: Math.ceil(((budgeted + itemTokens) / maxTokens - 1) * 100),
-                slackSpent: slackSpent && slack > 0,
-                remaining: Math.max(0, maxTokens - budgeted),
-            });
-        }
-        if (maxTotal > 0 && counted >= maxTotal) {
-            blockedBy.push({ cap: 'total', shortfall: 1 });
-        }
-        if (maxDynamic > 0 && isDynamic(item) && dynamic >= maxDynamic) {
-            blockedBy.push({ cap: 'dynamic', shortfall: 1 });
-        }
-        const bookCap = capOf(item);
-        if (bookCap > 0 && isDynamic(item) && (perWorld.get(item.entry?.world) ?? 0) >= bookCap) {
-            blockedBy.push({ cap: 'book', shortfall: 1, world: item.entry?.world, limit: bookCap });
-        }
-
-        // Skip rather than stop. An entry too big for the remaining tokens shouldn't
-        // bar the smaller ones behind it, and stopping early would mean an entry marked
-        // ignoreBudget never gets reached — which is the one thing that flag promises.
-        if (blockedBy.length && !exempt) {
-            skipped.push({ item, tokens: itemTokens, blockedBy, index });
-            continue;
-        }
-
-        // An entry that can't be cut isn't part of the population being budgeted, so it
-        // stays out of the denominator too. Counting it would mean 10 ignoreBudget
-        // entries against a cap of 10 silently returns zero retrieval results — a total
-        // failure whose cause is a flag on ten unrelated entries. Not counting it means
-        // you asked for 10 and got 20, which is visible and proportional.
-        //
-        // Tokens are the exception by default: they are a real resource with a real
-        // consequence, so a mandatory entry's tokens still come off the top and squeeze
-        // what fits below. Turning that off makes exemption total.
-        if (rescuable) {
-            slackSpent = true;
-        }
-
-        if (!exempt || exemptIsBudgeted) {
-            budgeted += itemTokens;
-        }
-
-        inPrompt += itemTokens;
-
-        if (!exempt) {
-            counted += 1;
-            if (isDynamic(item)) {
-                dynamic += 1;
-                perWorld.set(item.entry?.world, (perWorld.get(item.entry?.world) ?? 0) + 1);
-            }
-        }
-
-        survivors.add(item);
-        lastAdmitted = index;
-    }
-
-    // Two different situations wear the same rejection. If something was admitted after
-    // an entry was rejected, the budget still had usable room and that entry simply did
-    // not fit — shortening it would work. If nothing after it got in, it is the tail of
-    // an exhausted budget, where per-entry advice is noise and only the cap matters.
-    for (const skip of skipped) {
-        skip.tail = skip.index > lastAdmitted;
-    }
-
-    return { survivors, counted, skipped, dropped: ranked.length - survivors.size, budgeted, inPrompt };
-}
-
-// Entry selection (count/elbow/dropoff cutoff) lives in selection.mjs; inject the cutoff settings.
-// Rationale/benchmarks are documented there.
-/**
- * The cutoff in force. Normally the settings; during a /wa-grade run, a deliberately wide `count` so the
- * grader sees enough candidates to judge the OTHER cutoff modes offline.
- *
- * Why widening matters: the cutoff decides which retrieved entries are force-activated, so it decides which
- * rows reach the candidates table and therefore which rows can be graded. Offline, an ungraded row scores 0,
- * so evaluating a cutoff that would keep MORE than the capture kept silently charges it for rows the grader
- * never saw. A sample captured at count/10 cannot fairly assess an elbow that wants 14.
- *
- * Read through a holder rather than by mutating settings(): settings persist, and a throw mid-run would
- * leave the user's real cutoff changed behind their back.
- * @returns {{mode: string, maxVectorEntries: number}} Effective cutoff
- */
-function effectiveCutoff() {
-    return runState.gradeCutoff ?? { mode: settings().vectorCutoff, maxVectorEntries: settings().maxVectorEntries };
-}
-
-const cutRetrieved = (ranked) => {
-    const { mode, maxVectorEntries } = effectiveCutoff();
-    return selection.cutRetrieved(ranked, {
-        mode,
-        maxVectorEntries,
-        minVectorEntries: settings().minVectorEntries,
-        elbowSensitivity: settings().elbowSensitivity,
-        dropoffThreshold: settings().dropoffThreshold,
-    });
-};
-
-/**
- * Summarizes the current chat and scores the result, so the summary prompt can be
- * tuned against retrieval quality directly. Activates nothing.
- * @returns {Promise<string>} Empty string — output goes to the console
- */
-async function probeSummary() {
-    const chat = getContext().chat ?? [];
-    const rawText = buildQuery(chat);
-
-    if (!rawText) {
-        toastr.warning('No chat to summarize.', 'Worlds Apart');
-        return '';
-    }
-
-    const summary = await summarizeQuery(rawText);
-
-    console.log(`Worlds Apart: summary (${summary.length} chars):\n%c${summary}`, 'color: #6cf');
-
-    if (summary === rawText) {
-        console.warn('Worlds Apart: summarization returned the raw text — it failed, see the error above');
-        return '';
-    }
-
-    await probeQuery(null, summary, { unfiltered: true });
-    return '';
-}
-
-// ---------------------------------------------------------------------------
 // Settings UI
-// ---------------------------------------------------------------------------
 
 const SETTINGS_HTML = `
 <style>
 /* Nested WA sub-sections read as subordinate to the top "Worlds Apart" header: indented, lighter,
    smaller, with a left rule — so they don't look like their own top-level drawers. */
-.worlds-apart-settings .wa-section { margin-left: 10px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-left: 8px; }
+.worlds-apart-settings .wa-section { margin-left: 12px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-left: 8px; }
+/* Every item under the top header is indented the same as a section is, so top-level and section items read as one level each. */
+.worlds-apart-settings > .inline-drawer > .inline-drawer-content > :not(.wa-section) { margin-left: 12px; }
+.worlds-apart-settings .checkbox_label { margin-left: 0; }
+.worlds-apart-settings .checkbox_label input[type="checkbox"] { margin-left: 0; }
+.worlds-apart-settings .wa-section > .inline-drawer-content { padding-bottom: 10px; }
+.worlds-apart-settings { padding-bottom: 10px; }
+/* The enable state as a switch; still a checkbox underneath, so bind() reads it unchanged. */
+.worlds-apart-settings .checkbox_label:has(input.wa-switch) { align-items: center; }
+.worlds-apart-settings input.wa-switch { appearance: none; -webkit-appearance: none; display: inline-block; width: 34px; height: 18px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 28%, var(--SmartThemeBlurTintColor, #222)); position: relative; cursor: pointer; vertical-align: middle; margin: 5px 0 0; transition: background 0.15s; }
+/* ST paints its tick in ::before with a scaled box-shadow and a clip-path; every one of those is reset so the knob is what shows. */
+.worlds-apart-settings input.wa-switch::before, .worlds-apart-settings input.wa-switch:checked::before { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--SmartThemeBodyColor, #fff); outline: 1px solid color-mix(in srgb, var(--SmartThemeBlurTintColor, #222) 60%, transparent); box-shadow: none; clip-path: none; transform: none; transition: left 0.15s; }
+.worlds-apart-settings input.wa-switch:checked { background: color-mix(in srgb, var(--SmartThemeQuoteColor, #7aa2f7) 70%, var(--SmartThemeBlurTintColor, #222)); }
+.worlds-apart-settings input.wa-switch:checked::before { left: 18px; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
+.worlds-apart-settings small.opacity50p { display: block; margin: 0.15em 0 0.8em; }
+.worlds-apart-settings .wa-section > .inline-drawer-content { margin-left: 12px; }
+.worlds-apart-settings .wa-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
+.worlds-apart-settings .wa-row label { margin: 0; }
+.worlds-apart-settings .wa-row input { width: 6em; flex: 0 0 auto; }
 </style>
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>Worlds Apart</b>
+            <b data-i18n="Worlds Apart">Worlds Apart</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
             <div id="wa_plugin_alert"></div>
-            <label class="checkbox_label" for="wa_enabled">
-                <input id="wa_enabled" type="checkbox"><span>Enabled</span>
-            </label>
-            <label>Prompt insertion order</label>
-            <small class="opacity50p">How WA lays out the entries it selected, in every prompt. Pick a base sort and, optionally, tiered grouping. (The Studio's sort views reuse this control but are per-session; this one is saved.)</small>
+            <div class="flex-container alignItemsCenter">
+                <label class="checkbox_label" for="wa_enabled">
+                    <input id="wa_enabled" type="checkbox" class="wa-switch"><span data-i18n="Enabled">Enabled</span>
+                </label>
+                <small id="wa_version" style="opacity:0.55;margin-left:6px;"></small>
+            </div>
+            <label><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
-            <label for="wa_retrieval_mode">Retrieval (which signals the sections below feed)</label>
-            <select id="wa_retrieval_mode" class="text_pole">
-                <option value="hybrid">Hybrid (BM25 + vector, RRF)</option>
-                <option value="lexical">BM25 only</option>
-                <option value="vector">Vector only</option>
-            </select>
-
-            <label for="wa_query_mode">Query from</label>
-            <select id="wa_query_mode" class="text_pole">
-                <option value="messages">Raw messages</option>
-                <option value="summary">Summarized scene (one LLM call per new turn)</option>
-            </select>
-
-            <label for="wa_message_depth">Message depth (recent messages for retrieval + keyword scan)</label>
-            <input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1">
+            <div class="wa-row"><label for="wa_message_depth" data-i18n="Message depth">Message depth</label><input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1"></div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Tier precedence</b>
+                    <b><span data-i18n="Tier precedence">Tier precedence</span> <span class="fa-solid fa-circle-question note-link-span" title="With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio." data-i18n="[title]With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio."></span></b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">When tiered grouping is on (in the insertion-order control above or in the Studio), entries group into the first tier they match, top to bottom. ↑/↓ sets precedence; untick to skip a tier. Shared with the Studio.</small>
+                    <small class="opacity50p" id="wa_tier_state"></small>
                     <div id="wa_tier_editor_mount" style="margin-top:4px;"></div>
                 </div>
             </div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Lorebook priority</b>
+                    <b data-i18n="Scan window">Scan window</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">With several books active, how their entries compete for budget slots and where they sit in the prompt. Books appear here once WA has seen them in a scan.</small>
+                    <label for="wa_drop_chat_tags"><span data-i18n="Ignored tags">Ignored tags</span> <span class="fa-solid fa-circle-question note-link-span" title="Comma-separated HTML or XML tags to be skipped when scanning for keyword hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries." data-i18n="[title]Comma-separated HTML or XML tags to be skipped when scanning for key hits. You might want to set this to your preset's internal state tracker so your quest tracker doesn't constantly pull entries."></span></label>
+                    <input id="wa_drop_chat_tags" type="text" class="text_pole" placeholder="internal_states, thinking">
 
-                    <label for="wa_world_priority_mode">Mode</label>
-                    <select id="wa_world_priority_mode" class="text_pole">
-                        <option value="interleaved">Interleaved — one relevance-ranked list, optional per-book weight</option>
-                        <option value="sequential">Sequential — fill higher books first</option>
+                    <label for="wa_match_window"><span data-i18n="Match window">Match window</span> <span class="fa-solid fa-circle-question note-link-span" title="The window within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window." data-i18n="[title]The window within which a key's conditions must all match, e.g. ? apple AND banana must both appear in the same paragraph, message or scan window."></span></label>
+                    <select id="wa_match_window" class="text_pole">
+                    <option value="paragraph" data-i18n="Paragraph">Paragraph</option>
+                    <option value="message" data-i18n="Message">Message</option>
+                    <option value="scan" data-i18n="Whole scan window (SillyTavern default)">Whole scan window (SillyTavern default)</option>
                     </select>
 
-                    <div id="wa_world_priority_list" style="margin-top:6px;"></div>
                 </div>
             </div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Summary</b>
+                    <b data-i18n="Matching &amp; relevance">Matching &amp; relevance</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Only applies when Query from = Summarized scene: how the scene summary that becomes the match text is generated.</small>
+                    <label for="wa_word_boundary"><span data-i18n="Word boundary">Word boundary</span> <span class="fa-solid fa-circle-question note-link-span" title="Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;." data-i18n="[title]Applies to entries with Match Whole Words on and SmartKeys that use =. Permissive: whole-word &quot;Joe&quot; matches &quot;Joe's&quot;. Strict: no match. Neither matches &quot;Joes&quot;."></span></label>
+                    <select id="wa_word_boundary" class="text_pole">
+                    <option value="strict" data-i18n="Strict: do not allow apostrophes and hyphens">Strict: do not allow apostrophes and hyphens</option>
+                    <option value="permissive" data-i18n="Permissive: whole-word matches allow apostrophes and hyphens">Permissive: whole-word matches allow apostrophes and hyphens</option>
+                    </select>
 
-                    <label for="wa_summary_profile">Summarize with</label>
-                    <div class="flex-container alignItemsCenter flexnowrap">
-                        <select id="wa_summary_profile" class="text_pole flex1"></select>
-                        <div id="wa_refresh_profiles" class="menu_button fa-solid fa-rotate" title="Reload the Connection Manager profile list"></div>
-                    </div>
+                    <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension." data-i18n="[title]Set the embedding model in the Vector Storage extension."></div>
 
-                    <label class="checkbox_label" for="wa_bypass_preset">
-                        <input id="wa_bypass_preset" type="checkbox"><span>Bypass the profile's preset</span>
-                    </label>
-
-                    <label for="wa_summary_prompt">Summary prompt</label>
-                    <textarea id="wa_summary_prompt" class="text_pole textarea_compact" rows="4"></textarea>
-
-                    <label for="wa_summary_temp">Summary temperature (blank = preset default; needs a profile)</label>
-                    <input id="wa_summary_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="preset default">
-
-                    <label for="wa_summary_length">Summary length (tokens)</label>
-                    <input id="wa_summary_length" type="number" class="text_pole" min="50" max="2000" step="50">
-                </div>
-            </div>
-
-            <div class="inline-drawer wa-section">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Vector Match</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <small class="opacity50p">Embedding similarity between the match text and your entries. Inactive when Retrieval = BM25 only.</small>
-                    <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="The embedding model and endpoint are configured in the Vector Storage extension settings — change them there."></div>
-
-                    <label>Mean-centered search (automatic when the server plugin is installed)</label>
+                    <label><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
-                    <label for="wa_uncentered_gate" title="A chunk must also reach this raw (uncentered) cosine to be admitted. Catches a wrong book attached by mistake; 0.5 is calibrated for bge-m3. 0 = off.">Wrong-book gate (raw cosine)</label>
-                    <input id="wa_uncentered_gate" type="number" class="text_pole" min="0" max="1" step="0.05">
-                </div>
-            </div>
+                    <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted." data-i18n="Find unused vector collections…;[title]Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>
+                    <div id="wa_orphans_out" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;"></div>
 
-            <div class="inline-drawer wa-section">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Ranking</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <small class="opacity50p">How the lexical (BM25) and vector signals fuse.</small>
-
-                    <label for="wa_lexical_weight">Lexical weight (BM25 vs vector in fusion)</label>
-                    <input id="wa_lexical_weight" type="number" class="text_pole" min="0" max="5" step="0.1">
-                    <label for="wa_keyword_weight">Keyword weight (BM25 over keys) — blank follows lexical weight</label>
-                    <input id="wa_keyword_weight" type="number" class="text_pole" min="0" max="5" step="0.1" placeholder="follow lexical">
-
-                    <label class="checkbox_label" for="wa_weight_by_order">
-                        <input id="wa_weight_by_order" type="checkbox"><span>Weight by entry order (order = priority)</span>
+                    <label class="checkbox_label" for="wa_drop_unavailable">
+                    <input id="wa_drop_unavailable" type="checkbox"><span data-i18n="Hide entries from later in the chat">Hide entries from later in the chat</span> <span class="fa-solid fa-circle-question note-link-span" title="On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn." data-i18n="[title]On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn."></span>
                     </label>
-                    <small class="opacity50p">Folds each entry's Order into the fused score as another rank, so higher-order entries rank higher — for books that use Order as priority. Order stays a tiebreak either way.</small>
                 </div>
             </div>
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Selection &amp; budget</b>
+                    <b data-i18n="Selection &amp; budget">Selection &amp; budget</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <label for="wa_max_entries">Max retrieved entries</label>
-                    <input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1">
-
-                    <label for="wa_vector_cutoff">Cutoff</label>
-                    <select id="wa_vector_cutoff" class="text_pole">
-                        <option value="count">Fixed count (always the max)</option>
-                        <option value="elbow">Elbow (cut at a gap vs the mean gap)</option>
-                        <option value="dropoff">Dropoff (cut at a fixed score drop)</option>
+                    <label for="wa_world_priority_mode"><span data-i18n="Lorebook priority">Lorebook priority</span> <span class="fa-solid fa-circle-question note-link-span" title="Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan." data-i18n="[title]Interleaved: one ranked list across books, with optional per-book weights. Sequential: higher books fill first. A book appears below after its first scan."></span></label>
+                    <select id="wa_world_priority_mode" class="text_pole">
+                    <option value="interleaved" data-i18n="Interleaved">Interleaved</option>
+                    <option value="sequential" data-i18n="Sequential">Sequential</option>
                     </select>
 
-                    <label for="wa_min_entries">Cliff modes: never keep fewer than</label>
-                    <input id="wa_min_entries" type="number" class="text_pole" min="1" max="100" step="1">
+                    <label data-i18n="Lorebook order">Lorebook order</label>
+                    <div id="wa_world_priority_list" style="margin-top:2px;"></div>
 
-                    <label for="wa_elbow_sensitivity">Elbow sensitivity (× mean gap; higher keeps fewer)</label>
-                    <input id="wa_elbow_sensitivity" type="number" class="text_pole" min="1" max="10" step="0.1">
+                    <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
-                    <label for="wa_dropoff_threshold">Dropoff threshold (fraction of top score; higher keeps fewer)</label>
-                    <input id="wa_dropoff_threshold" type="number" class="text_pole" min="0.01" max="1" step="0.01">
+                    <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt." data-i18n="[title]Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 
-                    <label for="wa_max_dynamic">Dynamic entry cap — keyword + vector (0 = no limit)</label>
-                    <input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1">
+                    <div class="wa-row"><label for="wa_max_dynamic"><span data-i18n="Dynamic entry cap">Dynamic entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Vector and keyword entries. 0 = unlimited." data-i18n="[title]Vector and keyword entries. 0 = unlimited."></span></label><input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
-                    <label for="wa_max_total">Total entry cap — includes constants (0 = no limit)</label>
-                    <input id="wa_max_total" type="number" class="text_pole" min="0" max="500" step="1">
+                    <div class="wa-row"><label for="wa_max_total"><span data-i18n="Total entry cap">Total entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Including constants and stickies. 0 = unlimited." data-i18n="[title]Including constants and stickies. 0 = unlimited."></span></label><input id="wa_max_total" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
-                    <label for="wa_max_tokens_pct">Token budget, % of context (0 = off)</label>
-                    <input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1">
+                    <div class="wa-row"><label for="wa_max_tokens_pct"><span data-i18n="Context %">Context %</span> <span class="fa-solid fa-circle-question note-link-span" title="Token budget as a share of the context. 0 = unlimited." data-i18n="[title]Token budget as a share of the context. 0 = unlimited."></span></label><input id="wa_max_tokens_pct" type="number" class="text_pole" min="0" max="100" step="1"></div>
 
-                    <label for="wa_max_tokens">Token budget, absolute (0 = off; tighter of the two wins)</label>
-                    <input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64">
+                    <div class="wa-row"><label for="wa_max_tokens"><span data-i18n="Max tokens">Max tokens</span> <span class="fa-solid fa-circle-question note-link-span" title="Token budget in tokens. The tighter of the two applies. 0 = unlimited." data-i18n="[title]Token budget in tokens. The tighter of the two applies. 0 = unlimited."></span></label><input id="wa_max_tokens" type="number" class="text_pole" min="0" max="100000" step="64"></div>
 
-                    <label for="wa_budget_slack">Budget slack, % over (0 = exact)</label>
-                    <input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1">
+                    <div class="wa-row"><label for="wa_budget_slack"><span data-i18n="Budget slack">Budget slack</span> <span class="fa-solid fa-circle-question note-link-span" title="% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly." data-i18n="[title]% of the budget a slightly-too-big entry may exceed it by. 0 applies the budget strictly."></span></label><input id="wa_budget_slack" type="number" class="text_pole" min="0" max="50" step="1"></div>
 
-                    <label for="wa_slack_mode">Slack applies</label>
+                    <label for="wa_slack_mode" data-i18n="Slack allowed for">Slack allowed for</label>
                     <select id="wa_slack_mode" class="text_pole">
-                        <option value="once">Once — rescues one entry, then the budget is exact</option>
-                        <option value="all">All — every entry may use the slack</option>
+                    <option value="once" data-i18n="One entry">One entry</option>
+                    <option value="all" data-i18n="All entries">All entries</option>
                     </select>
-
                     <label class="checkbox_label" for="wa_tokens_include_exempt">
-                        <input id="wa_tokens_include_exempt" type="checkbox"><span>Token budget caps "ignore budget" entries (i.e., tokens never exceeds cap)</span>
+                    <input id="wa_tokens_include_exempt" type="checkbox"><span data-i18n="Budget-exempt entries spend budget">Budget-exempt entries spend budget</span> <span class="fa-solid fa-circle-question note-link-span" title="On: their tokens still spend the budget, so fewer other entries fit beside them. Off: they ride free, and the prompt may exceed the budget by their size. Either way they are never cut." data-i18n="[title]On: their tokens still spend the budget, so fewer other entries fit beside them. Off: they ride free, and the prompt may exceed the budget by their size. Either way they are never cut."></span>
                     </label>
 
                     <small id="wa_exempt_count" class="opacity50p"></small>
@@ -2858,243 +1866,284 @@ const SETTINGS_HTML = `
 
             <div class="inline-drawer wa-section">
                 <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Advanced</b>
+                    <b data-i18n="Audit &amp; suggestions">Audit &amp; suggestions</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <small class="opacity50p">Set once and forget.</small>
+                    <label for="wa_language"><span data-i18n="Language">Language</span> <span class="fa-solid fa-circle-question note-link-span" title="Language of the lorebook and chat. Selects the word-frequency table the keyword suggester and audit use." data-i18n="[title]Language of the lorebook and chat. Selects the word-frequency table the keyword suggester and audit use."></span></label>
+                    <select id="wa_language" class="text_pole">
+                    <option value="en" data-i18n="English">English</option>
+                    </select>
+                    <small class="opacity50p" id="wa_language_state"></small>
 
-                    <label class="checkbox_label" for="wa_suppress_keys">
-                        <input id="wa_suppress_keys" type="checkbox"><span>Suppress keywords on 🔗 entries</span>
-                    </label>
+
+                    <label for="wa_llm_profile"><span data-i18n="Suggester LLM profile">Suggester LLM profile</span> <span class="fa-solid fa-circle-question note-link-span" title="One call per entry." data-i18n="[title]One call per entry."></span></label>
+                    <div class="flex-container alignItemsCenter flexnowrap">
+                    <select id="wa_llm_profile" class="text_pole flex1"></select>
+                    <div id="wa_refresh_profiles" class="menu_button fa-solid fa-rotate" title="Reload the Connection Manager profile list" data-i18n="[title]Reload the Connection Manager profile list"></div>
+                    </div>
+
+                    <div class="wa-row"><label for="wa_llm_temp"><span data-i18n="Temperature">Temperature</span> <span class="fa-solid fa-circle-question note-link-span" title="No measured effect on suggestion quality. Leave blank for the backend default." data-i18n="[title]No measured effect on suggestion quality. Leave blank for the backend default."></span></label><input id="wa_llm_temp" type="number" class="text_pole" min="0" max="2" step="0.05" placeholder="backend default" data-i18n="[placeholder]backend default"></div>
+                </div>
+            </div>
+
+            <div class="inline-drawer wa-section">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <b data-i18n="Advanced">Advanced</b>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+
 
                     <label class="checkbox_label" for="wa_debug_log">
-                        <input id="wa_debug_log" type="checkbox"><span>Log selection table on every generation</span>
+                        <input id="wa_debug_log" type="checkbox"><span data-i18n="Log the selection table on every generation">Log the selection table on every generation</span>
                     </label>
+
+                    <label for="wa_rater_id"><span data-i18n="Rater id">Rater id</span> <span class="fa-solid fa-circle-question note-link-span" title="A random anonymous ID your grades are signed with." data-i18n="[title]A random anonymous ID your grades are signed with."></span></label>
+                    <input id="wa_rater_id" type="text" class="text_pole" readonly style="opacity:0.55;cursor:default;" placeholder="generated on your first grade" data-i18n="[placeholder]generated on your first grade">
+
+
+                    <div id="wa_review_bundles" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Opens the bundle reviewer without a chat." data-i18n="Review graded bundles…;[title]Opens the bundle reviewer without a chat.">Review graded bundles…</div>
                 </div>
             </div>
         </div>
     </div>
 </div>`;
 
-/**
- * Rebuilds the profile dropdown from Connection Manager's current list.
- * Called on init and from the refresh button, since profiles can be added or
- * renamed while ST is running.
- * @param {boolean} notify Show a toast with the result
- */
+/** Rebuilds the profile dropdown from Connection Manager's current list; `notify` toasts the result. */
 function populateProfiles(notify = false) {
     const profiles = extension_settings.connectionManager?.profiles ?? [];
-    const selected = settings().summaryProfile;
+    const selected = settings().llmProfile;
 
-    $('#wa_summary_profile')
+    $('#wa_llm_profile')
         .empty()
-        .append([`<option value="">Current API</option>`]
+        // Not a neutral fallback: without a profile generateText uses generateRaw, which takes no generation parameters.
+        .append([`<option value="">${escapeHtml(t`Current chat API`)}</option>`]
             .concat(profiles.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`))
             .join(''));
 
-    // A deleted profile leaves a dangling id: show the fallback rather than a blank
-    // select, but don't silently rewrite the setting.
+    // A deleted profile leaves a dangling id: show the fallback, but do not rewrite the setting.
     const stillExists = !selected || profiles.some(x => x.id === selected);
-    $('#wa_summary_profile').val(stillExists ? selected : '');
+    $('#wa_llm_profile').val(stillExists ? selected : '');
 
     if (!stillExists) {
-        console.warn(`Worlds Apart: saved summary profile "${selected}" no longer exists, falling back to the current API`);
-        toastr.warning('Saved summarization profile no longer exists.', 'Worlds Apart');
+        console.warn(`Worlds Apart: saved LLM profile "${selected}" no longer exists, falling back to the current API`);
+        toastr.warning(t`Saved LLM profile no longer exists.`, 'Worlds Apart');
     }
 
     if (notify) {
-        toastr.info(`${profiles.length} profile(s) loaded.`, 'Worlds Apart');
+        toastr.info(t`${profiles.length} profile(s) loaded.`, 'Worlds Apart');
     }
 }
 
-/**
- * A blank field for a 'number?' setting, and anything that does not parse. Both mean null — "unset, follow
- * whatever this setting defers to" — and NaN in particular must never be stored: it is neither null nor
- * undefined, so it survives every `??` downstream and turns a fused score into NaN silently.
- */
-const nullableNumber = (val) => {
-    const n = Number(String(val).trim() || NaN);
-    return Number.isFinite(n) ? n : null;
-};
-
-/**
- * Wires a settings control to its backing value.
- * @param {string} selector Element selector
- * @param {string} key Settings key
- * @param {'checked'|'number'|'number?'|'string'} kind Value type. 'number?' persists a blank or
- *   unparseable field as null ("unset"), for settings whose null means "follow another setting".
- */
+/** Wires a settings control to its backing value.
+ *  @param {'checked'|'number'|'string'} kind */
 function bind(selector, key, kind) {
     const $el = $(selector);
 
     if (kind === 'checked') {
         $el.prop('checked', settings()[key]);
     } else {
-        // 'number?' holds null when unset, which must render as an empty field (showing the placeholder)
-        // rather than as the string "null".
-        $el.val(kind === 'number?' ? settings()[key] ?? '' : settings()[key]);
+        $el.val(settings()[key]);
     }
 
-    $el.on('input change', () => {
-        settings()[key] = kind === 'checked' ? $el.prop('checked')
-            : kind === 'number' ? Number($el.val())
-                : kind === 'number?' ? nullableNumber($el.val())
-                    : String($el.val());
+    $el.on('input change', ev => {
+        if (kind === 'number') {
+            const raw = String($el.val()).trim(), n = Number(raw);
+            // A cleared box is mid-edit, never a zero: `relevanceCutoff` 0 admits every row, and a cap of 0 is "off".
+            // On commit the box snaps back to the value in force rather than showing a blank that was never stored.
+            if (!raw || !Number.isFinite(n)) { if (ev.type === 'change') $el.val(settings()[key]); return; }
+            settings()[key] = n;
+        } else {
+            settings()[key] = kind === 'checked' ? $el.prop('checked') : String($el.val());
+        }
         saveSettingsDebounced();
     });
 }
 
 
 
-// ---------------------------------------------------------------------------
-// Active-entries panel — a book icon (bottom-left) that expands into the list
-// WA actually selected, each row tooltipped with its per-signal scores and
-// keyword hits, click opening the entry text. Refreshed from runState.lastLayout at the
-// end of every real scan (see rankActivated).
-// ---------------------------------------------------------------------------
-let wiTrigger = null, wiPanel = null;
-function ensureWiPanel() {
-    if (wiTrigger) return;
+// The Delivery panel: a bottom-left icon expanding into stage 5's delivered set, in prompt order, from
+// runState.lastPromptOrder.
+let deliveryTrigger = null, deliveryPanel = null;
+function ensureDeliveryPanel() {
+    if (deliveryTrigger) return;
     const style = document.createElement('style');
     style.textContent = `
-.wa-wi-trigger { position: fixed; left: 10px; bottom: 10px; z-index: 100000; width: 28px; height: 28px;
+.wa-delivery-trigger { position: fixed; left: 10px; bottom: 10px; z-index: 100000; width: 28px; height: 28px;
     line-height: 28px; text-align: center; cursor: pointer; opacity: 0.6; border-radius: 6px;
     background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.4)); }
-.wa-wi-trigger:hover { opacity: 1; }
-.wa-wi-trigger[data-count]:not([data-count="0"])::after { content: attr(data-count); position: absolute;
+.wa-delivery-trigger:hover { opacity: 1; }
+.wa-delivery-trigger[data-count]:not([data-count="0"])::after { content: attr(data-count); position: absolute;
     top: -6px; right: -6px; min-width: 14px; height: 14px; line-height: 14px; padding: 0 3px; font-size: 9px;
     text-align: center; color: #fff; background: var(--crimson70a, #b33); border-radius: 8px; }
-.wa-wi-panel { position: fixed; left: 10px; bottom: 46px; z-index: 100000; display: none; flex-direction: column;
+.wa-delivery-panel { position: fixed; left: 10px; bottom: 46px; z-index: 100000; display: none; flex-direction: column;
     gap: 2px; width: 320px; max-width: calc(100vw - 20px); max-height: 60vh; overflow-y: auto; padding: 6px;
     border-radius: 8px; font-size: 0.85em; background: var(--SmartThemeBlurTintColor, rgba(20,20,20,0.92));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
-.wa-wi-panel.wa-wi-open { display: flex; }
-.wa-wi-entry { display: flex; align-items: baseline; gap: 6px; padding: 3px 5px; border-radius: 5px; cursor: pointer; }
-.wa-wi-entry:hover { background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-wi-glyph { flex: 0 0 auto; }
-.wa-wi-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wa-wi-empty { opacity: 0.6; padding: 4px; }`;
+.wa-delivery-panel.wa-delivery-open { display: flex; }
+.wa-delivery-entry { display: flex; align-items: baseline; gap: 6px; padding: 3px 5px; border-radius: 5px; cursor: pointer; }
+.wa-delivery-entry:hover { background: var(--white20a, rgba(255,255,255,0.1)); }
+.wa-delivery-glyph { flex: 0 0 auto; }
+.wa-delivery-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-delivery-empty { opacity: 0.6; padding: 4px; }`;
     document.head.append(style);
 
-    wiTrigger = document.createElement('div');
-    wiTrigger.className = 'wa-wi-trigger fa-solid fa-fw fa-book-atlas';
-    wiTrigger.title = 'Worlds Apart — active entries';
-    wiTrigger.dataset.count = '0';
-    wiPanel = document.createElement('div');
-    wiPanel.className = 'wa-wi-panel';
-    wiTrigger.addEventListener('click', () => wiPanel.classList.toggle('wa-wi-open'));
-    document.body.append(wiTrigger, wiPanel);
+    deliveryTrigger = document.createElement('div');
+    deliveryTrigger.className = 'wa-delivery-trigger fa-solid fa-fw fa-book-atlas';
+    deliveryTrigger.title = t`Worlds Apart — delivered this turn`;
+    deliveryTrigger.dataset.count = '0';
+    deliveryPanel = document.createElement('div');
+    deliveryPanel.className = 'wa-delivery-panel';
+    deliveryTrigger.addEventListener('click', () => deliveryPanel.classList.toggle('wa-delivery-open'));
+    document.body.append(deliveryTrigger, deliveryPanel);
 }
 
-function renderWiPanel(layout) {
-    ensureWiPanel();
-    wiTrigger.dataset.count = String(layout.length);
-    wiPanel.innerHTML = '';
+function renderDeliveryPanel(layout) {
+    ensureDeliveryPanel();
+    deliveryTrigger.dataset.count = String(layout.length);
+    deliveryPanel.innerHTML = '';
+    // Appended last: the panel opens upward, so the bottom row is nearest the icon.
+    const lab = document.createElement('div');
+    lab.className = 'wa-delivery-entry';
+    lab.title = t`Open the Studio on the Key Lab`;
+    lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
+        + `<span class="wa-delivery-title">${escapeHtml(t`Open the Key Lab`)}</span>`;
+    lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
     if (!layout.length) {
         const empty = document.createElement('div');
-        empty.className = 'wa-wi-empty';
-        empty.textContent = 'No active entries';
-        wiPanel.append(empty);
+        empty.className = 'wa-delivery-empty';
+        empty.textContent = t`Nothing delivered yet`;
+        deliveryPanel.append(empty, lab);
         return;
     }
     for (const row of layout) {
         const e = row.item.entry;
         const el = document.createElement('div');
-        el.className = 'wa-wi-entry';
-        el.title = wiTooltip(row);
+        el.className = 'wa-delivery-entry';
+        el.title = wiTooltip(row) + '\n\n' + t`Click: open in the Explorer · Shift-click: show the text`;
         const g = document.createElement('span');
-        g.className = 'wa-wi-glyph';
+        g.className = 'wa-delivery-glyph';
         g.textContent = wiGlyph(e);
-        const t = document.createElement('span');
-        t.className = 'wa-wi-title';
-        t.textContent = wiTitleOf(e);
-        el.append(g, t);
-        el.addEventListener('click', () => showEntryText(e));
-        wiPanel.append(el);
+        const ttl = document.createElement('span');
+        ttl.className = 'wa-delivery-title';
+        ttl.textContent = wiTitleOf(e);
+        el.append(g, ttl);
+        // Click opens the entry in the Explorer; shift-click shows its text alone.
+        el.addEventListener('click', ev => {
+            if (ev.shiftKey) { showEntryText(e); return; }
+            lorebookStudio(e.world ?? chatBook(), { entry: { world: e.world, uid: e.uid } });
+        });
+        deliveryPanel.append(el);
     }
+    deliveryPanel.append(lab);
 }
 
 let initialized = false;
 
 export async function init() {
-    // Both `hooks.activate` and the jQuery bootstrap below can reach here, and
-    // whichever loses the race would otherwise duplicate the panel, the event
-    // listeners and the slash command.
+    // Handed the pipeline's entry points once, here, so the dependency runs one way.
+    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, scopedPriority, vectorRequestBody });
+    // Both `hooks.activate` and the jQuery bootstrap below can reach here.
     if (initialized) {
         return;
     }
     initialized = true;
 
-    ensureSettings();
-    // 'off' folded into 'interleaved' (identical at weight 1/offset 0); drop the stale value.
+    ensureSettings(extension_settings);
+    // Migrations of stored values from earlier settings shapes.
     if (settings().worldPriorityMode === 'off') settings().worldPriorityMode = 'interleaved';
-    // Legacy presentationOrder ('authored'/'authored-inverse') → shared sort keys; studioTierCfg → shared tierCfg.
     if (settings().presentationOrder in PRESENTATION_ALIAS) settings().presentationOrder = PRESENTATION_ALIAS[settings().presentationOrder];
     if (settings().studioTierCfg && !settings().tierCfg) { settings().tierCfg = settings().studioTierCfg; delete settings().studioTierCfg; }
-    delete settings().baselineQuery; delete settings().baselineWeight;   // removed feature — drop orphaned stored values
+    // Removed features — drop the orphaned stored values, or ensureSettings merges them over the defaults forever.
+    for (const k of ['baselineQuery', 'baselineWeight', 'queryMode', 'summaryPrompt', 'summaryLength', 'uncenteredGate', 'keywordScoring']) delete settings()[k];
+    // Not awaited: an unstored pack is a network fetch with no timeout, and ST awaits each extension's activate hook in
+    // turn — blocking here holds up every later extension while the interceptor is already live and the scan hooks are
+    // not yet registered. The pack applies when it lands; until then `table()` is the English one.
+    setLanguage(settings().language, { fetchPack, store: packStore }).catch(() => {});
+    // The one place wordBoundary crosses into the matcher, which holds it module-level; re-pushed by the select's handler below.
+    matcher.setBoundaryMode(settings().wordBoundary);
 
     $('#extensions_settings').append(SETTINGS_HTML);
 
     updateEmbedInfo();   // refresh on drawer open so it tracks Vector Storage changes made mid-session
     $('#wa_embed_info').closest('.inline-drawer').children('.inline-drawer-toggle').on('click', updateEmbedInfo);
 
-    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="Worlds Apart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span>WA Lorebook Studio</span></div>');
+    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="Worlds Apart — Lorebook Studio: manage all lorebooks and entries" data-i18n="[title]Worlds Apart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
-    bind('#wa_suppress_keys', 'suppressVectorKeys', 'checked');
-    // Prompt insertion order — the same sort widget the Studio uses, plus relevance options (prompt-only).
-    // The widget's button (.wa-filter) and its popup (.wa-ctx) are styled by ensureStudioStyle, which the
-    // Studio injects lazily; the settings control can be used first, so inject here too (idempotent).
+    // ensureStudioStyle styles the sort widget; the Studio injects it lazily and this control can be used first (idempotent).
     ensureStudioStyle();
     const getTierCfg = () => reconcileTiers(settings().tierCfg);
     const setTierCfg = cfg => { settings().tierCfg = cfg; saveSettingsDebounced(); };
     const presentationMount = document.querySelector('#wa_presentation_order_mount');
     const tierMount = document.querySelector('#wa_tier_editor_mount');
     let tierEditor = null;
+    const tierState = () => { $('#wa_tier_state').text(settings().presentationTiered ? t`Tiered grouping is on: the prompt groups entries by these tiers.` : t`Tiered grouping is off: this order applies in the Studio only.`); };
     if (presentationMount) presentationMount.append(makeSortControl({
         getSort: () => normPresentation(settings().presentationOrder),
         setSort: k => { settings().presentationOrder = k; saveSettingsDebounced(); },
         getTiered: () => !!settings().presentationTiered,
-        setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); },
+        setTiered: on => { settings().presentationTiered = on; saveSettingsDebounced(); tierState(); },
         getTierCfg, setTierCfg,
-        extraItems: [{ label: 'Most relevant first', key: 'best-first' }, { label: 'Most relevant last', key: 'best-last' }],
-        // Keep the inline tier editor in sync if tiers are reordered from the button's Configure tiers… menu.
-        onChange: () => { if (tierEditor) tierEditor.replaceWith(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {})); },
+        extraItems: [{ label: t`Most relevant first`, key: 'best-first' }, { label: t`Most relevant last`, key: 'best-last' }],
+        // Inside the settings root, or ST's autoclose reads a menu click as outside the Extensions drawer and shuts it.
+        mount: () => document.querySelector('.worlds-apart-settings') ?? document.body,
+        // Keeps the inline tier editor in sync when tiers are reordered from the button's menu.
+        onChange: () => { if (tierEditor) tierEditor.replaceWith(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] })); },
         block: true,
     }));
-    if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}));
-    bind('#wa_retrieval_mode', 'retrievalMode', 'string');   // commonWordWeight now derives from this at query time (internal global)
+    if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] }));
+    tierState();
     renderPluginSetup();                     // paints "checking…" then the detected/install state
-    // Detect the plugin and fingerprint the source in parallel; re-render once both settle so the box
-    // can show up-to-date / out-of-date. Both are cached, so this runs its fetches at most once.
-    Promise.all([hasPlugin(), computeSourceFingerprint()]).then(renderPluginSetup);
+    waVersion().then(v => { if (v) document.querySelector('#wa_version').textContent = v; });
+    Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
+        renderPluginSetup();
+        // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
+        if (pluginDrifted()) toastr.warning(t`Server plugin is out of date. Redeploy it and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+    });
     bind('#wa_debug_log', 'debugLog', 'checked');
+    document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
+        const out = document.querySelector('#wa_orphans_out');
+        if (out) out.textContent = t`Looking…`;
+        try { const line = await reportOrphanCollections(); if (out) out.textContent = line; }
+        catch (error) { if (out) out.textContent = t`Failed: ${error.message}`; }
+    });
+    $('#wa_rater_id').val(settings().raterId);
     bind('#wa_message_depth', 'messageDepth', 'number');
-    bind('#wa_lexical_weight', 'lexicalWeight', 'number');
-    // 'number?', not 'number': blank means "follow lexicalWeight" and must persist as null, where a plain
-    // number binding would collapse it to 0 and silently switch the keys signal off.
-    bind('#wa_keyword_weight', 'keywordWeight', 'number?');
-    bind('#wa_weight_by_order', 'weightByOrder', 'checked');
-    bind('#wa_summary_profile', 'summaryProfile', 'string');
-    bind('#wa_bypass_preset', 'summaryBypassPreset', 'checked');
-    bind('#wa_query_mode', 'queryMode', 'string');
-    bind('#wa_summary_prompt', 'summaryPrompt', 'string');
-    bind('#wa_summary_length', 'summaryLength', 'number');
-    bind('#wa_summary_temp', 'summaryTemperature', 'string');
-    bind('#wa_uncentered_gate', 'uncenteredGate', 'number');
+    bind('#wa_match_window', 'matchWindow', 'string');
+    bind('#wa_language', 'language', 'string');
+    const languageState = () => {
+        const tb = table();
+        $('#wa_language_state').text(tb.loaded ? t`${tb.label} — ${tb.zipf.size} words` : t`${tb.lang}: pack not loaded — every word reads rare until it is`);
+    };
+    $('#wa_language').on('change', async () => { await setLanguage(settings().language, { fetchPack, store: packStore }); languageState(); });
+    // The index is read only here, when the panel fills its list; a stored pack the index has moved is refreshed then.
+    (async () => {
+        const index = await refreshIndex({ fetchIndex, fetchPack, store: packStore });
+        const $sel = $('#wa_language');
+        const known = new Set(['en']);
+        for (const [lang, meta] of Object.entries(index ?? {})) { if (!known.has(lang)) { known.add(lang); $sel.append(new Option(meta.label, lang)); } }
+        // A language the store holds but the index no longer lists stays selectable while it is the setting.
+        if (!known.has(settings().language)) $sel.append(new Option(settings().language, settings().language));
+        $sel.val(settings().language);
+        languageState();
+    })();
+    bind('#wa_drop_chat_tags', 'dropChatTags', 'string');
+    bind('#wa_word_boundary', 'wordBoundary', 'string');
+    $('#wa_word_boundary').on('change', () => matcher.setBoundaryMode(settings().wordBoundary));
+    bind('#wa_llm_profile', 'llmProfile', 'string');
+    bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
-    bind('#wa_vector_cutoff', 'vectorCutoff', 'string');
-    bind('#wa_min_entries', 'minVectorEntries', 'number');
-    bind('#wa_elbow_sensitivity', 'elbowSensitivity', 'number');
-    bind('#wa_dropoff_threshold', 'dropoffThreshold', 'number');
     bind('#wa_max_tokens', 'maxTokens', 'number');
     bind('#wa_max_tokens_pct', 'maxTokensPercent', 'number');
     bind('#wa_budget_slack', 'budgetSlackPercent', 'number');
     bind('#wa_slack_mode', 'budgetSlackMode', 'string');
+    bind('#wa_relevance_cutoff', 'relevanceCutoff', 'number');
     bind('#wa_max_dynamic', 'maxDynamicEntries', 'number');
     bind('#wa_max_total', 'maxTotalEntries', 'number');
+    bind('#wa_drop_unavailable', 'dropUnavailable', 'checked');
     bind('#wa_tokens_include_exempt', 'maxTokensIncludesExempt', 'checked');
 
     bind('#wa_world_priority_mode', 'worldPriorityMode', 'string');
@@ -3109,8 +2158,7 @@ export async function init() {
     $wp.on('input change', '.wa-world-weight', function () { editField('weight', this); });
     $wp.on('input change', '.wa-world-offset', function () { editField('offset', this); });
     $wp.on('input change', '.wa-world-cap', function () { editField('cap', this); });
-    // Swap with the adjacent VISIBLE row, not the array neighbour — a filtered-out book
-    // from another chat sitting between them must not absorb the move.
+    // Swap with the adjacent VISIBLE row, not the array neighbour: a filtered-out book between them must not absorb the move.
     const moveWorld = (i, dir) => {
         const scoped = scopedPriority();
         if (!scoped) return;
@@ -3129,95 +2177,116 @@ export async function init() {
     // After bind(), so the dropdown's value survives being rebuilt.
     populateProfiles();
     $('#wa_refresh_profiles').on('click', () => populateProfiles(true));
+    $('#wa_review_bundles').on('click', () => superEvalScene());
 
-    // ST fires a dry-run generation on chat load and for token estimates; note it so the
-    // scan-done handler can stay quiet, since its interceptor (and our retrieval) is skipped.
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
-    eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; });
+    eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
 
-    eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, suppressKeys);
-    // WORLDINFO_ENTRIES_LOADED only fires during a scan, so switching chat/character wouldn't
-    // refresh the attached-book set until the next generation. CHAT_CHANGED fires on every
-    // switch; re-read the active books then. Also populates once now so it isn't blank on load.
+    eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
+
+    // WORLDINFO_ENTRIES_LOADED only fires during a scan, so CHAT_CHANGED refreshes the attached-book set.
     const refreshAttached = () => getSortedEntries().then(showExemptCount).catch(() => {});
     eventSource.on(event_types.CHAT_CHANGED, refreshAttached);
-    // New chat = possibly different books; drop the smartkeys key registry so the automaton
-    // tracks the active vocabulary instead of the union of every book ever scanned.
-    eventSource.on(event_types.CHAT_CHANGED, resetSmartKeys);
-    // The panel survives dry-run scans untouched (rankActivated ignores them), so without
-    // this it would carry the previous chat's selection across a switch.
-    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastLayout = []; renderWiPanel([]); });
+    // Wrapped, not passed by reference: CHAT_CHANGED emits the chat id, which would land in resetSmartKeys's `scope`.
+    eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
+    // The panel survives dry-run scans untouched, so it would carry the previous chat's selection across a switch.
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; runState.lastLayoutOrder = []; renderDeliveryPanel([]); });
     refreshAttached();
-    eventSource.on(event_types.WORLDINFO_SCAN_DONE, rankActivated);
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
+    // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at
+    // GENERATION_ENDED, so a between-scans getSortedEntries escapes the blanking.
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, (args) => {
+        if (!args?.state?.next) runState.waOwnsScan = false;
+    });
 
-    // Show the active-entries icon right away; it fills in on the next scan.
-    if (settings().enabled) renderWiPanel(runState.lastLayout);
+    if (settings().enabled) renderDeliveryPanel(runState.lastPromptOrder);
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    /** Registers a command under its name plus the `wa=` twin of it, keeping any aliases the props already carry. */
+    const addWaCommand = props => SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        ...props,
+        aliases: [...(props.aliases ?? []), props.name.replace(/^wa-/, 'wa=')],
+    }));
+
+    addWaCommand({
+        name: 'wa-versus',
+        callback: async (named) => { await versusCore(named); return ''; },
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many of WA\u2019s ranked entries to carry beyond the two delivered sets, for grading depth', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
+        ],
+        helpString: 'Worlds Apart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Runs /wa-debug first, prints the difference, and downloads an ordinary two-arm capture bundle \u2014 grade it with Review bundles, apply with eval/synthetic-data/apply-review.mjs, then score with eval/versus-score.mjs.',
+        returns: 'nothing',
+    });
+
+    addWaCommand({
+        name: 'wa-core',
+        callback: () => {
+            const c = runState.lastCoreSet;
+            if (!c) { toastr.info(t`No core selection recorded yet — it is captured on ST’s own dry runs, so send or receive a message first.`, 'Worlds Apart'); return ''; }
+            console.log(`%cWorlds Apart \u00b7 ST core's own selection at message ${c.at} \u2014 ${c.entries.length} entries, core budget ${c.budget ?? 'unknown'}`, 'font-weight: bold');
+            console.table(c.entries.map(e => ({ uid: e.uid, order: e.order, constant: e.constant, book: e.world, entry: e.title })));
+            console.log(`uids for eval/core-compare.mjs --core-uids:\n${c.entries.map(e => e.uid).join(',')}`);
+            toastr.success(t`${c.entries.length} entries — see console`, t`ST core selection`);
+            return '';
+        },
+        helpString: 'Worlds Apart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
+        returns: 'nothing',
+    });
+
+    addWaCommand({
         name: 'wa-dry',
         callback: () => dryRun(false),
         helpString: 'Worlds Apart: run retrieval and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-debug',
         callback: () => dryRun(true),
         helpString: 'Worlds Apart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-grade',
         callback: gradeScene,
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'sample name, used as the filename', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'scene-<date>' }),
-            SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (verbatim), meta (entries without content), none (paths only)', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
-            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cut is widened to a plain count for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in the sample', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
         helpString: 'Worlds Apart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-super-grade',
         callback: superGradeScene,
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'base sample name; each arm gets "<name>--<arm>.json"', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'chat-msgN' }),
             SlashCommandNamedArgument.fromProps({ name: 'arms', description: 'which arms to capture, comma-separated (default: all)', typeList: [ARGUMENT_TYPE.STRING], enumList: Object.keys(POOL_ARMS) }),
-            SlashCommandNamedArgument.fromProps({ name: 'books', description: 'lorebook copy fidelity: full (default — content is what makes a sample re-indexable by anyone else), meta, none', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'full', enumList: ['full', 'meta', 'none'] }),
-            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cut is widened to a plain count for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cliff is switched off for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in every sample written', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
         helpString: 'Worlds Apart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-super-eval',
         callback: superEvalScene,
-        helpString: 'Worlds Apart: review a graded sample/bundle from its FILE, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Same grading window as /wa-super-grade; stored grades arrive pre-filled and editable (legacy 0-5 remapped to 0-4), entry text comes from the embedded books, and Save downloads the same bundle with only the grades updated — diff it against the original to see exactly what the review changed.',
+        helpString: 'Worlds Apart: review graded samples/bundles from their FILES, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Pick several and each becomes a section with its own query text; stored grades arrive pre-filled and editable, entry text comes from the embedded books. Save downloads ONE review file for the whole run; apply it with node eval/synthetic-data/apply-review.mjs <file> --write.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-studio',
-        // Wrapped, not passed by reference: ST hands callbacks (namedArgs, unnamedArgs), which would
-        // land in preferredBook.
+        // Wrapped: ST hands callbacks (namedArgs, unnamedArgs), which would land in preferredBook.
         callback: () => lorebookStudio(chatBook()),
         helpString: 'Worlds Apart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
         returns: 'nothing',
-    }));
+    });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'wa-summary',
-        callback: probeSummary,
-        helpString: 'Worlds Apart: summarize the current chat with the configured prompt and score the result. Activates nothing.',
-        returns: 'nothing',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+    addWaCommand({
         name: 'wa-query',
         callback: probeQuery,
         helpString: 'Worlds Apart: score entries against arbitrary text without activating anything. Usage: /wa-query your query text here',
@@ -3229,15 +2298,14 @@ export async function init() {
                 isRequired: true,
             }),
         ],
-    }));
+    });
 
     console.log('Worlds Apart: ready');
 }
 
 globalThis.worldsApart_intercept = intercept;
 
-// Third-party extensions are loaded as modules; `hooks.activate` may not fire for
-// every ST version, so fall back to the conventional jQuery bootstrap.
+// `hooks.activate` may not fire on every ST version; the jQuery bootstrap is the fallback.
 jQuery(async () => {
     await init();
 });

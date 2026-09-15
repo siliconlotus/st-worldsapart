@@ -1,10 +1,7 @@
-// vector.mjs — vector similarity: L2 norm, the corpus mean (for mean-centering), and mean-centered
-// cosine of a query against a collection's item vectors. Pure and isomorphic (no DOM/fs/vectra), shared
-// by the server plugin, the extension, and the offline harnesses.
+// vector.mjs — L2 norm, corpus mean, and mean-centered cosine of a query against item vectors. Pure; shared by plugin, extension and harnesses.
 
 export function norm(vector) { let sum = 0; for (const x of vector) sum += x * x; return Math.sqrt(sum); }
 
-/** Mean vector of a collection's items — the corpus centroid mean-centering subtracts. */
 export function corpusMean(items) {
     const dim = items[0].vector.length;
     const mean = new Float64Array(dim);
@@ -13,11 +10,7 @@ export function corpusMean(items) {
     return mean;
 }
 
-/**
- * Per-item cosine of the query against each item vector, both optionally mean-centered (subtract the
- * corpus mean before comparing — removes the large shared direction that otherwise compresses a
- * single-corpus's similarities into a narrow band). Returns a Float64Array aligned with `items`.
- */
+/** Cosine per item, query and items both centred on `mean` when `centered`; aligned with `items`. */
 export function centeredCosineScores(items, queryVector, mean, centered = true) {
     const dim = mean.length;
     const q = new Float64Array(dim);

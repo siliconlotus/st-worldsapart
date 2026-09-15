@@ -1,204 +1,124 @@
-// grading.mjs — assembles a graded-scene SAMPLE: the self-contained bundle /wa-grade writes and
-// eval/graded-scene-grid.mjs reads back. Pure and ST-free (settings and candidate rows are injected), so
-// eval/grading-check.mjs can exercise the real assembler under node instead of trusting it by eye.
-//
-// WHY A BUNDLE AND NOT A PILE OF PATHS. A graded scene has to stay comparable months later, and every
-// input that lives outside the file is an input that can move underneath it: the chat gets played on, the
-// lorebook gets edited, the settings get retuned. All three happened to scene1, and the resulting harness
-// numbers were quietly describing a different configuration than the one that was graded. So the sample
-// carries the query text, the grades, the settings snapshot, and (optionally) the books themselves.
-//
-// The one thing deliberately NOT carried is the vector index: it is large, and a stale copy would keep
-// answering after the embedding model changed. The index path is recorded; the harness self-checks it by
-// re-embedding a stored chunk and comparing cosine.
+// grading.mjs — assembles the graded-scene bundle /wa-grade writes and eval/graded-scene-grid.mjs reads back: query, grades,
+// settings snapshot and the books themselves, frozen; the vector index is recorded by path only. ST-free.
 
-/** Fields of an entry the offline harness actually reads. `content` is NOT one of them, which is what makes
- *  'meta' lossless and ~20x smaller: the chunk text being scored comes from the vector index, and the
- *  gazetteer is built from keys and titles only.
- *
- *  This makes 'meta' lossless for the CURRENT gazetteer but not for experimenting with a wider one, which is
- *  why it is not the default. The widening that motivated keeping content — a gazetteer fed entry bodies —
- *  has since measured WORSE than shipped across three scenes (mean rank 7.20 vs 6.43; see
- *  ranking.mjs buildTermWeights), so 'full' is now just cheap insurance against the next such question
- *  rather than support for a live one. 'meta' is the better default the day sample size starts to hurt. */
-const META_FIELDS = ['uid', 'comment', 'key', 'keysecondary', 'vectorized', 'constant', 'sticky', 'order', 'disable', 'caseSensitive', 'matchWholeWords', 'scanDepth', 'ignoreBudget'];
+import * as matcher from './matcher.mjs';
 
-/**
- * Copies a book's entries at the requested fidelity.
- *
- * 'full' — verbatim, including entry content. THE DEFAULT: content is what a widened gazetteer would read,
- *          and that arm measures competitively (see META_FIELDS), so a sample that drops it can't test it.
- *          A book is a couple of MB and eval-data is gitignored, so the size is not worth the foreclosure.
- * 'meta' — every entry, `content` dropped. Lossless for the harness AS IT SCORES TODAY (see META_FIELDS)
- *          at ~1/20th the size. It keeps every entry, which matters: the gazetteer and the keyword scan read
- *          the whole book, so dropping "irrelevant" ENTRIES silently changes the entity filter and ranking.
- * 'none' — no entries; the sample just records which books were attached. graded-scene-grid.mjs REJECTS such
- *          a sample: it has no live-book fallback by design, since reading the current lorebook is what let a
- *          later edit move an already-graded scene's numbers. Provenance only.
- *
- * There is deliberately no "only the candidate entries" mode. It looks like the thrifty choice and is a
- * trap: the entity filter's gazetteer is built from every entry's keys and title, and admitting 2.3x too
- * many query terms was measured to move BM25 by up to 74% (see ranking.mjs buildGazetteer).
- *
- * @param {Record<string, object>|object[]} entries A book's entries (ST stores a uid-keyed object)
- * @param {'full'|'meta'|'none'} mode Fidelity
- * @returns {Record<string, object>} uid-keyed entries
- */
-export function trimBook(entries, mode = 'full') {
-    const list = Array.isArray(entries) ? entries : Object.values(entries ?? {});
+/** ST's top-level directories; a stored path is cut at the FIRST match, since a chat or a book may itself be named `data`. */
+const ST_ROOTS = /[\\/](data|public|plugins|backups|default)[\\/]/;
 
-    if (mode === 'none') {
-        return {};
-    }
+export function stRelative(path) {
+    if (typeof path !== 'string') return path;
+    const m = ST_ROOTS.exec(path);
+    return m ? path.slice(m.index + 1).replace(/\\/g, '/') : path;
+}
 
+/** A book's entries keyed by uid, verbatim and whole: a trimmed book moves stage 3's BM25 through the gazetteer (R22). */
+export function keyByUid(entries) {
     const out = {};
-    for (const entry of list) {
-        if (mode === 'full') {
-            out[entry.uid] = entry;
-            continue;
-        }
-        const kept = {};
-        for (const field of META_FIELDS) {
-            if (entry[field] !== undefined) {
-                kept[field] = entry[field];
-            }
-        }
-        out[entry.uid] = kept;
-    }
+    for (const entry of (Array.isArray(entries) ? entries : Object.values(entries ?? {}))) out[entry.uid] = entry;
     return out;
 }
 
-/**
- * Maps WA's live settings onto the harness's parameter names.
- *
- * The two vocabularies differ (settings are user-facing, the harness's are the scorers' own argument
- * names), and hand-transcribing them is how scene1 ended up with a partly reverse-engineered snapshot.
- * Whole-word/case-sensitivity come from ST globals, not WA settings, so they are injected.
- *
- * @param {object} s WA settings
- * @param {object} wi ST world-info globals
- * @param {boolean} wi.caseSensitive world_info_case_sensitive
- * @param {boolean} wi.wholeWords world_info_match_whole_words
- * @param {boolean} wi.includeNames world_info_include_names
- * @returns {object} captureParams for graded-scene-grid
- */
-export function captureParams(s, { caseSensitive, wholeWords, includeNames }) {
+/** WA's live settings under the harness's parameter names; the four ST globals (case, whole-word, includeNames, allowWIScan) are injected. */
+export function captureParams(s, { caseSensitive, wholeWords, includeNames, allowWIScan, recursive, maxRecursionSteps }) {
     return {
-        K: s.rrfK,
         K1: s.bm25K1,
+        chunkMode: s.chunkMode,
+        chunkSize: s.chunkSize,
+        minChunkSize: s.minChunkSize,
         B: s.bm25B,
-        LEXW: s.lexicalWeight,
-        // null = follows LEXW; recorded as-is so a sample says which of the two it was captured under.
-        KEYW: s.keywordWeight ?? null,
+        repeatCurve: s.repeatCurve,
+        repeatR: s.repeatR,
         boost: s.properNounBoost,
         stopwordDf: s.stopwordDocFreq,
-        // Derived from the mode rather than stored (see paramSnapshot): BM25-only runs down-weight
-        // general-English words, hybrid does not.
-        commonWordWeight: s.retrievalMode === 'lexical' ? 0.7 : 1,
-        threshold: s.scoreThreshold,
+        meanCentered: s.meanCentered,
         maxVectorEntries: s.maxVectorEntries,
-        minVectorEntries: s.minVectorEntries,
-        suppressVectorKeys: s.suppressVectorKeys,
-        scoreVectorKeys: s.scoreVectorKeys,
         entityFilter: s.entityFilter,
-        retrievalMode: s.retrievalMode,
-        queryMode: s.queryMode,
-        weightByOrder: s.weightByOrder,
-        vectorCutoff: s.vectorCutoff,
-        elbowSensitivity: s.elbowSensitivity,
-        dropoffThreshold: s.dropoffThreshold,
         caseSensitive,
         wholeWords,
+        // Read back by the harness, not only snapshotted: without it a permissive capture re-scores at the default.
+        wordBoundary: s.wordBoundary,
+        // The same, for the unit a conjunction must match within: absent, the harness re-scores at `scan` whatever the run used.
+        matchWindow: s.matchWindow,
         includeNames,
+        // "Include in World Info Scanning" on the Author's Note panel: puts the note and the depth prompt into the scan for every entry.
+        allowWIScan,
+        // Core's two, by their own names. Absent means the capture predates the field, which eval/scene.mjs reads as off.
+        recursive,
+        maxRecursionSteps,
     };
 }
 
-/**
- * A candidate row is scaffolding — always-on or persist-on-trigger — rather than a relevance result.
- *
- * Tiered off the CONFIGURED sticky value and the runtime constant class, never the runtime sticky state:
- * a sticky entry reads `block: 'dynamic'` on its keyword-activation turn, and a dry run never arms the
- * effect at all. Grading these would drag nDCG down for entries relevance never chose.
- * @param {object} row Candidate row
- * @returns {boolean} True when the row is scaffolding
- */
-export const isScaffolding = row => row.block === 'constant' || Number(row.sticky) > 0;
+/** Median; an even count takes the LOWER middle, so the result is always a grade a rater gave. */
+const median = v => [...v].sort((a, b) => a - b)[Math.floor((v.length - 1) / 2)];
 
-// --- delta pooling (/wa-super-grade) -----------------------------------------------------------------
-//
-// WHY THIS EXISTS. A single sample's pool is whatever ONE configuration surfaced — 15-20 entries out of a
-// 145-334 entry book. Score a configuration far from that one and its top rows are unjudged, so they count
-// as irrelevant and it is penalised for surfacing entries nobody looked at. That is textbook pool bias, and
-// it is fatal to a zero-based defaults review, which exists precisely to score distant configurations.
-//
-// The fix is iterative pooling: capture several population-changing configurations, union what they
-// surfaced, grade the union once, and keep going until the configurations the grid actually favours have
-// fully-judged top rows. That only stays cheap if each round grades the DELTA, which is what these do —
-// otherwise round four re-grades everything from rounds one through three and the loop dies of tedium.
-//
-// So arm count is deliberately not a constant anywhere in this module. It is whatever the coverage number
-// in graded-scene-grid.mjs says it needs to be.
+/** The grade in force on a row, NaN when ungraded: the latest human verdict, else the median of >= 3 llm verdicts (G7), else the latest llm. */
+export const gradeValue = (g) => {
+    const of = kind => (g?.grades ?? []).filter(v => v?.kind === kind).map(v => Number(v.grade)).filter(Number.isFinite);
+    const human = of('human');
+    if (human.length) return human[human.length - 1];
+    const llm = of('llm');
+    if (llm.length >= 3) return median(llm);
+    if (llm.length) return llm[llm.length - 1];
+    // A bare `grade` is a verdict a human has just typed and gradeEntries has not yet recorded — a live path (splitGraded, makeGradeOf).
+    return Number(g?.grade);
+};
 
-/** Unit Separator — see CLAUDE.md. A composite key git diffs, grep matches and awk doesn't truncate. */
+/** A capture row in the prompt by intent: constant, or sticky with the effect ARMED (`block`, never the `sticky` setting); eval/scene.mjs `isDurableEntry` asks the same of a raw entry. */
+export const isDurable = row => row.block === 'constant' || row.block === 'sticky';
+
+/** Unit Separator — CLAUDE.md; never NUL. */
 const US = '';
 
-/** A candidate row's identity. uid alone is ambiguous across books, so it is world + uid. */
-export const rowKey = row => `${row.world ?? ''}${US}${row.uid}`;
+/** The fields (`query`, `scanChat` compared through the shipped window builder, `depth`) on which two captures are different scenes; empty means the same scene. */
+export function sceneDiff(a, b, { ignoreTrailingWhitespace = false } = {}) {
+    const scanOf = v => matcher.scanWindow(v?.scanChat ?? [], { depth: v?.depth, includeNames: true });
+    const read = (v, f) => (f === 'scanChat' ? scanOf(v) : f === 'depth' ? Number(v?.depth) : v?.[f]);
+    const flat = x => (typeof x === 'string' ? x.split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n') : x);
+    const norm = ignoreTrailingWhitespace ? flat : (x => x);
+    return ['query', 'scanChat', 'depth'].filter(f => norm(read(a, f)) !== norm(read(b, f)));
+}
 
-/**
- * Unions several arms' candidate rows into one list for the grader.
- *
- * FOR THE UI ONLY. Each arm's SAMPLE keeps its own rows, with its own per-signal scores under its own
- * captureParams — that is what makes a sample re-runnable. A merged row would carry one arm's numbers under
- * another arm's parameters, which is a lie the offline harness would then reproduce faithfully.
- *
- * A duplicate keeps the FIRST arm's row (arms are passed best-understood-first, normally shipped-defaults
- * first) and accumulates the labels that surfaced it, so the grader can see whether a row is consensus or
- * the pet of one configuration. Ordered by best rank achieved across arms, so the strongest candidates are
- * graded while attention is freshest.
- *
- * Scaffolding is dropped here rather than listed-but-disabled as /wa-grade does: across N arms the same
- * constant would appear N times to no purpose, and relevance never chose it in any of them.
- *
- * @param {Array<{arm: string, rows: object[], entries: object[]}>} arms Per-arm captures, aligned rows/entries
- * @returns {{rows: object[], entries: object[]}} Deduped rows (each with `arms` and `bestRank`) + aligned entries
- */
+/** A row's identity: book + uid. `book`, never `world` — past the ST boundary the name is `book` everywhere. */
+export const rowKey = row => `${row.book ?? ''}${US}${row.uid}`;
+
+const FILLABLE = ['cosine', 'text', 'keys'];
+
+/** Unions several arms' candidate rows: the first arm wins a duplicate and accumulates `arms`, ordered by `bestRank`; only the raw signals under `scores` are filled from a later arm (`filled` names it). */
 export function unionArms(arms) {
     const seen = new Map();   // rowKey -> { row, entry }
     for (const { arm, rows, entries } of arms ?? []) {
         (rows ?? []).forEach((row, i) => {
-            if (isScaffolding(row)) return;
             const key = rowKey(row);
             const hit = seen.get(key);
-            const rank = Number(row['#'] ?? Infinity);
+            const rank = Number(row.index ?? Infinity);
             if (hit) {
                 hit.row.arms.push(arm);
                 hit.row.bestRank = Math.min(hit.row.bestRank, rank);
+                for (const sig of FILLABLE) {
+                    if (hit.row.scores?.[sig] == null && row.scores?.[sig] != null) {
+                        (hit.row.scores ??= {})[sig] = row.scores[sig];
+                        (hit.row.filled ??= {})[sig] = arm;
+                        if (sig === 'keys' && !(hit.row.why ?? []).length && (row.why ?? []).length) hit.row.why = row.why;
+                    }
+                }
                 return;
             }
-            seen.set(key, { row: { ...row, arms: [arm], bestRank: rank }, entry: entries?.[i] });
+            // `scores` is cloned: the fill writes into it, and a shallow copy would mutate the arm it came from.
+            seen.set(key, { row: { ...row, scores: { ...(row.scores ?? {}) }, arms: [arm], bestRank: rank, from: arm }, entry: entries?.[i] });
         });
     }
     const merged = [...seen.values()].sort((a, b) => a.row.bestRank - b.row.bestRank);
     return { rows: merged.map(x => x.row), entries: merged.map(x => x.entry) };
 }
 
-/**
- * Splits a union into rows that still need a human and rows an earlier round already judged.
- *
- * Matched on world+uid, never on title: titles get edited, and a retitled entry silently regraded from
- * zero would move the numbers of every arm that surfaced it. Prior rounds carry both fields (every sample
- * /wa-grade has ever written records them), so identity matching costs nothing.
- *
- * @param {object[]} rows Union rows from unionArms
- * @param {Array<{world?: string, uid?: number, grade: number}>} prior Grades from earlier rounds
- * @returns {{fresh: object[], known: object[], priorOf: Map<string, number>}} Split, plus rowKey -> prior grade
- */
+/** Splits union rows into those still needing a human and those an earlier round judged, matched on book+uid, never title; `priorOf` is rowKey -> grade in force. */
 export function splitGraded(rows, prior) {
     const priorOf = new Map();
     for (const g of prior ?? []) {
-        if (g && g.uid !== undefined && Number.isFinite(Number(g.grade))) {
-            priorOf.set(rowKey(g), Number(g.grade));
+        const v = gradeValue(g);
+        if (g && g.uid !== undefined && Number.isFinite(v)) {
+            priorOf.set(rowKey(g), v);
         }
     }
     return {
@@ -208,198 +128,337 @@ export function splitGraded(rows, prior) {
     };
 }
 
-/**
- * Accumulates this round's grades onto the earlier rounds'.
- *
- * Later rounds win on conflict, so a regrade is an overwrite rather than a duplicate. Prior grades are kept
- * even when this round's arms surfaced nothing matching them: they still describe judged entries of the same
- * book and scene, and the harness's pool is the judged set, not one capture's candidate list.
- *
- * @param {Array<object>} prior Grades from earlier rounds
- * @param {Array<object>} fresh This round's grades
- * @returns {object[]} Merged grade list
- */
-export function mergeGrades(prior, fresh) {
+/** Appends this round's bare-`grade` rows onto the earlier rounds' verdicts; nothing is overwritten, and a repeat of the same pass (`passKey`) is skipped. */
+export function mergeGrades(prior, fresh, who = {}) {
     const by = new Map();
-    for (const g of [...(prior ?? []), ...(fresh ?? [])]) {
-        if (g && g.uid !== undefined) by.set(rowKey(g), g);
+    for (const g of prior ?? []) if (g && g.uid !== undefined) by.set(rowKey(g), g);
+    for (const g of fresh ?? []) {
+        if (!g || g.uid === undefined) continue;
+        const seen = by.get(rowKey(g));
+        const lifted = gradeEntries([g], who)[0];
+        if (!seen) { by.set(rowKey(g), lifted); continue; }
+        const verdict = lifted?.grades?.slice(-1)[0];
+        if (!verdict) continue;
+        if ((seen.grades ?? []).some(v => v.kind === 'human' && passKey(v) === passKey(verdict))) continue;
+        by.set(rowKey(g), { ...seen, grades: [...(seen.grades ?? []), verdict] });
     }
     return [...by.values()];
 }
 
-/**
- * The book whose vector collection this scene's ranking came out of — the sample's `primaryBook`.
- *
- * NOT ST's chat book, and not "a world". Both of those are ST's own concepts with ST's own semantics (the
- * lorebook bound to the chat via METADATA_KEY; the book an entry belongs to) and neither answers the
- * question the sample actually asks, which is "which collection must the harness load". They coincide most
- * of the time and diverge exactly where it matters: retrieval spans every attached vectorized book, so the
- * chat's bound book can easily be one that contributed nothing — or, if it has no entries at all, one ST
- * never reports as attached, leaving the sample keyed to a collection that does not exist.
- *
- * So it is read off the ranking instead: the book contributing the MOST retrieved rows. Most rather than
- * top-ranked, because the harness loads one collection and declares the other books' grades out of scope
- * (excludeTitles) — picking a book with one lucky top hit over one with twenty would throw the twenty away.
- * Ties break toward the higher-ranked book (Map keeps insertion order and sort is stable).
- *
- * `cosine` is the retrieval marker: null means the entry was never retrieved, and it must be compared
- * against null, not tested for truthiness — a genuine 0.00000 cosine is a retrieved row.
- *
- * @param {object[]} rows Candidate rows, ranked best-first, as /wa-debug builds them
- * @returns {string|null} Book name, or null when nothing was retrieved (a keyword-only scene)
- */
+/** The sample's `primaryBook`: the book contributing the most retrieved rows (`cosine !== null`, never truthiness — a 0 cosine is retrieved), or null. */
 export function searchedBook(rows) {
     const counts = new Map();
     for (const row of rows ?? []) {
-        if (row?.cosine !== null && row?.cosine !== undefined && row.world) {
-            counts.set(row.world, (counts.get(row.world) ?? 0) + 1);
+        if (row?.cosine !== null && row?.cosine !== undefined && row.book) {
+            counts.set(row.book, (counts.get(row.book) ?? 0) + 1);
         }
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 
-/**
- * Assembles the sample.
- *
- * @param {object} args
- * @param {string} args.name Sample name (used for the filename)
- * @param {string} [args.notes] Free text
- * @param {string} args.query Retrieval query, verbatim
- * @param {string} args.scanText Keyword scan window
- * @param {number} args.depth messageDepth the query was built at
- * @param {string} args.index Vector index path (recorded, not embedded)
- * @param {string} [args.chat] Chat file path — provenance, and the ONLY way to re-derive the query at another depth
- * @param {string} [args.book] Primary book path — the harness's fallback when no entries are embedded
- * @param {string} args.primaryBook Book whose collection was searched
- * @param {string} [args.embedModel] Embedding model id
- * @param {object} args.params captureParams() output
- * @param {object} args.snapshot Raw grouped paramSnapshot(), for the record
- * @param {object[]} args.candidates Candidate rows, as /wa-debug builds them
- * @param {Record<string, object>} args.books world -> uid-keyed entries (already trimmed)
- * @param {string} args.bookMode Fidelity the books were copied at
- * @param {object[]} args.priority Per-book weight/offset/cap
- * @param {Array<{title: string, grade: number, world?: string, uid?: number}>} args.grades Human grades
- * @param {object} [args.cutoff] What the cutoff did on this run
- * @param {string} [args.now] ISO date (injected so the check is deterministic)
- * @returns {object} The sample manifest
- */
-export function buildSample({ name, notes, query, queryChat, scanText, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, bookMode, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, now }) {
-    // Grades for entries outside the searched collection can't be ranked offline: the harness loads one
-    // vector collection, so a second book's entries have no cosine and never enter the ranking. Declaring
-    // them here means the harness reports "excluded" instead of scoring them as irrelevant — the exact
-    // confound the interleaved-books case introduces.
-    const foreign = grades.filter(g => g.world && g.world !== primaryBook);
-
+/** Assembles the sample. `queryChat`/`scanChat` are ST's {name, mes} messages; `injects` are {key, text, ambient, depth}; `sources` is
+ *  matcher.usedMatchSources output; `books` is world -> uid-keyed entries; `chat`/`book`/`index` are paths, recorded not embedded; `now` is injected. */
+export function buildSample({ name, notes, query, queryChat, scanChat, injects, sources, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
+    const { budget, ...rest } = snapshot ?? {};
     return {
         name,
         notes: notes || `Graded ${now} from a live /wa-grade run.`,
         createdAt: now,
         createdBy: 'wa-grade',
 
-        // Frozen inputs — everything needed to re-rank this scene with no live state.
         query,
-        // The messages `query` was joined from, macros resolved, ST's {name, mes} shape. This is what makes
-        // messageDepth sweepable from a frozen sample: buildQuery over the last d of these reproduces the
-        // query at any depth <= the capture depth exactly, so ONE capture at a deliberately-too-wide depth
-        // (20) ablates down to 15/10/5 with no chat file and no live state.
-        //
-        // Splitting `query` back apart cannot substitute for this. buildQuery joins with '\n\n' and RP
-        // messages routinely contain blank lines, so the boundaries are not recoverable from the blob.
+        // What makes messageDepth sweepable offline: buildQuery over the last d of these reproduces the query at any depth <= capture.
         queryChat,
-        scanText,
+        // The haystack's inputs, never the haystack: a reader builds any window from these (matcher.mjs makeWindowFor).
+        scanChat,
+        injects,
+        sources,
         depth,
-        // Path only, for provenance and for re-deriving a WIDER window than was captured — the one thing
-        // queryChat can't do. A played-on chat invalidates it; queryChat is what's actually frozen.
-        chat,
-        // Which deployed plugin produced these scores. Retrieval math lives in plugin/ and a redeploy can
-        // move every per-entry signal in the sample without touching a single setting — server-side entry
-        // pooling did exactly that. `pluginFP` is what served the capture, `sourceFP` what the extension's
-        // own copy hashed to; equal means the deploy was current. A harness run against a different plugin
-        // is comparing rankings to grades collected under different arithmetic.
+        chat: stRelative(chat),
+        // `pluginFP` served the capture, `sourceFP` is what the extension's own copy hashed to; equal means the deploy was current.
         pluginFP,
         sourceFP,
+        // `<branch>@<git describe>`, undefined where the writer cannot resolve it.
+        waVersion,
+        stVersion,
         embedModel,
+        budget,
         primaryBook,
-        // Path to the primary book on disk — the harness's fallback when the sample embeds no entries
-        // (bookMode 'none'), and provenance otherwise.
-        book,
-        index,
+        // Provenance only, never a fallback: no reader may open the live book.
+        book: stRelative(book),
+        index: stRelative(index),
 
-        captureParams: params,
-        paramSnapshot: snapshot,
+        params,
+        paramSnapshot: rest,
 
-        bookMode,
         bookPriority: priority,
         books,
 
         grades,
-        gradeScale: 4,
-        excludeTitles: foreign.map(g => g.title),
+        gradeScale: GRADE_SCALE,
 
-        // The ranking as it stood, so a later run can be diffed against what was actually graded.
+        // The grading depth, under its historical name.
         cutoff,
-        // How many rows the grader was actually shown. Rows past it are UNGRADED, not irrelevant, so the
-        // harness needs it to know which of its deep cutoff arms it is allowed to believe.
+        // How many rows the grader was shown; rows past it are ungraded, not irrelevant.
         gradedCandidates,
         candidates,
     };
 }
 
-/** Fields that are identical across every arm of one pooled grading, so they are stored ONCE in a bundle.
- *  Everything else — query, candidates, captureParams, cutoff, primaryBook — is per-arm and must not be
- *  hoisted: the summary arm has a different query, and a lexical-only arm can retrieve from a different
- *  book. */
-const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'books', 'bookMode', 'bookPriority', 'grades', 'gradeScale', 'embedModel', 'pluginFP', 'sourceFP', 'chat'];
+/** Fields identical across every arm, stored once at document level. Not query, candidates, params, cutoff or primaryBook: those are per-arm. */
+const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
 
-/**
- * Packs one sample per arm into a single bundle.
- *
- * ONE FILE, NOT N. The arms of a pooled grading differ only in how they were scored; they share the graded
- * scene, the grades, and — the bulk of the bytes by a wide margin — the embedded copies of every attached
- * book. Writing them separately meant N browser downloads to accept and N duplicate copies of a 300-entry
- * lorebook on disk, which is why the first version of this was annoying enough to replace.
- *
- * @param {Array<{arm: string, sample: object}>} arms Per-arm samples from buildSample
- * @returns {object} Bundle: shared fields once, `arms` carrying the rest
- */
-export function bundleSamples(arms) {
+const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's names for sceneChat / sceneChats / sceneInjects / sceneSources
+
+/** Numeric signal values, which live under `scores` and a fitted model indexes by name; ranks and the fused score stay flat, being arm-relative. */
+const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'properNouns', 'length'];
+
+export const SCHEMA_VERSION = 3;
+
+/** A scene's id, `<chat basename>-msg-<end>`, every run outside `[A-Za-z0-9_]` collapsed to `-`. */
+const sceneId = (chat, end) => {
+    const base = String(chat ?? '').split(/[\\/]/).pop().replace(/\.[^.]*$/, '');
+    return `${base.replace(/[^A-Za-z0-9_]+/g, '-')}-msg-${end}`;
+};
+
+/** A rater's canonical id: a human's UUID, or for an llm `modelDigest || modelName` and `rubric` US-joined — never a printable separator, model ids carry `:` and `/` (G8, P6). */
+export const raterKey = r => (r?.kind === 'human'
+    ? String(r.id ?? '')
+    : [r?.modelDigest || r?.modelName || '', r?.rubric ?? ''].join(US));
+
+/** The inverse; `isDigest` says whether the model half is a content digest or a name standing in for one. */
+export const raterParts = r => (r?.kind === 'human'
+    ? { id: r.id }
+    : (([modelId, rubric]) => ({ modelId, rubric, isDigest: /^[0-9a-f]{64}$/.test(modelId) }))(String(r?.id ?? '').split(US)));
+
+/** A pass's identity, what a writer deduplicates on: the rater and the day. Settings are not identity (H1); `params` must not join it. */
+export const passKey = v => [v?.id ?? '', v?.gradedAt ?? ''].join(US);
+
+const RATER_DESC = ['modelName', 'family', 'quant', 'modelParams'];
+
+/** The distinct raters across a scene's verdicts as one table, each verdict carrying its index. One `grades` array, not one per kind: the file promises order across kinds. */
+function indexVerdicts(entries) {
+    const raters = [];
+    const at = new Map();
+    const index = (v) => {
+        const kind = v.kind === 'human' ? 'human' : 'llm';
+        const id = raterKey({ kind, ...v });
+        const key = `${kind}${US}${id}`;
+        if (!at.has(key)) {
+            const desc = {};
+            for (const k of RATER_DESC) if (v[k]) desc[k] = v[k];
+            at.set(key, raters.length);
+            raters.push({ rater: raters.length, kind, id, ...desc });
+        }
+        return at.get(key);
+    };
+    const who = ({ kind, id, modelDigest, rubric, modelName, family, quant, modelParams, ...rest }) =>
+        [{ kind, id, modelDigest, rubric, modelName, family, quant, modelParams }, rest];
+    const out = (entries ?? []).map(e => ({
+        ...e,
+        ...((e.grades ?? []).length
+            ? { grades: e.grades.map(g => { const [r, v] = who(g); return { rater: index(r), ...v }; }) }
+            : {}),
+    }));
+    return { entries: out, raters };
+}
+
+/** A stored rater record expanded back into the fields raterKey composed it from; without it openBundle -> setGrades recomposes a different id (G9). */
+const expandRater = (who) => {
+    if (who?.kind !== 'llm') return who;
+    const { modelId, rubric, isDigest } = raterParts(who);
+    return {
+        ...who,
+        // raterKey reads `modelDigest || modelName`, so a NAME must not be restored as a digest.
+        ...(isDigest ? { modelDigest: modelId } : { modelName: who.modelName ?? modelId }),
+        ...(rubric ? { rubric } : {}),
+    };
+};
+
+/** The inverse: an index back to the rater it names, so a reader never handles indices. */
+const deref = (entries, raters = []) => (entries ?? []).map(e => ({
+    ...e,
+    ...(e.grades ? { grades: e.grades.map(({ rater, ...v }) => { const { rater: _i, ...who } = raters[rater] ?? {}; return { ...expandRater(who), ...v }; }) } : {}),
+}));
+
+/** Live grade rows -> scene entries carrying the record: a bare `grade` is a human's by definition and is appended as a verdict. */
+function gradeEntries(grades, { user, now } = {}) {
+    const out = [];
+    for (const g of grades ?? []) {
+        if (!g || g.uid === undefined) continue;
+        const verdicts = [...(g.grades ?? [])];
+        if (Number.isFinite(Number(g.grade))) {
+            verdicts.push({ kind: 'human', ...(user ? { id: user } : {}), grade: Number(g.grade), ...(now ? { gradedAt: now } : {}) });
+        }
+        out.push({
+            book: g.book ?? '',
+            uid: g.uid,
+            title: g.title,
+            ...(verdicts.length ? { grades: verdicts } : {}),
+        });
+    }
+    return out;
+}
+
+
+/** A debug row -> a v3 candidate: signals gathered under `scores`, everything else as-is. One direction only; there is no inverse. */
+export const toCandidate = (row, i) => {
+    const scores = { ...(row.scores ?? {}) };
+    const flat = {};
+    for (const [k, v] of Object.entries(row)) {
+        if (SIGNAL_FIELDS.includes(k)) scores[k] = v; else flat[k] = v;
+    }
+    // Idempotent: a row that is already a candidate keeps its `scores`, since the UI and bundleSamples both convert the same row.
+    delete flat.scores;
+    return { book: row.book ?? '', uid: row.uid, index: Number(row.index ?? i), ...flat, scores };
+};
+
+/** Canonical JSON for hashing: keys sorted, since insertion order carries no meaning and two installs need not agree on it. */
+const canonical = v => {
+    if (v === undefined || typeof v === 'function') return 'null';
+    if (v === null || typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+    return `{${Object.keys(v).sort()
+        .filter(k => v[k] !== undefined && typeof v[k] !== 'function')
+        .map(k => `${JSON.stringify(k)}:${canonical(v[k])}`)
+        .join(',')}}`;
+};
+
+/** Web Crypto, not node:crypto: the browser half imports this module. */
+const sha256Hex = async text => [...new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+/** Drops `entry.world`, ST's back-pointer to the book name, which is present or absent by ST path and would hash one book two ways (G8). */
+const withoutLocation = e => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return e;
+    const { world, ...rest } = e;
+    return rest;
+};
+
+/** book name -> SHA-256 hex of its entries. Beside `books`, never inside: every reader walks a book with Object.values. */
+export async function hashBooks(books) {
+    return Object.fromEntries(await Promise.all(Object.entries(books ?? {}).map(
+        async ([name, bk]) => [name, await sha256Hex(canonical(Object.fromEntries(
+            Object.entries(bk ?? {}).map(([uid, e]) => [uid, withoutLocation(e)]))))])));
+}
+
+/** Packs one sample per arm into one schemaVersion 3 document; one scene is a one-element `scenes` list. `scene.user` is the rater
+ *  id for freshly typed grades (state.mjs `raterId`); `extra` is document-level fields to carry. */
+export async function bundleSamples(arms, scene = {}, extra = {}) {
     const first = arms[0]?.sample ?? {};
-    const bundle = { bundleVersion: 1 };
-    for (const f of SHARED_FIELDS) if (first[f] !== undefined) bundle[f] = first[f];
-    bundle.arms = arms.map(({ arm, sample }) => {
-        const per = { arm };
-        for (const [k, v] of Object.entries(sample)) if (!SHARED_FIELDS.includes(k)) per[k] = v;
+    const doc = { schemaVersion: SCHEMA_VERSION };
+    if (scene.captureId) doc.captureId = scene.captureId;
+    for (const f of SHARED_FIELDS) if (first[f] !== undefined) doc[f] = first[f];
+    Object.assign(doc, extra);
+
+    const id = sceneId(first.chat, scene.end);
+    const indexed = indexVerdicts(gradeEntries(first.grades, { user: scene.user, now: first.createdAt }));
+
+    // A scene is the graded moment, not a span: `sceneStart` and `depth` belong to the arm's cell.
+    doc.scenes = [{ id, sceneChat: first.chat ?? '', sceneEnd: scene.end, entries: indexed.entries }];
+
+    const whyBlock = {};
+    doc.arms = arms.map(({ arm, sample }) => {
+        const per = { name: arm };
+        if (sample.waVersion !== undefined) per.waVersion = sample.waVersion;
+        if (sample.stVersion !== undefined) per.stVersion = sample.stVersion;
+        per.params = { ...(sample.params ?? {}), ...(sample.scoredBy ? { scoredBy: sample.scoredBy } : {}) };
+        if (sample.paramSnapshot !== undefined) per.paramSnapshot = sample.paramSnapshot;
+        const cell = { sceneStart: scene.start, depth: sample.depth };
+        for (const [k, v] of Object.entries(sample)) {
+            if (SHARED_FIELDS.includes(k) || SCENE_FIELDS.includes(k) || k in extra) continue;
+            if (['arm', 'grades', 'candidates', 'params', 'paramSnapshot', 'depth', 'waVersion', 'stVersion', 'scoredBy', 'books'].includes(k)) continue;
+            if (v === undefined) continue;
+            cell[k] = v;
+        }
+        // Layout order, load-bearing: every stage-5 cap is a prefix cut replayed over the array as it stands. `why` moves to the trailing block, by position.
+        const cands = (sample.candidates ?? []).map(toCandidate);
+        cell.candidates = cands.map(({ why: _why, ...c }) => c);
+        const whys = cands.map(c => c.why ?? []);
+        if (whys.some(w => w.length)) whyBlock[arm] = { [id]: whys };
+        per.scenes = { [id]: cell };
         return per;
     });
-    return bundle;
+
+    // `query`/`queryChat` hoist onto the scene only when the arms agree; openBundle spreads the cell last, so a per-arm value wins.
+    const cells = doc.arms.map(a => a.scenes[id]);
+    const key = c => JSON.stringify([c.query ?? null, c.queryChat ?? null]);
+    if (cells.length && cells.every(c => key(c) === key(cells[0]))) {
+        const { query, queryChat } = cells[0];
+        for (const c of cells) { delete c.query; delete c.queryChat; }
+        if (query !== undefined) doc.scenes[0].query = query;
+        if (queryChat !== undefined) doc.scenes[0].queryChat = queryChat;
+    }
+
+    if (indexed.raters.length) doc.raters = indexed.raters;
+
+    // Field order is the schema (bundle-schema.md): the bulk goes last, and the hashes stay ahead of the books.
+    const books = first.books ?? {};
+    doc.bookHashes = await hashBooks(books);
+
+    if (Object.keys(whyBlock).length) doc.candidateWhy = whyBlock;
+
+    doc.sceneChats = { [id]: first.scanChat ?? [] };
+    if ((first.injects ?? []).length) doc.sceneInjects = { [id]: first.injects };
+    // Only the fields some entry's `matchXxx` names (matcher.usedMatchSources): a persona description is the most personal text a shared file could carry.
+    if (Object.keys(first.sources ?? {}).length) doc.sceneSources = { [id]: first.sources };
+    doc.books = books;
+    return doc;
 }
 
-/**
- * Unpacks one arm of a bundle back into an ordinary sample, so every existing tool keeps working unchanged.
- *
- * A plain sample passes through untouched, which is what lets callers open any manifest without knowing
- * which kind it is. An unknown arm name is an error rather than a silent fallback — scoring the wrong
- * configuration and reporting it as the requested one is the failure mode worth being loud about.
- *
- * @param {object} manifest A bundle or a plain sample
- * @param {string} [arm] Arm name; defaults to 'shipped' when present, else the first
- * @returns {object} A plain sample
- */
-export function openBundle(manifest, arm = null) {
-    if (!Array.isArray(manifest?.arms)) return normalizeSample(manifest);
-    const names = manifest.arms.map(a => a.arm);
+/** One arm of one scene as a flat view, every field keeping its schema name; `arm` is the arm's `name`. Defaults to the 'shipped' arm and the only scene. */
+export function openBundle(doc, arm = null, scene = null) {
+    if (!Array.isArray(doc?.scenes)) {
+        throw new Error('not a graded-scene document — no `scenes`');
+    }
+    const ids = doc.scenes.map(s => s.id);
+    const sc = scene ? doc.scenes.find(s => s.id === scene) : doc.scenes[0];
+    if (!sc) throw new Error(`document has no scene "${scene}" — available: ${ids.join(', ')}`);
+
+    const over = (doc.arms ?? []).filter(a => a.scenes?.[sc.id]);
+    const names = over.map(a => a.name);
     const wanted = arm ?? (names.includes('shipped') ? 'shipped' : names[0]);
-    const hit = manifest.arms.find(a => a.arm === wanted);
-    if (!hit) throw new Error(`bundle has no arm "${wanted}" — available: ${names.join(', ')}`);
-    const { arms: _drop, bundleVersion: _v, ...shared } = manifest;
-    return normalizeSample({ ...shared, ...hit, name: `${manifest.name}--${hit.arm}` });
+    const hit = over.find(a => a.name === wanted);
+    if (!hit) throw new Error(`scene "${sc.id}" has no arm "${wanted}" — available: ${names.join(', ')}`);
+
+    const { scenes: _s, arms: _a, sceneChats, sceneInjects, sceneSources, raters, schemaVersion: _v, ...docFields } = doc;
+    const { entries, ...sceneFields } = sc;
+    const { name: armName, scenes: _cells, params, ...armFields } = hit;
+    const { depth, ...cell } = hit.scenes[sc.id];
+    const whys = doc.candidateWhy?.[armName]?.[sc.id];
+    return {
+        ...docFields,
+        ...sceneFields,
+        scanChat: sceneChats?.[sc.id] ?? [],
+        injects: sceneInjects?.[sc.id] ?? [],
+        sources: sceneSources?.[sc.id] ?? {},
+        entries: deref(entries, raters),
+        ...armFields,
+        params,
+        depth,
+        ...cell,
+        ...(whys ? { candidates: (cell.candidates ?? []).map((c, i) => (whys[i]?.length ? { ...c, why: whys[i] } : c)) } : {}),
+        arm: armName,
+    };
 }
 
-/**
- * The grading scale: 0-4, each grade an INCLUSION DECISION rather than a magnitude. Anchored wording is
- * what inter-rater agreement hangs on — measured on one scene, restating the rubric alone nearly doubled
- * weighted kappa between two raters — so the anchors are data here and the grading UIs show them verbatim.
- */
+export const armNames = (doc, scene = null) => {
+    const sc = scene ? doc?.scenes?.find(s => s.id === scene) : doc?.scenes?.[0];
+    return sc ? (doc.arms ?? []).filter(a => a.scenes?.[sc.id]).map(a => a.name) : [];
+};
+
+/** Writes verdict rows (the entry shape openBundle hands out) back onto a single-scene document — the only writer of the layout besides bundleSamples. */
+export function setGrades(doc, rows, who = {}) {
+    if (!Array.isArray(doc?.scenes)) throw new Error('setGrades expects a schemaVersion 3 document');
+    if (doc.scenes.length !== 1) throw new Error(`setGrades is for single-scene documents; this one has ${doc.scenes.length}`);
+    const indexed = indexVerdicts(gradeEntries(rows, who));
+    doc.scenes[0].entries = indexed.entries;
+    if (indexed.raters.length) doc.raters = indexed.raters; else delete doc.raters;
+    return doc;
+}
+
+/** The 0-4 scale's anchors, shown verbatim by the grading UIs; the wording is what agreement hangs on (G5). */
 export const GRADE_ANCHORS = [
     'Definitely not relevant',
     'Most likely not relevant; include only as filler',
@@ -407,17 +466,8 @@ export const GRADE_ANCHORS = [
     'Fairly relevant; should likely be included',
     'Directly relevant; should absolutely be included',
 ];
-export const GRADE_SCALE = 4;
+export const GRADE_SCALE = GRADE_ANCHORS.length - 1;
 
-// ponytail: transitional 0-5 -> 0-4 remap (grader's own re-reading: 2s->1, 3+->g-1); DELETE normalizeGrade
-// and normalizeSample (leave a passthrough) once every pre-0-4 sample has been regraded or retired.
-export const normalizeGrade = g => (g <= 1 ? g : g <= 2 ? 1 : g - 1);
-export function normalizeSample(sample) {
-    if (!sample || sample.gradeScale === GRADE_SCALE || !Array.isArray(sample.grades)) return sample;
-    return { ...sample, gradeScale: GRADE_SCALE, grades: sample.grades.map(g => ({ ...g, grade: normalizeGrade(Number(g.grade) || 0) })) };
-}
-
-/** Sample -> pretty JSON + filename, ready for ST's download(). */
 export function sampleFile(sample) {
     const slug = String(sample.name || 'scene').trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scene';
     return { filename: `${slug}.json`, content: `${JSON.stringify(sample, null, 2)}\n` };

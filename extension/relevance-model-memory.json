@@ -1,0 +1,377 @@
+{
+ "schema": 2,
+ "tier": "memory",
+ "byModel": {
+  "bge-m3": {
+   "tier": "memory",
+   "standardise": "pooled",
+   "cutoff": 0.07,
+   "f2": 0.5028368817602132,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -2.94846713325475,
+     0.39306053680445185,
+     0.6901435457543277,
+     0.4121034048999398,
+     0.3069056429107746
+    ],
+    "ge3": [
+     -3.405501113798108,
+     0.2757740054137927,
+     0.5960580431033676,
+     0.4489842106090474,
+     0.27697081755131153
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.827432166900499,
+   "heldOutAuc": 0.8072515639478846,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "bge-m3"
+  },
+  "qwen3-embedding-8b-4bit-dwq": {
+   "tier": "memory",
+   "standardise": "pooled",
+   "cutoff": 0.12,
+   "f2": 0.5442933420943817,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -3.033751701049117,
+     0.7519842130458673,
+     0.5581661138590661,
+     0.30928305768623854,
+     0.2661477849931287
+    ],
+    "ge3": [
+     -3.5399239063593155,
+     0.765730419952319,
+     0.4102316631564791,
+     0.3403035222159982,
+     0.27028267767716174
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.8583985210877113,
+   "heldOutAuc": 0.8437210423093956,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "omlx:Qwen3-Embedding-8B-4bit-DWQ"
+  },
+  "cohee/jina-embeddings-v2-base-en": {
+   "tier": "memory",
+   "standardise": "pooled",
+   "cutoff": 0.06,
+   "f2": 0.5029608608633912,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -2.896660410591336,
+     -0.07729723850538446,
+     0.8229070204181926,
+     0.46610550618344654,
+     0.19818800488453028
+    ],
+    "ge3": [
+     -3.3748223646468625,
+     -0.0578248843673039,
+     0.6896752557785227,
+     0.487954112226223,
+     0.19565324730820707
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.8254314114420325,
+   "heldOutAuc": 0.8024806390508762,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "st:Cohee/jina-embeddings-v2-base-en"
+  },
+  "embeddinggemma": {
+   "tier": "memory",
+   "standardise": "pooled",
+   "cutoff": 0.08,
+   "f2": 0.5080231700061992,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -2.9885714203260667,
+     0.6090673223544648,
+     0.5849759964841843,
+     0.35969466643871684,
+     0.26972084285416315
+    ],
+    "ge3": [
+     -3.4561132454511982,
+     0.5326573902869518,
+     0.479739548568021,
+     0.39678870847377895,
+     0.26127303672246593
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.8390501319261213,
+   "heldOutAuc": 0.8166668837524329,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "embeddinggemma"
+  },
+  "mxbai-embed-large": {
+   "tier": "memory",
+   "standardise": "pooled",
+   "cutoff": 0.11,
+   "f2": 0.5015221907545068,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -2.954448715976416,
+     0.4065380818452453,
+     0.7346895360176924,
+     0.3883252635215417,
+     0.27927705660194213
+    ],
+    "ge3": [
+     -3.4162569025817913,
+     0.32443190644292236,
+     0.6183794411772201,
+     0.4242455482048247,
+     0.26185769192967473
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.8311443335032804,
+   "heldOutAuc": 0.8112749385027036,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "mxbai-embed-large"
+  },
+  "qwen3-embedding:0.6b": {
+   "tier": "memory",
+   "standardise": "pooled",
+   "cutoff": 0.07,
+   "f2": 0.5203675900740343,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -2.978719498184997,
+     0.6222868488834516,
+     0.6439167994261855,
+     0.33070774850351936,
+     0.31714742067123675
+    ],
+    "ge3": [
+     -3.4555030350733937,
+     0.5809053389954939,
+     0.5133786022042479,
+     0.3648625887856085,
+     0.30910730327680924
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.8445555820193442,
+   "heldOutAuc": 0.8279531727394859,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "qwen3-embedding:0.6b"
+  },
+  "qwen3-embedding:4b": {
+   "tier": "memory",
+   "standardise": "pooled",
+   "cutoff": 0.11,
+   "f2": 0.535446892979443,
+   "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+   "features": [
+    "cosine",
+    "text",
+    "properNouns",
+    "density"
+   ],
+   "properNounsMode": "idf",
+   "properNounsExtract": "entity",
+   "layout": [
+    "intercept",
+    "cosine.z",
+    "text.z",
+    "properNouns.z",
+    "density.z"
+   ],
+   "beta": {
+    "ge2": [
+     -2.9888347041876346,
+     0.650238556181263,
+     0.6203189944908334,
+     0.30499184516046335,
+     0.2804784500395819
+    ],
+    "ge3": [
+     -3.4826509068410476,
+     0.6478068100750186,
+     0.4821937951118333,
+     0.3338146255722737,
+     0.27940624961965044
+    ]
+   },
+   "aucAt": 3,
+   "auc": 0.849007390839973,
+   "heldOutAuc": 0.833986141244683,
+   "fittedOn": {
+    "scenes": 94,
+    "rows": 6051,
+    "books": 5
+   },
+   "embedModel": "qwen3-embedding:4b"
+  }
+ },
+ "noCosine": {
+  "tier": "memory",
+  "standardise": "pooled",
+  "cutoff": 0.06,
+  "f2": 0.505087274340908,
+  "target": "E[credit] = 0.5*P(>=2) + 0.5*min(P(>=3), P(>=2))",
+  "features": [
+   "text",
+   "properNouns",
+   "density"
+  ],
+  "properNounsMode": "idf",
+  "properNounsExtract": "entity",
+  "layout": [
+   "intercept",
+   "text.z",
+   "properNouns.z",
+   "density.z"
+  ],
+  "beta": {
+   "ge2": [
+    -2.896139933167127,
+    0.8220217532219423,
+    0.45546090981593806,
+    0.22365388451838789
+   ],
+   "ge3": [
+    -3.375155193037498,
+    0.6897900263507798,
+    0.4803476595760847,
+    0.21507545346228027
+   ]
+  },
+  "aucAt": 3,
+  "auc": 0.8256505130046778,
+  "heldOutAuc": 0.8039999292920648,
+  "fittedOn": {
+   "scenes": 94,
+   "rows": 6051,
+   "books": 5
+  }
+ }
+}

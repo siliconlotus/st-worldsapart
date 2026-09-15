@@ -1,0 +1,31 @@
+name: staging version
+on:
+  push:
+    branches: [staging]
+
+# Two merges landing together queue rather than clobber each other's bump.
+concurrency:
+  group: staging-version
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    # Without this the bot's own push retriggers the workflow forever.
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node .github/scripts/bump-staging-version.mjs
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add manifest.json
+          git commit -m 'Bump staging build counter'
+          git push origin staging

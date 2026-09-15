@@ -1,0 +1,55 @@
+// buildKeyPruneScan's near-duplicate flag, on synthetic shapes: a scene summarized twice, an arc containing a scene (must not flag), two arcs with one text (must flag).
+import { buildKeyPruneScan, KEY_DUPE_MIN } from '../extension/keyword-audit.mjs';
+import { eq } from './metrics.mjs';
+
+const OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
+    pruneUnattested: false, pruneCommon: false, pruneShort: false, pruneShared: false, pruneFragment: false,
+    ignoreProper: false, minLength: 4, bookShared: 0.75 };
+
+// Rare tokens only: the flag ignores anything the English table calls common, so filler must be rare too.
+const rare = (tag, n) => Array.from({ length: n }, (_, i) => `${tag}zzq${i}`).join(' ');
+const body = (shared, own) => `${rare('shared', shared)} ${rare('own' + own, 40)} ${'padding text here. '.repeat(12)}`;
+
+const mk = es => ({ entries: Object.fromEntries(es.map((e, i) => [String(i), { uid: i, comment: '', content: '', key: [], ...e }])) });
+
+let scan = buildKeyPruneScan(mk([
+    { comment: '180 - Docking Rehearsal', content: body(60, 'a') },
+    { comment: '181 - Attitude Control', content: body(60, 'a') },
+    { comment: '999 - Unrelated', content: body(0, 'c') },
+]), OPTS, new Set());
+eq(scan.dupes.get(0)?.length, 1, 'a near-duplicate pair is flagged');
+eq(scan.dupes.get(1)?.[0].uid, 0, 'and it is flagged on both sides, not just the first');
+eq(scan.dupes.has(2), false, 'an unrelated entry is not flagged');
+eq(scan.dupes.get(0)[0].sim >= KEY_DUPE_MIN, true, 'reported similarity clears the threshold');
+
+scan = buildKeyPruneScan(mk([
+    { comment: 'ARC 10 — Return from Orbit', content: body(60, 'a') },
+    { comment: '089 - Crew Quarters Revelry', content: body(60, 'a') },
+]), OPTS, new Set());
+eq(scan.dupes.size, 0, 'arc vs member scene is hierarchy, not duplication');
+
+scan = buildKeyPruneScan(mk([
+    { comment: 'The Baikonur Trip', stmbArc: true, content: body(60, 'a') },
+    { comment: '176 - Launch Day Party', content: body(60, 'a') },
+]), OPTS, new Set());
+eq(scan.dupes.size, 0, 'stmbArc is honoured when the title does not say ARC');
+
+scan = buildKeyPruneScan(mk([
+    { comment: 'Arc 05: Tarn\'s Return', content: body(60, 'a') },
+    { comment: 'Arc 05 - Tarn\'s Return', content: body(60, 'a') },
+]), OPTS, new Set());
+eq(scan.dupes.size, 2, 'arc vs arc is a real duplicate');
+
+scan = buildKeyPruneScan(mk([
+    { comment: 'stub a', content: 'tiny' },
+    { comment: 'stub b', content: 'tiny' },
+]), OPTS, new Set());
+eq(scan.dupes.size, 0, 'entries under the length floor are not compared');
+
+scan = buildKeyPruneScan(mk([
+    { comment: 'kept', content: body(60, 'a') },
+    { comment: 'retired', disable: true, content: body(60, 'a') },
+]), OPTS, new Set());
+eq(scan.dupes.get(0)?.[0].disabled, true, 'a disabled twin is flagged as disabled, not hidden');
+
+console.log('dupe-check: ok');

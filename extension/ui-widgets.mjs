@@ -1,17 +1,16 @@
-// ui-widgets.mjs — shared UI controls used by the settings panel and the Lorebook Studio:
-// the sort/tier control builders, the floating context menu, entry tooltips + glyph, and the
-// injected stylesheet. DOM-coupled; imports the sort vocabulary from sort.mjs and needs Popup.
-import { settings } from './state.mjs';
+// ui-widgets.mjs — DOM controls shared by the settings panel and the Lorebook Studio: sort/tier controls, the
+// floating context menu, entry tooltip and fold, and the injected stylesheet.
 import { escapeHtml } from '../../../../utils.js';
+import { markExcerptText } from './matcher.mjs';
+import { DOMPurify } from '../../../../../lib.js';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
+import { t, translate } from '../../../../i18n.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from './sort.mjs';
 
 export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢');
 
 
-// --- Shared floating context menu (submenus) ---------------------------------------------------------
-// Each item is a leaf {label, fn, danger, active} or a parent {label, children:[…]} that flies out on
-// hover. `mount` is where panels attach (a modal's <dialog> to stack in its top layer, else document.body).
+// Floating context menu: items are leaves {label, fn, danger, active} or parents {label, children}; `mount` is a modal's <dialog> (its top layer) or document.body.
 let ctxPanels = [];   // open panels, root at 0; a submenu at depth d replaces anything deeper
 const closeCtx = () => {
     for (const m of ctxPanels) m.remove(); ctxPanels = [];
@@ -21,11 +20,18 @@ const closeCtx = () => {
 };
 const ctxDown = ev => { if (!ctxPanels.some(m => m.contains(ev.target))) closeCtx(); };
 const ctxKey = ev => { if (ev.key === 'Escape') { ev.preventDefault(); closeCtx(); } };
-const buildCtxPanel = (items, x, y, depth, mount) => {
-    while (ctxPanels.length > depth) ctxPanels.pop().remove();   // drop this level + deeper before reopening
+// `refresh` is the item builder for a menu whose `keep` items stay open: after such a click the menu is rebuilt from it, so tick marks update in place.
+const buildCtxPanel = (items, x, y, depth, mount, refresh = null) => {
+    while (ctxPanels.length > depth) ctxPanels.pop().remove();
     const menu = document.createElement('div'); menu.className = 'wa-ctx';
     for (const it of items) {
         const row = document.createElement('div'); row.className = 'wa-ctx-item' + (it.danger ? ' wa-ctx-danger' : '') + (it.children ? ' wa-ctx-parent' : '') + (it.active ? ' wa-ctx-active' : '');
+        if (it.icon) { const ic = document.createElement('i'); ic.className = `${it.icon} wa-ctx-icon`; row.append(ic); }   // a Font Awesome class, e.g. a tick state
+        // `glyph` is the item's own mark beside the tick: a Font Awesome class or a text glyph such as an emoji, tinted by `glyphColor`.
+        if (it.glyph) {
+            const g = it.glyph.startsWith('fa-') ? Object.assign(document.createElement('i'), { className: `fa-solid ${it.glyph}` }) : Object.assign(document.createElement('span'), { textContent: it.glyph });
+            g.classList.add('wa-ctx-glyph'); if (it.glyphColor) g.style.color = it.glyphColor; row.append(g);
+        }
         const lbl = document.createElement('span'); lbl.textContent = it.label; row.append(lbl);
         if (it.children) {
             const car = document.createElement('span'); car.className = 'wa-ctx-caret'; car.textContent = '›'; row.append(car);
@@ -33,72 +39,69 @@ const buildCtxPanel = (items, x, y, depth, mount) => {
             row.addEventListener('mouseenter', open);
             row.addEventListener('click', ev => { ev.stopPropagation(); open(); });   // click also opens (touch / diagonal-miss)
         } else {
-            row.addEventListener('mouseenter', () => { while (ctxPanels.length > depth + 1) ctxPanels.pop().remove(); });   // entering a childless row drops any open submenu
-            // Panels mount on document.body, so a bubbling click reads as "outside the drawer" to ST's
-            // autoclose handler and collapses the Extensions panel. Stop here (parent rows already do).
-            row.addEventListener('click', ev => { ev.stopPropagation(); closeCtx(); it.fn?.(); });
+            row.addEventListener('mouseenter', () => { while (ctxPanels.length > depth + 1) ctxPanels.pop().remove(); });
+            // Without stopPropagation the click bubbles to ST's autoclose handler and collapses the Extensions drawer.
+            row.addEventListener('click', ev => {
+                ev.stopPropagation();
+                if (it.keep && refresh) { it.fn?.(); buildCtxPanel(refresh(), x, y, depth, mount, refresh); return; }
+                closeCtx(); it.fn?.();
+            });
         }
         menu.append(row);
     }
     mount.append(menu);
     ctxPanels[depth] = menu;
-    const r = menu.getBoundingClientRect();   // clamp so it never opens off-screen
+    const r = menu.getBoundingClientRect();
     menu.style.left = Math.max(6, Math.min(x, innerWidth - r.width - 6)) + 'px';
     menu.style.top = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
     return menu;
 };
-export const showCtxMenu = (items, x, y, mount = document.body) => {
+export const showCtxMenu = (items, x, y, mount = document.body, refresh = null) => {
     closeCtx();
-    buildCtxPanel(items, x, y, 0, mount);
+    buildCtxPanel(items, x, y, 0, mount, refresh);
     document.addEventListener('mousedown', ctxDown, true);
     document.addEventListener('keydown', ctxKey, true);
     window.addEventListener('scroll', closeCtx, true);
 };
 
-// Reorder / enable tiers (shared). Draft a copy, commit on Save. onSaved fires after persistence.
-// Inline tier-precedence editor: ↑/↓ reorder + enable checkbox, committing live via setCfg/onChange.
-// Shared by WA settings (mounted inline) and the Studio's Configure-tiers popup. getCfg returns a fresh
-// array each call, so mutating a copy and handing it to setCfg is safe.
-export function makeTierEditor(getCfg, setCfg, onChange) {
+/** Tier-precedence editor (↑/↓ and an enable checkbox), committing live through setCfg/onChange. `getCfg` must
+ * return a fresh array each call: the editor mutates it before handing it to setCfg. */
+/** `omit` hides tiers that mean nothing where the editor is shown (the panel hides `disabled`: no disabled entry reaches the prompt); moves skip over hidden rows, the config keeps them. */
+export function makeTierEditor(getCfg, setCfg, onChange, { omit = [] } = {}) {
     const wrap = document.createElement('div');
     const commit = next => { setCfg(next); onChange?.(); render(); };
     const render = () => {
         const cfg = getCfg();
         wrap.innerHTML = '';
-        cfg.forEach((t, i) => {
+        const vis = cfg.map((tier, i) => ({ tier, i })).filter(x => !omit.includes(x.tier.id));
+        vis.forEach(({ tier, i }, k) => {
             const row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px 0;';
-            const mv = (cls, dis, dir) => { const x = document.createElement('i'); x.className = 'fa-solid ' + cls; x.style.cssText = `cursor:${dis ? 'default' : 'pointer'};opacity:${dis ? 0.25 : 0.7};padding:2px 4px;`; if (!dis) x.addEventListener('click', () => { const n = getCfg(); [n[i + dir], n[i]] = [n[i], n[i + dir]]; commit(n); }); return x; };
-            const up = mv('fa-chevron-up', i === 0, -1);
-            const dn = mv('fa-chevron-down', i === cfg.length - 1, +1);
+            const mv = (cls, dis, dir) => { const x = document.createElement('i'); x.className = 'fa-solid ' + cls; x.style.cssText = `cursor:${dis ? 'default' : 'pointer'};opacity:${dis ? 0.25 : 0.7};padding:2px 4px;`; if (!dis) x.addEventListener('click', () => { const n = getCfg(); const j = vis[k + dir].i; [n[j], n[i]] = [n[i], n[j]]; commit(n); }); return x; };
+            const up = mv('fa-chevron-up', k === 0, -1);
+            const dn = mv('fa-chevron-down', k === vis.length - 1, +1);
             const lbl = document.createElement('label'); lbl.className = 'checkbox_label'; lbl.style.flex = '1';
-            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = t.on;
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = tier.on;
             cb.addEventListener('change', () => { const n = getCfg(); n[i] = { ...n[i], on: cb.checked }; commit(n); });
-            const sp = document.createElement('span'); sp.textContent = TIER_DEFS[t.id].label;
+            const sp = document.createElement('span'); sp.textContent = translate(TIER_DEFS[tier.id].label);
             lbl.append(cb, sp); row.append(up, dn, lbl); wrap.append(row);
         });
     };
     render();
     return wrap;
 }
-// Studio's Configure-tiers…: the same inline editor in a popup (live-commit; Close when done).
 async function configureTiersPopup(getCfg, setCfg, onSaved) {
     const wrap = document.createElement('div'); wrap.style.textAlign = 'left';
     const hint = document.createElement('div'); hint.style.cssText = 'opacity:0.7;margin-bottom:8px;font-size:0.9em;';
-    hint.textContent = 'Entries fall into the first ticked tier they match, top to bottom. ↑/↓ sets precedence; untick to skip a tier. Shared with the prompt insertion order (WA settings).';
+    hint.textContent = t`An entry joins the first ticked tier it matches, top to bottom. Untick a tier to skip it. Shared with the settings panel.`;
     wrap.append(hint, makeTierEditor(getCfg, setCfg, onSaved));
-    await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close' }).show();
+    await new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: t`Close` }).show();
 }
 
-// Sort-control button, shared by the Studio header and the settings panel. Opens `leadItems` (special
-// leaves shown first, e.g. the Studio's "Insert Order") + the tiered toggle + Configure tiers… + base
-// sorts + any `extraItems` (e.g. relevance, prompt-only). Callbacks read/write the caller's own state so
-// the same widget drives display order and insertion order. `mount` (fn → element) targets a modal
-// dialog's top layer when needed; omit for document.body. Lead items encapsulate their own tiered state,
-// so the "Tiered · " prefix is suppressed for them.
+/** Sort-control button shared by the Studio header and the settings panel; the menu is `leadItems`, the tiered
+ * toggle, Configure tiers…, the base sorts, then `extraItems`. `mount` is a fn returning the element the menu attaches to. */
 export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTierCfg, setTierCfg, leadItems = [], extraItems = [], onChange, mount, block = false }) {
     const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'menu_button wa-filter';
-    btn.title = 'Sort order';
-    // block = full-width, select-like (label left, caret right) for settings; else compact icon-wide (toolbar).
+    btn.title = t`Sort order`;
     btn.style.cssText = block
         ? 'display:flex;align-items:center;gap:6px;width:100%;justify-content:flex-start;white-space:nowrap;'
         : 'display:inline-flex;align-items:center;gap:5px;width:auto;white-space:nowrap;';
@@ -106,8 +109,8 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
     const lblEl = document.createElement('span'); if (block) lblEl.style.cssText = 'flex:1;text-align:left;'; btn.append(lblEl);
     if (block) { const car = document.createElement('span'); car.textContent = '▾'; car.style.opacity = '0.6'; btn.append(car); }
     const named = [...leadItems, ...extraItems];
-    const labelFor = k => SORT_LABELS[k] ?? named.find(e => e.key === k)?.label ?? 'Order ↑';
-    const refresh = () => { const k = getSort(); const lead = leadItems.some(e => e.key === k); lblEl.textContent = (!lead && getTiered() ? 'Tiered · ' : '') + labelFor(k); };
+    const labelFor = k => (SORT_LABELS[k] ? translate(SORT_LABELS[k]) : named.find(e => e.key === k)?.label) ?? translate(SORT_LABELS['order-asc']);
+    const refresh = () => { const k = getSort(); const lead = leadItems.some(e => e.key === k); lblEl.textContent = !lead && getTiered() ? t`Tiered · ${labelFor(k)}` : labelFor(k); };
     refresh();
     const changed = () => { refresh(); onChange?.(); };
     btn.addEventListener('click', () => {
@@ -115,11 +118,11 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
         const leaf = ex => ({ label: ex.label, active: cur === ex.key, fn: () => { setSort(ex.key); changed(); } });
         const items = [
             ...leadItems.map(leaf),
-            { label: `${getTiered() ? '☑' : '☐'} Tiered grouping`, active: getTiered(), fn: () => { setTiered(!getTiered()); changed(); } },
-            { label: 'Configure tiers…', fn: () => configureTiersPopup(getTierCfg, setTierCfg, changed) },
+            { label: t`Tiered grouping`, icon: getTiered() ? 'fa-solid fa-square-check' : 'fa-regular fa-square', active: getTiered(), fn: () => { setTiered(!getTiered()); changed(); } },
+            { label: t`Configure tiers…`, fn: () => configureTiersPopup(getTierCfg, setTierCfg, changed) },
             ...SORT_MENU.map(m => m.key
-                ? { label: m.label, active: cur === m.key, fn: () => { setSort(m.key); changed(); } }
-                : { label: m.label, active: m.kids.some(([, k]) => k === cur), children: m.kids.map(([l, k]) => ({ label: l, active: cur === k, fn: () => { setSort(k); changed(); } })) }),
+                ? { label: translate(m.label), active: cur === m.key, fn: () => { setSort(m.key); changed(); } }
+                : { label: translate(m.label), active: m.kids.some(([, k]) => k === cur), children: m.kids.map(([l, k]) => ({ label: translate(l), active: cur === k, fn: () => { setSort(k); changed(); } })) }),
             ...extraItems.map(leaf),
         ];
         const r = btn.getBoundingClientRect(); showCtxMenu(items, r.left, r.bottom + 2, mount?.());
@@ -130,19 +133,60 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
 export function wiTooltip({ item, block }) {
     const e = item.entry;
     const lines = [`[${e.world}] ${wiTitleOf(e)}`, block];
-    if (item.fused) lines.push(`fused ${item.fused.toFixed(4)}`);
-    if (item.score !== undefined) lines.push(`vector ${item.score.toFixed(3)}${item.vectorRank ? ` (#${item.vectorRank})` : ''}`);
-    if (item.textScore) lines.push(`text ${item.textScore.toFixed(2)}${item.textRank ? ` (#${item.textRank})` : ''}`);
-    if (item.keywordScore) lines.push(`keys ${item.keywordScore.toFixed(2)}${item.keywordRank ? ` (#${item.keywordRank})` : ''}`);
-    if (item.keywordHits?.length) lines.push('hits: ' + item.keywordHits.map(h => `${h.key} ×${h.count}`).join(', '));
+    if (Number.isFinite(item.eCredit)) lines.push(`E[credit] ${item.eCredit.toFixed(4)}`);
+    if (item.score !== undefined) lines.push(`vector ${item.score.toFixed(3)}`);
+    if (item.textScore) lines.push(`text ${item.textScore.toFixed(2)}`);
+    if (item.keywordScore) lines.push(`keys ${item.keywordScore.toFixed(2)}`);
+    if (item.keywordHits?.length) { const hits = item.keywordHits.map(h => `${h.key} ×${h.count}`).join(', '); lines.push(t`hits: ${hits}`); }
     return lines.join('\n');
 }
 
-// Same "view entry text" popup the keyword suggester opens.
+// Marks the span by keyExcerpts' offsets; nothing is parsed back out of the text, which can hold guillemets of its own.
+const markExcerpt = ex => (ex && typeof ex === 'object'
+    ? escapeHtml(ex.text.slice(0, ex.start))
+        + `<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;opacity:1;">${escapeHtml(ex.text.slice(ex.start, ex.end))}</span>`
+        + escapeHtml(ex.text.slice(ex.end))
+    : escapeHtml(String(ex ?? '')));
+
+/** The key-hit lines under a grading row's title: key, count, and the excerpt with the matched span coloured. */
+export const keyHitsHtml = why => (why ?? []).map(w => {
+    // A title attribute is plain text, so the tooltip marks spans with markExcerptText's guillemets, not colour.
+    const all = (w.contexts ?? []).filter(Boolean);
+    const tip = all.length > 1
+        ? ` title="${escapeHtml(all.map(markExcerptText).join('\n'))}"`
+        : '';
+    // With `color`, the key is drawn as a wa-kw chip; a leading `\u21b3` stays outside it.
+    const label = w.color
+        ? `${w.key.startsWith('\u21b3') ? '\u21b3 ' : ''}<span class="wa-kw" style="border-color:${escapeHtml(w.color)};`
+            + `background:color-mix(in srgb, ${escapeHtml(w.color)} 18%, transparent);">${escapeHtml(w.key.replace(/^\u21b3 ?/, ''))}</span>`
+        : `<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`;
+    return `<br><small style="opacity:0.75;text-align:left;">${label}`
+        + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`
+        + `${w.excerpt ? ` <span style="opacity:0.6;cursor:${all.length > 1 ? 'help' : 'default'};"${tip}>${markExcerpt(w.excerpt)}</span>` : ''}</small>`;
+}).join('');
+
+/** The fold under a grading row, as HTML: the entry's keys, then its text. Reads `waKeys`/`waSecondary` when `key`
+ * is empty — the takeover stashes a vectorized entry's keys there. `idx` becomes `data-i` for the caller's popout. */
+export function entryFoldHtml(entry, idx) {
+    const live = list => (list ?? []).filter(k => String(k).trim());
+    const keys = live(entry?.key?.length ? entry.key : entry?.waKeys);
+    const sec = live(entry?.keysecondary?.length ? entry.keysecondary : entry?.waSecondary);
+    const chip = k => `<code style="background:var(--black30a,rgba(0,0,0,0.25));padding:1px 5px;border-radius:3px;margin:0 3px 3px 0;display:inline-block;font-size:0.85em;">${escapeHtml(k)}</code>`;
+    const line = (label, list) => (list.length
+        ? `<div style="margin-bottom:0.35em;"><small style="opacity:0.55;">${label}</small><br>${list.map(chip).join('')}</div>`
+        : '');
+    const pop = `<i class="wa-fold-pop fa-solid fa-expand" data-i="${idx}" title="${escapeHtml(t`Open in a larger window`)}" style="cursor:pointer;opacity:0.6;float:right;padding:2px 4px;"></i>`;
+    return `<div style="text-align:left;">${pop}`
+        + line(escapeHtml(t`keys`), keys)
+        + line(escapeHtml(t`secondary`), sec)
+        + (keys.length || sec.length ? '' : `<div style="opacity:0.5;margin-bottom:0.35em;"><small>${escapeHtml(t`no keys`)}</small></div>`)
+        + `<div style="white-space:pre-wrap;max-height:22em;overflow:auto;opacity:0.9;border-left:2px solid var(--SmartThemeBorderColor);padding-left:0.6em;">${escapeHtml(String(entry?.content ?? '') || t`(empty)`)}</div></div>`;
+}
+
 export function showEntryText(entry) {
     const body = document.createElement('div');
     body.style.cssText = 'white-space:pre-wrap;text-align:left;max-height:65vh;overflow:auto;font-size:0.95em;';
-    body.textContent = String(entry.content ?? '') || '(empty)';
+    body.textContent = String(entry.content ?? '') || t`(empty)`;
     const wrap = document.createElement('div');
     wrap.style.cssText = 'text-align:left;width:100%;';
     wrap.innerHTML = `<b>${escapeHtml(wiTitleOf(entry))}</b>`;
@@ -153,22 +197,164 @@ export function showEntryText(entry) {
     vp.show();
 }
 
-// One-time stylesheet for Lorebook Studio (hover states can't be inlined).
+/** A tag, an HTML comment or a character entity. A range like the markdown ones, so one a span overlaps can be shown as
+ *  text instead of rendered: matching reads `&nbsp;` as six characters, and a mark on them needs somewhere to land. */
+const HTML_RANGE = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>|&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,30});/g;
+
+/** Open and close HTML per range tag. Sorted by this order, so a block tag wraps the inline tags inside it. */
+const TAG_HTML = {
+    h: ['<strong style="font-size:1.15em;">', '</strong>'],
+    quote: ['<span style="border-left:2px solid currentColor;padding-left:7px;opacity:0.85;">', '</span>'],
+    pre: ['<code style="white-space:pre-wrap;">', '</code>'],
+    q: ['<q>', '</q>'],
+    strong: ['<strong>', '</strong>'],
+    s: ['<s>', '</s>'],
+    em: ['<em>', '</em>'],
+    code: ['<code>', '</code>'],
+};
+const TAG_ORDER = Object.keys(TAG_HTML);
+const BLOCK_TAGS = new Set(['h', 'quote', 'pre', 'delim', 'html']);
+
+/** `[regex, tag, m => [from, to]]`: the match is the range, `from`/`to` bound its content, the rest being delimiter.
+ *  No list markers: they stay visible. */
+const BLOCK_MARKUP = [
+    [/^```[^\n]*\n[\s\S]*?^```[ \t]*$/gm, 'pre', m => [m[0].indexOf('\n') + 1, m[0].length - 3]],
+    [/^#{1,6}[ \t]+[^\n]*$/gm, 'h', m => [/^#{1,6}[ \t]+/.exec(m[0])[0].length, m[0].length]],
+    [/^[ \t]*>[ \t]?[^\n]*$/gm, 'quote', m => [/^[ \t]*>[ \t]?/.exec(m[0])[0].length, m[0].length]],
+];
+
+/** `[regex, tag, d]`, longest delimiter first so `**` is not read as `*`; `d` is the delimiter length at each end. */
+const INLINE_MARKUP = [
+    [/(?<![\w*])\*\*(?!\s)[^\n]+?(?<!\s)\*\*(?![\w*])/g, 'strong', 2],
+    [/(?<![\w~])~~(?!\s)[^\n]+?(?<!\s)~~(?![\w~])/g, 's', 2],
+    [/(?<![\w*])\*(?!\s)[^*\n]+?(?<!\s)\*(?![\w*])/g, 'em', 1],
+    [/(?<![\w_])_(?!\s)[^_\n]+?(?<!\s)_(?![\w_])/g, 'em', 1],
+    [/`[^`\n]+`/g, 'code', 1],
+];
+
+/** Every markup range in `src` as offsets: quotes, HTML, block and inline markdown, plus a `delim` range over each
+ *  delimiter. Delimiters are ranges rather than removed text, so offsets keep indexing the matched string. */
+const proseRanges = src => {
+    const out = [];
+    for (const m of src.matchAll(/"[^"\n]*"|\u201C[^\u201D\n]*\u201D|\u00AB[^\u00BB\n]*\u00BB/g)) {
+        out.push({ start: m.index, end: m.index + m[0].length, tag: 'q' });
+    }
+    for (const m of src.matchAll(HTML_RANGE)) out.push({ start: m.index, end: m.index + m[0].length, tag: 'html' });
+    for (const [re, tag, body] of BLOCK_MARKUP) {
+        for (const m of src.matchAll(re)) {
+            const [start, end] = [m.index, m.index + m[0].length];
+            if (out.some(r => start < r.end && r.start < end)) continue;
+            const [from, to] = body(m);
+            out.push({ start, end, tag });
+            if (from > 0) out.push({ start, end: start + from, tag: 'delim' });
+            if (to < m[0].length) out.push({ start: start + to, end, tag: 'delim' });
+        }
+    }
+    // Longest delimiter first, so `**bold**` is not read as emphasis of `*bold*`.
+    for (const [re, tag, d] of INLINE_MARKUP) {
+        for (const m of src.matchAll(re)) {
+            const [start, end] = [m.index, m.index + m[0].length];
+            // A block range and a quote may contain an inline one; two inline ranges may not overlap.
+            if (out.some(r => r.tag !== 'q' && !BLOCK_TAGS.has(r.tag) && start < r.end && r.start < end)) continue;
+            out.push({ start, end, tag }, { start, end: start + d, tag: 'delim' }, { start: end - d, end, tag: 'delim' });
+        }
+    }
+    return out;
+};
+
+/** `text` as HTML, rendering quotes, markdown and the HTML in it, with `spans` marked. A delimiter or a tag that no span
+ *  overlaps is hidden or rendered; one a span overlaps is shown as text, so the mark has characters to cover. `markSpan(span,
+ *  text)` returns the HTML for one mark. `spans` carry `start`/`end` into the NFC form of `text`. `showMarkup` shows every
+ *  tag, entity and delimiter. Output is DOMPurify-sanitised; the container needs class `wa-marked` for the tag colours. */
+export function renderMessageHtml(text, { spans = [], markSpan = null, showMarkup = false } = {}) {
+    const src = String(text).normalize('NFC');
+    // The blank lines around a thematic break are consumed with it: the container is pre-wrap, so they would render as
+    // blank lines on top of the rule's margins.
+    const escapedWithRules = txt => escapeHtml(txt).replace(/(?:\r?\n)*^[ \t]*-{3,}[ \t]*$(?:\r?\n)*/gm,
+        // No border and no colour: ST's `hr` is a gradient, which either would flatten.
+        '<hr style="margin:15px 0;opacity:0.75;">');
+    const prose = proseRanges(src);
+    // Whole-range, not per cut: emitting `<!-- ` alone opens a comment that swallows the mark after it.
+    const revealed = new Set(prose.filter(r => r.tag === 'html'
+        && (showMarkup || spans.some(sp => sp.start < r.end && r.start < sp.end))));
+    const cuts = [...new Set([0, src.length, ...spans.flatMap(sp => [sp.start, sp.end]), ...prose.flatMap(r => [r.start, r.end])])]
+        .sort((a, b) => a - b);
+    let html = '';
+    let codeOpen = null;
+    const closeCode = () => { if (codeOpen) { html += '</code>'; codeOpen = null; } };
+    for (let i = 0; i + 1 < cuts.length; i++) {
+        const [a, b] = [cuts[i], cuts[i + 1]];
+        if (a >= b) continue;
+            const covering = prose.filter(r => r.start <= a && b <= r.end);
+        const sp = markSpan ? spans.find(x => x.start <= a && b <= x.end) : null;
+        // A delimiter no span overlaps is not rendered, as chat does not render it.
+        if (covering.some(r => r.tag === 'delim') && !sp && !showMarkup) continue;
+        // A span overlapping markup shows it as text: a mark inside an attribute, or inside a comment, renders nothing.
+        const asMarkup = covering.find(r => r.tag === 'html');
+        if (asMarkup) {
+            if (!revealed.has(asMarkup)) { closeCode(); html += src.slice(a, b); continue; }
+            // One <code> per range, not per cut: ST's `code` has a border and padding, which would repeat per piece.
+            if (codeOpen !== asMarkup) { closeCode(); html += '<code>'; codeOpen = asMarkup; }
+            html += sp ? markSpan(sp, src.slice(a, b)) : escapeHtml(src.slice(a, b));
+            continue;
+        }
+        closeCode();
+        const tags = covering.filter(r => r.tag !== 'delim').map(r => r.tag)
+            .sort((x, y) => TAG_ORDER.indexOf(x) - TAG_ORDER.indexOf(y));
+        html += `${tags.map(g => TAG_HTML[g][0]).join('')}${sp ? markSpan(sp, src.slice(a, b)) : escapedWithRules(src.slice(a, b))}`
+            + `${[...tags].reverse().map(g => TAG_HTML[g][1]).join('')}`;
+    }
+    closeCode();
+    // ST's own config, so this admits what a message admits. data-at/data-to are added: DOMPurify drops unknown attributes.
+    return DOMPurify.sanitize(html, { MESSAGE_SANITIZE: true, ADD_ATTR: ['data-at', 'data-to'] });
+}
+
 let studioStyled = false;
 export function ensureStudioStyle() {
     if (studioStyled) return;
     studioStyled = true;
     const style = document.createElement('style');
+    // --wa-severe is the audit's red, as a variable: the script side has it in SEVERITY_COLOR and a sheet cannot read that.
     style.textContent = `
-.wa-studio { display: flex; gap: 0; height: 72vh; text-align: left; }
+.wa-studio, .wa-ctx-menu, .wa-bulkbar { --wa-severe: #e06c6c; }
+/* Focus has to land somewhere when a nested popup (Replace all…, a confirm) closes, and with no OK
+   button left it falls to the dialog, then to whichever pane Chrome counts as focusable — it makes
+   scroll containers focusable, so the nav or the entry list gets ringed. None of these are controls;
+   the ring marks a whole pane and points at nothing actionable. Real controls inside keep theirs.
+   Cost: tabbing to a pane to arrow-scroll it shows no indicator. */
+dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-entries { outline: none; }
+.wa-studio { position: relative; display: flex; gap: 0; height: 72vh; text-align: left; }
+/* Close corner — the popup's own button row is hidden, so this is the only way out, which is why it's
+   a real button: it has to be reachable by keyboard, and it keeps its focus ring. */
+.wa-studio-close { position: absolute; top: 0; right: 0; z-index: 2; cursor: pointer; opacity: 0.55;
+    padding: 4px 7px; border-radius: 4px; font-size: 1.15em;
+    background: none; border: none; color: inherit; line-height: 1; }
+.wa-studio-close:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
+/* renderMessageHtml's output, coloured as .mes_text colours a message. <q>'s auto-quotes are off: the quote characters
+   are in the text already. */
+.wa-marked q { color: var(--SmartThemeQuoteColor); }
+.wa-marked em { color: var(--SmartThemeEmColor); }
+.wa-marked u { color: var(--SmartThemeUnderlineColor); }
+.wa-marked q em, .wa-marked q i, .wa-marked q u, .wa-marked q strong { color: inherit; }
+.wa-marked code { font-family: var(--monoFontFamily); font-size: 0.92em; }
+.wa-marked q::before, .wa-marked q::after { content: ''; }
 .wa-studio-nav { flex: 0 0 20%; min-width: 170px; max-width: 320px; overflow-y: auto;
     border-right: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-right: 6px; }
+/* Collapsed to a rail holding the chevron. min-width overrides the rule above. */
+.wa-studio-nav.wa-nav-collapsed { flex: 0 0 22px; min-width: 22px; padding-right: 0; overflow: hidden; }
 /* Explorer = pinned header/drawer (wa-studio-fixed) + a single scrolling entry list (wa-studio-entries),
    so the header and the Tool Settings drawer stay put (MUI persistent top drawer: docked, pushes the
    list down) while only the entries scroll beneath. */
 .wa-studio-explorer { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; padding-left: 12px; min-width: 0; }
 .wa-studio-fixed { flex: 0 0 auto; }
-.wa-studio-entries { flex: 1 1 auto; overflow-y: auto; }
+.wa-studio-entries { flex: 1 1 auto; overflow-y: auto; min-width: 0; }
+.wa-studio-body { flex: 1 1 auto; display: flex; min-height: 0; }
+/* The explorer clips its overflow, so the rail cannot reach into the popup's 23 px right padding (ST popup.css: 14 + 1 + 8); it leans toward the list instead: 13 px on the left against the 23 on the right reads better than centred. */
+.wa-rail { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 2em 0 0 13px; }
+.wa-rail .menu_button { width: 2.6em; height: 2.6em; padding: 0; margin: 0; display: grid; place-items: center; position: relative; font-size: 1.05em; }
+.wa-rail-count { position: absolute; bottom: 1px; right: 2px; font-size: 0.55em; line-height: 1; opacity: 0.8; }
+.wa-icon-fromline { position: relative; display: inline-grid; place-items: center; }
+.wa-icon-fromline::after { content: ''; position: absolute; width: 1em; height: 0.13em; border-radius: 1px; background: currentColor; transform: translateY(-1px); }
 .wa-studio-navhead, .wa-studio-exphead { position: sticky; top: 0; z-index: 1; padding: 2px 0 6px;
     background: var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.95))); }
 .wa-book-row { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 5px;
@@ -176,19 +362,24 @@ export function ensureStudioStyle() {
 .wa-book-row:hover { background: var(--white20a, rgba(255,255,255,0.08)); }
 .wa-book-row.wa-sel { background: var(--white30a, rgba(255,255,255,0.14)); font-weight: bold; }
 .wa-book-name { overflow: hidden; text-overflow: ellipsis; }
+/* Books attached to this chat. The theme accent, not WA_GREEN, which means "no prune" on a keyword chip. */
+.wa-book-row.wa-attached .wa-book-name { color: var(--SmartThemeQuoteColor); }
+.wa-book-row.wa-attached { box-shadow: inset 2px 0 0 var(--SmartThemeQuoteColor); }
 /* Bulk-select mode: size the nav to its content (capped) so full book titles are readable. */
 .wa-studio-nav.wa-nav-wide { flex: 0 0 auto; width: max-content; min-width: 200px; max-width: 55%; overflow: auto; }
 .wa-nav-wide .wa-book-row { overflow: visible; }
 .wa-nav-wide .wa-book-name { overflow: visible; text-overflow: clip; }
-/* Tab strip above the explorer pane: Explorer / Cleanup / Suggest Terms. The active tab is the only
+/* Tab strip above the explorer pane: Explorer / Cleanup. The active tab is the only
    indicator of which direction a commit runs in, so it reads loudly (underline + colour, not just weight). */
+.wa-tab-status { margin-left: auto; margin-right: 2.4em; align-self: center; font-size: 0.85em; opacity: 0.6; white-space: nowrap; }
 .wa-tabs { display: flex; gap: 2px; flex: 0 0 auto; margin-bottom: 6px;
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-tab { padding: 5px 14px; cursor: pointer; white-space: nowrap; opacity: 0.6; font-size: 0.9em;
     border: none; background: transparent; color: inherit; font-family: inherit;
     border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .wa-tab:hover { opacity: 0.9; background: var(--white20a, rgba(255,255,255,0.06)); }
-.wa-tab.wa-tab-on { opacity: 1; font-weight: bold; color: #6ea8fe; border-bottom-color: #6ea8fe; }
+.wa-tab.wa-tab-on { opacity: 1; font-weight: bold; color: var(--SmartThemeQuoteColor, #6ea8fe);
+    border-bottom-color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tab-count { opacity: 0.6; font-weight: normal; margin-left: 5px; font-size: 0.9em; }
 /* Key-per-row tables shared by Cleanup and Suggest. */
 /* Pinned strip of the book's ignored terms, above the term list. Wraps rather than scrolls — the set is
@@ -208,9 +399,14 @@ export function ensureStudioStyle() {
 .wa-term-act:hover { opacity: 1; }
 .wa-entry { padding: 5px 4px; border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1)); }
 .wa-entry-head { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-.wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.wa-entry-title.wa-off { opacity: 0.45; }
-.wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex-shrink: 0; }
+/* The title yields last: the meta text shrinks and truncates first, the title only below its floor. */
+.wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.wa-off { opacity: 0.45; }
+.wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.wa-entry-titleline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wa-entry-titleline .wa-entry-title { flex: 0 1 auto; }
+.wa-entry-meta-sub { white-space: normal; overflow: visible; }
 .wa-entry-badge { font-size: 0.78em; background: var(--wa-kw-flag-bg, #274d78); color: #fff;
     border-radius: 8px; padding: 1px 7px; white-space: nowrap; flex-shrink: 0; }
 .wa-entry-body { margin-top: 2px; }
@@ -234,36 +430,51 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-studio-exphead .menu_button i { margin-right: 6px; }
 .wa-chevron { width: 14px; text-align: center; opacity: 0.7; transition: transform 0.12s; cursor: pointer; }
 .wa-chevron.wa-open { transform: rotate(90deg); }
-.wa-entry-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
-.wa-tool { cursor: pointer; padding: 3px 4px; border-radius: 4px; opacity: 0.55; font-style: normal; }
+.wa-entry-tools { display: flex; align-items: center; gap: 0; margin-left: auto; }
+/* One box for every tool, glyph centred. The power glyph fills its em box, so it gets a breath before Aa. */
+.wa-tool.fa-power-off { margin-right: 1px; }
+/* The crown and the percent sign draw to the top of their em box where the others leave headroom; a pixel down evens the row. */
+.wa-tool.fa-crown, .wa-tool.fa-percent { position: relative; top: 1px; }
+.wa-tool.fa-thumbtack { position: relative; top: 2px; }
+.wa-tool { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; line-height: 1; height: 1.5em; padding: 0 2px; min-width: 1.3em; border-radius: 4px; opacity: 0.55; font-style: normal; }
 .wa-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-tool.wa-on { opacity: 1; color: #6ea8fe; }
+.wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; margin: 0 -0.1em; }   /* the crown and the lettered tools: the scale leaves the box its full width; the margin takes back what the glyph gave up */
+.wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tool.wa-badge { position: relative; }
 .wa-tool.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
     font-size: 0.6em; font-style: normal; font-weight: bold; line-height: 1.4; padding: 0 3px;
-    border-radius: 8px; background: #16305c; color: #fff; }
+    border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 30%, var(--SmartThemeBlurTintColor));
+    color: var(--SmartThemeBodyColor); }
 .wa-title-edit { font-size: 0.82em; opacity: 0.4; }
-.wa-mode { margin: 0; padding: 1px 2px; font-size: 0.95em; background: transparent;
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 4px; cursor: pointer; }
+.wa-mode { display: inline-block; user-select: none; margin: 0; padding: 1px 2px; font-size: 0.95em; background: transparent;
+    border: 1px solid transparent; border-radius: 4px; cursor: pointer; outline: none; }
+.wa-mode:hover, .wa-mode:focus-visible { border-color: var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-kw-para { display: flex; flex-wrap: wrap; align-items: flex-start; margin: 6px 0 2px 22px; }
 /* Chip outline/fill derive from currentColor (the theme's text colour) so they stay visible on any
    background — a fixed --SmartThemeBorderColor vanished on near-black themes. */
-.wa-kw-item { display: inline-flex; flex-direction: column; align-items: center; white-space: nowrap; margin: 0 0.6em 0.5em 0; }
+.wa-kw-item { display: inline-flex; flex-direction: column; align-items: flex-start; white-space: nowrap; margin: 0 0.6em 0.5em 0; }
 .wa-kw { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px;
     white-space: nowrap; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: 11px; }
 .wa-kw-dead .wa-kw-text { opacity: 0.8; }
+/* A text-only chip: wraps, and breaks a term with no break opportunity in it. inline, since it has no ✕ to lay out. */
+.wa-kw-wrap { display: inline; white-space: normal; overflow-wrap: anywhere; }
+/* Both jump targets. */
+.wa-studio [data-jump], .wa-marked [data-at] { cursor: pointer; }
+/* The gate row reads under the keys it gates, so it needs a rule to be a second row at all — two
+   paragraphs of chips run together and the secondaries read as more primaries. currentColor for the
+   same reason the chips use it: a fixed border colour vanishes on near-black themes. */
+.wa-kw-sec { border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding-top: 7px; }
+.wa-kw-sec .wa-mode { margin-right: 0.6em; align-self: flex-start; }
 /* Whitelisted (ignored) keys: purple so a deliberately-spared key reads apart from an unflagged one. */
 .wa-kw-ignored { border-color: #a879e0 !important; background: color-mix(in srgb, #a879e0 18%, transparent); }
-.wa-tray { margin: 2px 0 0; }
-.wa-tray-head { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; opacity: 0.8; font-size: 0.9em; padding: 2px 0 6px; }
-.wa-tray-head:hover { opacity: 1; }
 /* Docked top drawer: full-width block below the header, columns so it stays shallow, divider beneath. */
 .wa-tray-panel { display: flex; flex-wrap: wrap; gap: 18px; padding: 8px 10px 10px; margin-bottom: 4px;
     border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
     background: var(--black30a, rgba(0,0,0,0.15)); }
-.wa-tray-col { flex: 1 1 210px; min-width: 190px; }
-.wa-tray-sec { font-weight: bold; font-size: 0.8em; opacity: 0.7; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+.wa-tray-col { flex: 2 1 190px; min-width: 170px; }
+.wa-tray-panel > .wa-tray-col:first-child { flex: 3 1 240px; }
+.wa-tray-sec { font-weight: bold; font-size: 0.9em; opacity: 0.8; margin: 0 0 4px; }
 .wa-tray-opt { display: flex; align-items: center; margin: 1px 0; font-size: 0.9em; }
 .wa-tray-num { gap: 2px; }
 .wa-tray-wl { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em; font-size: 0.9em; }
@@ -273,17 +484,22 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
     border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-bulk-count { font-weight: bold; margin-right: 2px; }
-.wa-bulk-btn, .wa-bulk-mode { margin: 0; padding: 3px 10px; font-size: 0.82em; }
-.wa-bulk-mode { padding: 3px 6px; }
-.wa-bulk-danger { color: #e06c6c; }
+/* ST draws the tick on :checked only, so an indeterminate box is pixel-identical to an empty one. Same
+   mechanism (::before carries the tick colour), a dash instead of the checkmark. */
+.wa-tri:indeterminate::before { transform: scale(1); clip-path: polygon(12% 42%, 88% 42%, 88% 58%, 12% 58%); }
+/* width:unset, or ST's .menu_button width breaks any two-word label onto a second line (its own popup.css says so). */
+.wa-bulk-btn { margin: 0; padding: 3px 10px; font-size: 0.82em; width: unset; white-space: nowrap; }
+.wa-studio-exphead .wa-bulk-btn { width: auto; }   /* the header's fixed button width does not apply to a bar button placed there */
+.wa-bulk-danger { color: var(--wa-severe); }
 .wa-bulk-sep { align-self: stretch; width: 1px; background: color-mix(in srgb, currentColor 22%, transparent); margin: 0 3px; }
 .wa-book-tools { margin-left: 8px; white-space: nowrap; }
 .wa-book-tool { cursor: pointer; opacity: 0.5; padding: 3px 5px; border-radius: 4px; font-size: 0.9em; }
 .wa-book-tool:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
-.wa-book-tool-danger:hover { color: #e06c6c; }
+.wa-book-tool-danger:hover { color: var(--wa-severe); }
 .wa-filter { margin: 0; padding: 3px 6px; font-size: 0.82em; }
 .wa-undo-bar { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 6px; padding: 6px 8px; border-radius: 5px;
-    font-size: 0.85em; background: color-mix(in srgb, #e0a86c 15%, transparent); border: 1px solid color-mix(in srgb, #e0a86c 45%, transparent); }
+    font-size: 0.85em; background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
 .wa-undo-top { display: flex; align-items: center; gap: 6px; }
 .wa-undo-text { flex: 1; min-width: 0; opacity: 0.8; }
 .wa-undo-name { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -308,13 +524,20 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     background: var(--SmartThemeBlurTintColor, rgba(30,30,38,0.96));
     backdrop-filter: blur(calc(var(--SmartThemeBlurStrength, 10) * 1px));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.18));
-    box-shadow: 0 6px 20px rgba(0,0,0,0.45); font-size: 0.9em; }
+    box-shadow: 0 6px 20px var(--SmartThemeShadowColor, rgba(0,0,0,0.45)); font-size: 0.9em; }
 .wa-ctx-item { display: flex; align-items: center; gap: 14px; padding: 5px 11px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .wa-ctx-item:hover { background: var(--white20a, rgba(255,255,255,0.12)); }
-.wa-ctx-danger:hover { color: #e06c6c; }
+.wa-ctx-icon { width: 1.1em; text-align: center; margin-right: -6px; opacity: 0.85; }
+.wa-ctx-glyph { width: 1.2em; text-align: center; margin-right: -6px; }
+.wa-ctx-danger:hover { color: var(--wa-severe); }
 .wa-ctx-caret { margin-left: auto; opacity: 0.55; font-size: 1.15em; line-height: 1; }
-.wa-ctx-active { color: #6ea8fe; font-weight: 600; }
-.wa-sugg { display: inline-flex; align-items: center; gap: 3px; margin: 0 0.7em 0.2em 0; white-space: nowrap; cursor: pointer; opacity: 0.9; }
+.wa-ctx-active { color: var(--SmartThemeQuoteColor, #6ea8fe); font-weight: 600; }
+.wa-sugg { display: inline-flex; align-items: center; gap: 3px; margin: 0 0.7em 0.2em 0; white-space: nowrap; opacity: 0.9; }
+/* ➕ takes the candidate as-is; the text rewords it first. Both commit, so both look clickable. */
+.wa-sugg-add { cursor: pointer; opacity: 0.55; font-size: 0.85em; }
+.wa-sugg-add:hover { opacity: 1; }
+.wa-sugg-text { cursor: text; }
+.wa-sugg-text:hover { text-decoration: underline dotted; }
 .wa-adv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 28px; margin: 6px 0 2px 22px; padding: 8px 10px; border-radius: 5px;
     background: var(--black30a, rgba(0,0,0,0.15)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-adv-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -322,7 +545,8 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-adv-row { display: flex; align-items: center; gap: 6px; font-size: 0.9em; margin: 0; }
 .wa-adv-row input[type=number] { width: 4.5em; margin: 0 0 0 auto; padding: 2px 5px; }
 .wa-adv-warn { display: flex; align-items: center; gap: 5px; margin-top: 5px; padding: 4px 6px; border-radius: 4px; font-size: 0.8em;
-    background: color-mix(in srgb, #e0a86c 15%, transparent); border: 1px solid color-mix(in srgb, #e0a86c 45%, transparent); }
-.wa-adv-warn i { color: #e0a86c; }`;
+    background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
+.wa-adv-warn i { color: var(--golden, #e0a86c); }`;
     document.head.append(style);
 }
