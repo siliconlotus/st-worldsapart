@@ -5,7 +5,7 @@ import { eq, gradeValue } from './metrics.mjs';
 import * as query from '../extension/query.mjs';
 
 const book = {
-    1: { uid: 1, comment: 'Villa Party', key: ['villa', 'party'], keysecondary: [], vectorized: true, content: 'A'.repeat(3000), order: 100 },
+    1: { uid: 1, comment: 'Launch Day', key: ['launch', 'day'], keysecondary: [], vectorized: true, content: 'A'.repeat(3000), order: 100 },
     2: { uid: 2, comment: 'Mechanics', key: ['knot'], vectorized: false, constant: true, content: 'B'.repeat(2000) },
 };
 
@@ -59,10 +59,10 @@ eq(searchedBook([{ book: 'B', cosine: 0.9 }, { book: 'A', cosine: 0.8 }]), 'B', 
 // --- buildSample ---
 const sample = buildSample({
     name: 'scene9', query: 'q', scanChat: [{ name: 'A', mes: 'w' }], depth: 5, index: 'i', chat: 'chats/c.jsonl', primaryBook: 'Main',
-    params: p, snapshot: { scoring: {} }, candidates: [{ title: 'Villa Party' }],
+    params: p, snapshot: { scoring: {} }, candidates: [{ title: 'Launch Day' }],
     books: { Main: full, Other: {} }, priority: [{ book: 'Main', weight: 1 }],
     grades: [
-        { title: 'Villa Party', grade: 5, book: 'Main', uid: 1 },
+        { title: 'Launch Day', grade: 5, book: 'Main', uid: 1 },
         { title: 'Mechanics', grade: 4, book: 'Other', uid: 10 },
     ],
     cutoff: { gradingOverride: { maxVectorEntries: 10 } }, now: '2026-07-29',
@@ -136,7 +136,7 @@ eq(sceneDiff(SCENE, WS, { ignoreTrailingWhitespace: true }).join(','), '', '...a
 const armA = {
     arm: 'shipped',
     rows: [
-        { title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.9 } },
+        { title: 'Launch', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.9 } },
         { title: 'Mechanics', book: 'W', uid: 2, block: 'constant', sticky: 0, index: 1 },
         { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 2, scores: { cosine: 0.5 } },
     ],
@@ -163,35 +163,35 @@ eq(u.rows.find(r => r.uid === 3).from, 'shipped', 'the row records which arm sup
 const armKeys = {
     arm: 'keys-live',
     rows: [
-        { title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.1, keys: 2.5 } },
+        { title: 'Launch', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.1, keys: 2.5 } },
         { title: 'Maren', book: 'W', uid: 3, block: 'dynamic', sticky: 0, index: 1, scores: { cosine: 0.7, keys: 1.5 } },
     ],
     entries: [{ uid: 1 }, { uid: 3 }],
 };
 const uf = unionArms([armA, armKeys]);
-const villa = uf.rows.find(r => r.uid === 1);
-eq(villa.scores.keys, 2.5, 'an absent signal is filled from an arm that could measure it');
-eq(villa.filled.keys, 'keys-live', 'the fill records its source arm');
-eq(villa.scores.cosine, 0.9, 'a signal the first arm measured is NOT overwritten by a later arm');
-eq(villa.filled.cosine, undefined, 'and is not marked as filled');
-eq(villa.from, 'shipped', 'the base row still names its own arm');
+const launch = uf.rows.find(r => r.uid === 1);
+eq(launch.scores.keys, 2.5, 'an absent signal is filled from an arm that could measure it');
+eq(launch.filled.keys, 'keys-live', 'the fill records its source arm');
+eq(launch.scores.cosine, 0.9, 'a signal the first arm measured is NOT overwritten by a later arm');
+eq(launch.filled.cosine, undefined, 'and is not marked as filled');
+eq(launch.from, 'shipped', 'the base row still names its own arm');
 
 const armWhy = {
     arm: 'keys-live',
-    rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { keys: 2.5 }, why: [{ key: 'villa', count: 2 }] }],
+    rows: [{ title: 'Launch', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { keys: 2.5 }, why: [{ key: 'launch', count: 2 }] }],
     entries: [{ uid: 1 }],
 };
 const uw = unionArms([armA, armWhy]);
-eq(uw.rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'why travels with the keys value it explains');
-eq(unionArms([armWhy, armA]).rows.find(r => r.uid === 1).why?.[0]?.key, 'villa', 'and a base row that has its own why keeps it');
+eq(uw.rows.find(r => r.uid === 1).why?.[0]?.key, 'launch', 'why travels with the keys value it explains');
+eq(unionArms([armWhy, armA]).rows.find(r => r.uid === 1).why?.[0]?.key, 'launch', 'and a base row that has its own why keeps it');
 const armStored = {
     arm: 'shipped',
-    rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.9, text: 12.5, keys: null } }],
+    rows: [{ title: 'Launch', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.9, text: 12.5, keys: null } }],
     entries: [{ uid: 1 }],
 };
 const armStoredKeys = {
     arm: 'keys-live',
-    rows: [{ title: 'Villa', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.1, text: 9, keys: 2.5 } }],
+    rows: [{ title: 'Launch', book: 'W', uid: 1, block: 'dynamic', sticky: 0, index: 0, scores: { cosine: 0.1, text: 9, keys: 2.5 } }],
     entries: [{ uid: 1 }],
 };
 const us = unionArms([armStored, armStoredKeys]).rows[0];
@@ -203,19 +203,19 @@ eq(us.filled.cosine, undefined, 'a stored signal the first arm measured is not m
 eq(u.rows.map(r => r.uid).join(','), '1,3,2,4', 'union is ordered by best rank achieved across arms');
 eq(u.entries.map(e => e.uid).join(','), '1,3,2,4', 'entries stay aligned with rows after dedupe + sort');
 
-const prior = [{ title: 'Villa', book: 'W', uid: 1, grade: 5 }, { title: 'Maren', book: 'W', uid: 3, grade: 4 }];
+const prior = [{ title: 'Launch', book: 'W', uid: 1, grade: 5 }, { title: 'Maren', book: 'W', uid: 3, grade: 4 }];
 const split = splitGraded(u.rows, prior);
 eq(split.fresh.map(r => r.uid).join(','), '2,4', 'splitGraded splits on prior grades alone, durable rows included');
 eq(split.fresh.filter(r => !isDurable(r)).map(r => r.uid).join(','), '4', 'the gradeable fresh rows are what the popup counts');
 eq(split.known.length, 2, 'already-judged rows are reported, not silently dropped');
 eq(split.priorOf.get(rowKey({ book: 'W', uid: 3 })), 4, 'prior grades are recoverable for display');
-eq(splitGraded([{ title: 'Villa Party (renamed)', book: 'W', uid: 1 }], prior).fresh.length, 0,
+eq(splitGraded([{ title: 'Launch Day (renamed)', book: 'W', uid: 1 }], prior).fresh.length, 0,
     'matching is on book+uid, so a retitled entry is still known');
 
 const ROUND1 = { user: 'me@host', now: '2026-07-01' };
 const ROUND2 = { user: 'me@host', now: '2026-07-02' };
 const first = mergeGrades([], prior, ROUND1);
-const merged = mergeGrades(first, [{ title: 'Ironhold', book: 'W', uid: 4, grade: 3 }, { title: 'Villa', book: 'W', uid: 1, grade: 2 }], ROUND2);
+const merged = mergeGrades(first, [{ title: 'Ironhold', book: 'W', uid: 4, grade: 3 }, { title: 'Launch', book: 'W', uid: 1, grade: 2 }], ROUND2);
 eq(merged.length, 3, 'merge accumulates without duplicating rows');
 eq(merged.find(g => g.uid === 1).grades.map(v => v.grade).join(','), '5,2', 'a regrade appends beside the earlier round');
 eq(gradeValue(merged.find(g => g.uid === 1)), 2, '...and the later verdict is the one in force');
@@ -481,23 +481,23 @@ eq(keys(Object.values(built.arms[0].scenes)[0]),
     const withWhy = await bundleForSchema([{
         arm: 'shipped',
         sample: { ...schemaFixture, candidates: [
-            { book: 'B', uid: 1, tokens: 10, why: [{ key: 'villa', excerpt: 'the villa' }] },
+            { book: 'B', uid: 1, tokens: 10, why: [{ key: 'launch', excerpt: 'the launch' }] },
             { book: 'B', uid: 2, tokens: 10 },
         ] },
     }], { start: 0, end: 10, user: 'u' });
     eq(Object.values(withWhy.arms[0].scenes)[0].candidates.every(c => !('why' in c)), true,
         'no candidate in the arms block carries its excerpts');
-    eq(withWhy.candidateWhy.shipped[withWhy.scenes[0].id][0][0].key, 'villa',
+    eq(withWhy.candidateWhy.shipped[withWhy.scenes[0].id][0][0].key, 'launch',
         '...they are in the trailing block, positionally aligned');
     const ord = Object.keys(withWhy);
     eq(ord.indexOf('candidateWhy') > ord.indexOf('arms') && ord.indexOf('candidateWhy') < ord.indexOf('sceneChats'), true,
         '...which is behind every field the order exists to keep reachable with head');
     const back = openBundle(structuredClone(withWhy));
-    eq(back.candidates[0].why[0].excerpt, 'the villa', 'openBundle puts them back on the row they came off');
+    eq(back.candidates[0].why[0].excerpt, 'the launch', 'openBundle puts them back on the row they came off');
     eq('why' in back.candidates[1], false, '...and invents none for a row that had none');
     const again = await bundleForSchema([{ arm: 'shipped', sample: { ...schemaFixture, candidates: back.candidates } }],
         { start: 0, end: 10, user: 'u' });
-    eq(openBundle(structuredClone(again)).candidates[0].why[0].key, 'villa', 'and a round trip through both is stable');
+    eq(openBundle(structuredClone(again)).candidates[0].why[0].key, 'launch', 'and a round trip through both is stable');
 }
 {
     const split = await bundleForSchema([

@@ -13,8 +13,8 @@ const body = (shared, own) => `${rare('shared', shared)} ${rare('own' + own, 40)
 const mk = es => ({ entries: Object.fromEntries(es.map((e, i) => [String(i), { uid: i, comment: '', content: '', key: [], ...e }])) });
 
 let scan = buildKeyPruneScan(mk([
-    { comment: '180 - Integration Breakfast', content: body(60, 'a') },
-    { comment: '181 - Autopilot', content: body(60, 'a') },
+    { comment: '180 - Docking Rehearsal', content: body(60, 'a') },
+    { comment: '181 - Attitude Control', content: body(60, 'a') },
     { comment: '999 - Unrelated', content: body(0, 'c') },
 ]), OPTS, new Set());
 eq(scan.dupes.get(0)?.length, 1, 'a near-duplicate pair is flagged');
@@ -23,14 +23,14 @@ eq(scan.dupes.has(2), false, 'an unrelated entry is not flagged');
 eq(scan.dupes.get(0)[0].sim >= KEY_DUPE_MIN, true, 'reported similarity clears the threshold');
 
 scan = buildKeyPruneScan(mk([
-    { comment: 'ARC 10 — Return from the Marches', content: body(60, 'a') },
-    { comment: '089 - Warm Valley Revelry', content: body(60, 'a') },
+    { comment: 'ARC 10 — Return from Orbit', content: body(60, 'a') },
+    { comment: '089 - Crew Quarters Revelry', content: body(60, 'a') },
 ]), OPTS, new Set());
 eq(scan.dupes.size, 0, 'arc vs member scene is hierarchy, not duplication');
 
 scan = buildKeyPruneScan(mk([
-    { comment: 'The Bali Trip', stmbArc: true, content: body(60, 'a') },
-    { comment: '176 - Villa Victory Party', content: body(60, 'a') },
+    { comment: 'The Baikonur Trip', stmbArc: true, content: body(60, 'a') },
+    { comment: '176 - Launch Day Party', content: body(60, 'a') },
 ]), OPTS, new Set());
 eq(scan.dupes.size, 0, 'stmbArc is honoured when the title does not say ARC');
 

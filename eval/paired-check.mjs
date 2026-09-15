@@ -79,39 +79,39 @@ eq(ndcg([1, 2, 3], 1) < 1, true, 'a badly ordered vector scores below 1');
 eq(ndcg([0, 0, 0], 5), 0, 'no relevance -> 0, not NaN');
 eq(ndcg([3, 0], 2), ndcg([3, 0], 2), 'ideal DCG is built from the ranked vector');
 eq(dcg([1, 1], 1), 1, 'dcg respects k');
-eq(nrm('176 - Villa Victory Party!').join(','), '176,villa,victory,party', 'nrm keeps alphanumeric tokens, drops singles');
-eq(wiTitle({ comment: ' Villa ', uid: 1 }), 'Villa', 'title prefers the trimmed comment');
+eq(nrm('176 - Launch Day Party!').join(','), '176,launch,day,party', 'nrm keeps alphanumeric tokens, drops singles');
+eq(wiTitle({ comment: ' Launch ', uid: 1 }), 'Launch', 'title prefers the trimmed comment');
 eq(wiTitle({ comment: '', key: ['a', 'b'], uid: 1 }), 'a, b', 'title falls back to keys');
 eq(wiTitle({ comment: '', key: [], uid: 7 }), 'UID 7', 'title falls back to uid');
 
 // --- makeGradeOf
 const inScope = { outOfScope: () => false, primary: 'B' };
 const gradeOf = makeGradeOf(
-    [{ title: 'Villa Victory Party', grade: 5 }, { title: 'Intimacy & Mechanics', grade: 4, book: 'Elsewhere' }],
+    [{ title: 'Launch Day Party', grade: 5 }, { title: 'Telemetry & Mechanics', grade: 4, book: 'Elsewhere' }],
     { outOfScope: r => r.book === 'Elsewhere', primary: 'B' },
 );
-eq(gradeOf('176 - Villa Victory Party'), 5, 'a graded title matches by token subset');
-eq(gradeOf('Intimacy & Mechanics'), null, 'a grade from an unloaded book has no usable verdict, not its grade');
+eq(gradeOf('176 - Launch Day Party'), 5, 'a graded title matches by token subset');
+eq(gradeOf('Telemetry & Mechanics'), null, 'a grade from an unloaded book has no usable verdict, not its grade');
 eq(gradeOf('Something Else'), null, 'an ungraded title is null, distinct from a judged 0');
-eq(makeGradeOf([{ title: 'Villa', grade: 0 }], inScope)('Villa'), 0, 'a judged 0 stays 0 and is not confused with unjudged');
+eq(makeGradeOf([{ title: 'Launch', grade: 0 }], inScope)('Launch'), 0, 'a judged 0 stays 0 and is not confused with unjudged');
 
 const byUid = makeGradeOf(
-    [{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Villa Party', grade: 2, uid: 2 }],
+    [{ title: 'Launch', grade: 5, uid: 1 }, { title: 'Launch Day', grade: 2, uid: 2 }],
     inScope,
 );
-eq(byUid({ uid: 2, title: 'Villa Party' }), 2, 'uid match beats the token-subset title match');
-eq(byUid({ uid: 9, title: 'Villa Party Annex' }), null, 'uid-complete grades: an unknown uid is ungraded, never title-guessed');
+eq(byUid({ uid: 2, title: 'Launch Day' }), 2, 'uid match beats the token-subset title match');
+eq(byUid({ uid: 9, title: 'Launch Day Annex' }), null, 'uid-complete grades: an unknown uid is ungraded, never title-guessed');
 eq(byUid({ key: 1, title: 'anything' }), 5, 'retrieval rows keyed by `key` resolve by uid too');
-eq(makeGradeOf([{ title: 'Villa', grade: 5, uid: 1 }, { title: 'Other', grade: 3 }], inScope)({ uid: 9, title: 'Other Thing' }), 3,
+eq(makeGradeOf([{ title: 'Launch', grade: 5, uid: 1 }, { title: 'Other', grade: 3 }], inScope)({ uid: 9, title: 'Other Thing' }), 3,
     'a grade set missing uids resolves every row by title');
 
 const twoBooks = makeGradeOf(
-    [{ title: 'Alpha Biology', grade: 4, uid: 1, book: 'folklore' }, { title: 'Harbor Pack Rules', grade: 0, uid: 1, book: 'B' }],
+    [{ title: 'Orbital Biology', grade: 4, uid: 1, book: 'spaceflight' }, { title: 'Apollo Crew Rules', grade: 0, uid: 1, book: 'B' }],
     inScope,
 );
-eq(twoBooks({ uid: 1, book: 'folklore', title: 'Alpha Biology' }), 4, 'a second book\'s row resolves against its own grade');
-eq(twoBooks({ uid: 1, book: 'B', title: 'Harbor Pack Rules' }), 0, '...and the primary\'s uid 1 keeps its own');
-eq(twoBooks({ uid: 1, entry: { world: 'folklore' }, title: 'x' }), 4, 'a scored row carries its book on entry.world');
+eq(twoBooks({ uid: 1, book: 'spaceflight', title: 'Orbital Biology' }), 4, 'a second book\'s row resolves against its own grade');
+eq(twoBooks({ uid: 1, book: 'B', title: 'Apollo Crew Rules' }), 0, '...and the primary\'s uid 1 keeps its own');
+eq(twoBooks({ uid: 1, entry: { world: 'spaceflight' }, title: 'x' }), 4, 'a scored row carries its book on entry.world');
 eq(twoBooks({ uid: 1, title: 'x' }), 0, 'a row naming no book is the primary\'s, as every reader here assumes');
 
 // --- makeKeywordScore
@@ -324,13 +324,13 @@ eq(L.get('Renamed'), L.get('Big'), 'an identical copy under another name is the 
 eq(L.get('Revised'), L.get('Big'), 'a revision sharing most bodies joins it');
 eq(L.get('Other') === L.get('Big'), false, '...and a book sharing nothing does not');
 eq(L.get('Big'), 'Big', 'with no stamps the group takes the shortest name, not whichever was seen first');
-const two = { 'LTM - Ascensus': bk('a', 'b'), 'LTM - Isekai Adventure - Isekai Adventure - 2026-03-04': bk('a', 'b') };
-eq(lineagesOf(two).get('LTM - Ascensus'), 'LTM - Ascensus', '...so a card-decorated duplicate does not become the label for the book it duplicates');
-eq(lineagesOf(two, new Map([['LTM - Isekai Adventure - Isekai Adventure - 2026-03-04', '2026-08-14'], ['LTM - Ascensus', '2026-08-13']])).get('LTM - Ascensus'),
-    'LTM - Isekai Adventure - Isekai Adventure - 2026-03-04', 'a more recently used name wins even when it is longer');
-eq(lineagesOf(two, new Map([['LTM - Isekai Adventure - Isekai Adventure - 2026-03-04', '2026-08-13'], ['LTM - Ascensus', '2026-08-13']])).get('LTM - Ascensus'),
-    'LTM - Ascensus', '...and a tied stamp falls back to the shorter, undecorated name');
-eq(lineagesOf(two, new Map([['LTM - Ascensus', '2026-08-13']])).get('LTM - Ascensus'), 'LTM - Ascensus', 'a name with no stamp at all sorts oldest rather than throwing');
+const two = { 'LTM - Ascent': bk('a', 'b'), 'LTM - Orbit Mission - Orbit Mission - 2026-03-04': bk('a', 'b') };
+eq(lineagesOf(two).get('LTM - Ascent'), 'LTM - Ascent', '...so a card-decorated duplicate does not become the label for the book it duplicates');
+eq(lineagesOf(two, new Map([['LTM - Orbit Mission - Orbit Mission - 2026-03-04', '2026-08-14'], ['LTM - Ascent', '2026-08-13']])).get('LTM - Ascent'),
+    'LTM - Orbit Mission - Orbit Mission - 2026-03-04', 'a more recently used name wins even when it is longer');
+eq(lineagesOf(two, new Map([['LTM - Orbit Mission - Orbit Mission - 2026-03-04', '2026-08-13'], ['LTM - Ascent', '2026-08-13']])).get('LTM - Ascent'),
+    'LTM - Ascent', '...and a tied stamp falls back to the shorter, undecorated name');
+eq(lineagesOf(two, new Map([['LTM - Ascent', '2026-08-13']])).get('LTM - Ascent'), 'LTM - Ascent', 'a name with no stamp at all sorts oldest rather than throwing');
 eq(new Set(L.values()).size, 2, 'four files, two lineages');
 const chain = lineagesOf({ A: bk('a', 'b', 'c'), B: bk('b', 'c', 'd'), C: bk('c', 'd', 'e') });
 eq(new Set(chain.values()).size, 1, 'a chain of partial revisions is one lineage, not three');

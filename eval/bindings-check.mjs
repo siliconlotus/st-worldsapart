@@ -4,21 +4,21 @@ import { eq } from './metrics.mjs';
 
 const chat = (file, world) => ({ file_name: file, chat_metadata: world ? { world_info: world } : {} });
 
-eq(normalizeWorldName('LTM_Isekai_-_Night_Market'), 'ltm isekai night market', 'underscores and dashes collapse');
+eq(normalizeWorldName('LTM_Orbit_-_Night_Launch'), 'ltm orbit night launch', 'underscores and dashes collapse');
 eq(normalizeWorldName('  A  B  '), 'a b', 'runs of whitespace collapse, ends trim');
 
 {
-    const worlds = ['LTM_Isekai_-_Night_Market_updated', 'Ravenmoor', 'atlas_lorebook_v2'];
-    eq(nearestWorld('LTM Isekai - Night Market', worlds), 'LTM_Isekai_-_Night_Market_updated', 'a dropped qualifier is recognised');
-    eq(nearestWorld('Ravenmoor', worlds), null, 'a name that still exists is not its own suggestion');
+    const worlds = ['LTM_Orbit_-_Night_Launch_updated', 'Baikonur', 'mercury_lorebook_v2'];
+    eq(nearestWorld('LTM Orbit - Night Launch', worlds), 'LTM_Orbit_-_Night_Launch_updated', 'a dropped qualifier is recognised');
+    eq(nearestWorld('Baikonur', worlds), null, 'a name that still exists is not its own suggestion');
     eq(nearestWorld('LTM_-__House_Next_Door__Notes_-_keywords_revised', ['LTM_-__House_Next_Door__Notes__keywords_revised']),
         'LTM_-__House_Next_Door__Notes__keywords_revised', 'a rename that only moved a separator is recognised');
-    eq(nearestWorld('Harbor_Pack', worlds), null, 'an unrelated name gets no guess, rather than a near one');
-    eq(nearestWorld('Ledger', ['Ledger v2']), 'Ledger v2', 'a true prefix is suggested');
-    eq(nearestWorld('Harbor_Pack__v22', ['Harbor_Pack__v23', 'Ravenmoor']), 'Harbor_Pack__v23', 'a version bump is recognised');
-    eq(nearestWorld('Ledger v1', ['Ledger v2']), 'Ledger v2', '...including one digit apart');
-    eq(nearestWorld('Saltmarch', ['Ravenmoor', 'atlas_lorebook_v2', 'Dunhollow']), null, 'nothing close gets no guess');
-    eq(nearestWorld('Ravenmoor', ['Harbor_Pack__v22']), null, 'and an unrelated long name is not within tolerance');
+    eq(nearestWorld('Apollo_Crew', worlds), null, 'an unrelated name gets no guess, rather than a near one');
+    eq(nearestWorld('Soyuz', ['Soyuz v2']), 'Soyuz v2', 'a true prefix is suggested');
+    eq(nearestWorld('Apollo_Crew__v22', ['Apollo_Crew__v23', 'Baikonur']), 'Apollo_Crew__v23', 'a version bump is recognised');
+    eq(nearestWorld('Soyuz v1', ['Soyuz v2']), 'Soyuz v2', '...including one digit apart');
+    eq(nearestWorld('Vostok', ['Baikonur', 'mercury_lorebook_v2', 'Korolev']), null, 'nothing close gets no guess');
+    eq(nearestWorld('Baikonur', ['Apollo_Crew__v22']), null, 'and an unrelated long name is not within tolerance');
 }
 
 {

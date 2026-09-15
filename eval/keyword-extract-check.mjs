@@ -254,7 +254,7 @@ for (const k of ['Dia de los Muertos', 'Cirque du Soleil', 'Coup de Grace']) {
     assert.equal(looksLikeFragment(k), false, `named entity spared: "${k}"`);
 }
 
-for (const k of ['Church of the Sun', 'War and Peace', 'House of the Rising Sun', 'The Bali Trip']) {
+for (const k of ['Church of the Sun', 'War and Peace', 'House of the Rising Sun', 'The Baikonur Trip']) {
     assert.equal(looksLikeFragment(k), false, `constructed proper noun spared: "${k}"`);
 }
 for (const k of ['Kyle went to Teddy', 'Order of the', 'church of the sun']) {
@@ -301,11 +301,11 @@ const OPTS = { dfCeil: 0.5, maxN: 4, excludeDates: true, excludeShort: true, onl
     assert.ok(!y0.includes('mobius industries hq'), 'an incohesive trigram does not swallow its leading bigram');
     assert.ok(y0.includes('mobius industries'), 'the bigram that lives independently is offered instead');
     const unit = { entries: { ...filler(6),
-        0: { uid: 0, key: [], content: 'They met at Pura Dalem Agung Padangtegal. Later, Pura Dalem Agung Padangtegal again.' },
+        0: { uid: 0, key: [], content: 'They met at Baikonur Cosmodrome Gagarin Start. Later, Baikonur Cosmodrome Gagarin Start again.' },
     } };
     const u0 = buildKeySuggest(unit, OPTS).perEntry.find(pe => pe.entry.uid === 0)?.newRows.map(r => r.term) ?? [];
-    assert.ok(u0.includes('pura dalem agung padangtegal'), 'a cohesive tetragram survives');
-    assert.ok(!u0.includes('pura dalem'), 'and still subsumes its halves');
+    assert.ok(u0.includes('baikonur cosmodrome gagarin start'), 'a cohesive tetragram survives');
+    assert.ok(!u0.includes('baikonur cosmodrome'), 'and still subsumes its halves');
     const titled = { entries: { ...filler(6),
         0: { uid: 0, key: [], content: 'Data Under Duress topped the report. Kyle under the awning waited for news.' },
         1: { uid: 1, key: [], content: 'The crate sat under the table for a week.' },

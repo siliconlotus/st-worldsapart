@@ -22,7 +22,7 @@ key joins them in memory with US (`\x1f`).
 
 ## A scene's id is composed, not opaque
 
-`<normalized chat>-msg-<end>` — `harbor_example-msg-1044`: the moment, not the span. Normalized is the
+`<normalized chat>-msg-<end>` — `apollo_example-msg-1044`: the moment, not the span. Normalized is the
 chat's basename without extension, every run outside `[A-Za-z0-9_]` collapsed to `-`. It keys
 `sceneChats`, `sceneInjects` and every arm's `scenes` map. A different depth over the same moment is
 the same scene, so `sceneStart` and `depth` sit on the arm's cell, not in the id; one capture has one
@@ -41,26 +41,26 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
   // WHAT IDENTIFIES THIS CAPTURE, surviving a rename. Nothing content-derived can: `name` and a scene id
   // both collide across two captures of one turn under different books.
   "captureId": "4f1c2e90-7a63-4d1e-9c02-8b5a1d3e7f44",
-  "name": "harbor-syn-msg1044",
+  "name": "apollo-syn-msg1044",
   "createdAt": "2026-08-21T09:14:02.118Z",
 
   // ONE ENTRY PER SCENE — the graded MOMENT: a chat, and the message it ends at. No span: the span is
   // what an arm chose to READ of it, and two arms may read different amounts of the same moment.
   "scenes": [
     {
-      "id": "Harbor-Winter-Test-msg-1044",
-      "sceneChat": "…/Harbor - Winter Test.jsonl",
+      "id": "Apollo-Splashdown-Test-msg-1044",
+      "sceneChat": "…/Apollo - Splashdown Test.jsonl",
       "sceneEnd": 1044,
 
       // ONE ROW PER CANDIDATE ENTRY, carrying only what is true of the entry and the verdicts on it.
       // Scores are NOT here — they are properties of a configuration, not of the entry (see `arms`).
       "entries": [
         {
-          "book": "Harbor_Pack__v22",
+          "book": "Apollo_Crew__v22",
           "uid": 1,
           // Duplicated from the entry for triage: reading a bundle by eye is most of what anyone does
           // with one, and a list of uids is unreadable.
-          "title": "262 - Rehearsal at the Old Mill",
+          "title": "262 - Rehearsal in the Vacuum Chamber",
           // EVERY verdict, in the order passed, naming its rater by index. See *A rater is whoever
           // passed a verdict* and *One `grades` array*.
           "grades": [
@@ -92,13 +92,13 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
       // THE CELL: this arm's capture of that scene, keyed by scene id. Everything varying with BOTH
       // coordinates is here — the span it read, the query it built, the rows it surfaced.
       "scenes": {
-        "Harbor-Winter-Test-msg-1044": {
+        "Apollo-Splashdown-Test-msg-1044": {
           // Redundant with `depth` on purpose: the two disagreeing means the scene was mis-extracted.
           "sceneStart": 1035,
           "depth": 10,
           // ON THE CELL ONLY WHEN THE ARMS DISAGREE — `messageDepth` moves them, so they cannot hoist
           // unconditionally; when nothing moved them they sit once on the scene instead.
-          "query": "…", "queryChat": [ /* … */ ], "primaryBook": "Harbor_Pack__v22",
+          "query": "…", "queryChat": [ /* … */ ], "primaryBook": "Apollo_Crew__v22",
           // WHAT THE GRADER WAS SHOWN, which a later run needs to know what it may believe. `cutoff` is
           // the depth this capture graded at; `gradedCandidates` is how many rows actually reached a
           // grader, so rows past it are UNGRADED rather than irrelevant, and a deep-cutoff arm scored
@@ -109,11 +109,11 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
           // IN LAYOUT ORDER — see below. `index` and `tokens` are the fields a reader can count on;
           // `scores` is WHATEVER THE CAPTURE RECORDED, keyed by the feature's own name.
           "candidates": [
-            { "book": "Harbor_Pack__v22", "uid": 1, "index": 0, "tokens": 214,
+            { "book": "Apollo_Crew__v22", "uid": 1, "index": 0, "tokens": 214,
               // What the row IS, beside what it scored — the classification the runtime gave it, the
               // budget's verdict, and the key hits that explain the keyword number. `block` is one of
               // `constant` | `sticky` | `promoted` | `dynamic`; see *A row's block*.
-              "title": "262 - Finale…", "block": "dynamic", "sticky": 1, "wiOrder": 1001,
+              "title": "262 - Rehearsal…", "block": "dynamic", "sticky": 1, "wiOrder": 1001,
               // NO `why`: the key hits that explain the keyword number are bulk, and live in
               // `candidateWhy` behind the head of the file. `openBundle` puts them back on the row.
               "score": 0.0456, "vRank": 3, "tRank": 14, "kRank": 3,
@@ -137,18 +137,18 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
   // `makeWindowFor`) — the only direction that works, since a joined blob cannot be taken apart.
   // CONTENT IDENTITY, keyed by the same names as `books`. Two captures hold the same book when these
   // agree — answerable without inflating two megabytes of entries.
-  "bookHashes": { "Harbor_Pack__v22": "10bdb8e8…" },
+  "bookHashes": { "Apollo_Crew__v22": "10bdb8e8…" },
   // arm -> scene -> the matched-key excerpts of each candidate, POSITIONALLY ALIGNED with that cell's
   // `candidates`. Absent when no candidate matched a key.
-  "candidateWhy": { "shipped": { "Harbor-Winter-Test-msg-1044": [ [ { "key": "mara", "excerpt": "…" } ] ] } },
-  "sceneChats": { "Harbor-Winter-Test-msg-1044": [ { "name": "Mara", "mes": "…" } ] },
-  "sceneInjects": { "Harbor-Winter-Test-msg-1044": [
+  "candidateWhy": { "shipped": { "Apollo-Splashdown-Test-msg-1044": [ [ { "key": "valentina", "excerpt": "…" } ] ] } },
+  "sceneChats": { "Apollo-Splashdown-Test-msg-1044": [ { "name": "Valentina", "mes": "…" } ] },
+  "sceneInjects": { "Apollo-Splashdown-Test-msg-1044": [
     { "key": "NOTE", "text": "…", "ambient": false, "depth": 2 },
     { "key": "1_memory", "text": "…", "ambient": true, "depth": 0 }
   ] },
   // Only the card/persona fields some entry's `matchXxx` names. Absent when none does.
-  "sceneSources": { "Harbor-Winter-Test-msg-1044": { "scenario": "…" } },
-  "books": { "Harbor_Pack__v22": { /* … */ } }
+  "sceneSources": { "Apollo-Splashdown-Test-msg-1044": { "scenario": "…" } },
+  "books": { "Apollo_Crew__v22": { /* … */ } }
 }
 ```
 
