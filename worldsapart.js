@@ -37,7 +37,7 @@ import { runState, defaultSettings, settings, ensureSettings } from './extension
 import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './extension/studio.mjs';
-import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, POOL_ARMS } from './extension/capture-ui.mjs';
+import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './extension/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
 import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
 import { packStore, fetchIndex, fetchPack } from './extension/lang-store.mjs';
@@ -1458,6 +1458,8 @@ async function dryRun(verbose = false) {
     console.log(`%cWorlds Apart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
     // Version and fingerprints stay out of paramSnapshot: a bundle carries them in SHARED_FIELDS, and recording them twice would let the two disagree.
     console.log(`Worlds Apart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
+    const identity = await extensionIdentity();
+    if (identity) console.log(`Worlds Apart: ${identity}`);
 
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;

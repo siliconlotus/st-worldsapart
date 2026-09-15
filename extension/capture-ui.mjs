@@ -69,6 +69,32 @@ export async function waVersion() {
     return waVersionCache;
 }
 
+/** WA's checkout as ST reports it: `<branch>@<short sha> on disk`, and whether origin has more. '' when unreadable. */
+let identityCache = null;
+
+export async function extensionIdentity() {
+    if (identityCache !== null) return identityCache;
+    identityCache = '';
+    try {
+        // The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not.
+        const path = decodeURIComponent(new URL('..', import.meta.url).pathname);
+        const dir = path.replace(/\/$/, '').split('/').pop();
+        const r = await fetch('/api/extensions/version', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            // Global extensions are served from public/scripts/extensions/third-party; a per-user install is not.
+            body: JSON.stringify({ extensionName: dir, global: path.includes('/scripts/extensions/third-party/') }),
+        });
+        const d = r.ok ? await r.json() : null;
+        if (d?.currentCommitHash) {
+            // `isUpToDate` is also true when the checkout has no remotes, so it means "no update found".
+            identityCache = `${d.currentBranchName || '?'}@${String(d.currentCommitHash).slice(0, 7)} on disk`
+                + (d.isUpToDate ? '' : ` \u2014 behind origin/${d.currentBranchName}`);
+        }
+    } catch { /* offline, or not a git checkout: identity unknown is normal */ }
+    return identityCache;
+}
+
 /** ST's resolved version, `<branch>@<commit>` from /version; empty when unreadable, cached for the page. */
 let stVersionCache = null;
 
