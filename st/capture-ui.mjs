@@ -8,12 +8,12 @@ import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '.
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
 import { getTokenCountAsync } from '../../../../tokenizers.js';
 import { t, translate } from '../../../../i18n.js';
-import { runState, settings } from './state.mjs';
-import * as matcher from './matcher.mjs';
+import { runState, settings } from '../extension/state.mjs';
+import * as matcher from '../extension/matcher.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
-import { entryKey } from './content-lexical.mjs';
-import { gradeOrder } from './sort.mjs';
-import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from './grading.mjs';
+import { entryKey } from '../extension/content-lexical.mjs';
+import { gradeOrder } from '../extension/sort.mjs';
+import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
 
 /** The pipeline entry points the capture flows drive, injected once at registration.
  * @typedef {{chatBook: Function, coreSelection: Function, dryRun: Function, effectiveTokenBudget: Function, paramSnapshot: Function, scopedPriority: Function, vectorRequestBody: Function}} CaptureHost */

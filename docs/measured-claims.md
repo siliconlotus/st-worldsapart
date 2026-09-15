@@ -407,7 +407,7 @@ unless the threshold was derived from a measurement, spec facts stated without o
  SmartKeys + 23 book-common flags; the case-sensitive-capital exemption covers 2 of the 7 flagged
  SmartKeys (both one character name); 84 entries across 43 books carry secondary keys.
  — `extension/smartkeys.mjs:70,:164`; `docs/matching.md:705,:1697`;
- `test/smartkeys-check.mjs:342,:477`; `extension/studio.mjs:1254`.
+ `test/smartkeys-check.mjs:342,:477`; `st/studio.mjs:1254`.
 
 - **K13** — Priming secondaries up front: 2ms vs 102ms over 200 entries × 20 segments.
  — `worldsapart.js:1085`.
@@ -425,7 +425,7 @@ unless the threshold was derived from a measurement, spec facts stated without o
  aliases on a hand-written public book (real finds: two typos, two apostrophe breaks); near-dupe
  discovery: one hand-disabled pair in a 334-entry book; the O(n²) pass is 55k intersections on the
  largest book. — `extension/keyword-audit.mjs:21,:50,:54,:73,:203,:387,:523,:531,:552,:557,:564,:575`;
- `extension/studio.mjs:137,:1102`.
+ `st/studio.mjs:137,:1102`.
 
 ## S — Keyword suggester and curation evidence
 
@@ -574,14 +574,14 @@ unless the threshold was derived from a measurement, spec facts stated without o
 - **P1** — Chat metadata routes: ST's `/api/characters/chats` reads every line of every chat — 1.28GB
  and 3.2s over 194 chats — vs 0.06s reading the line-0 bindings (53x); a globally-active book means
  190 chats / 1.2GB / 12–17MB files, which is why global bindings are never pre-ticked.
- — `plugin/server.js:344,:284`; `extension/studio.mjs:169,:2137,:2218,:2308`.
+ — `plugin/server.js:344,:284`; `st/studio.mjs:169,:2137,:2218,:2308`.
 
 - **P2** — Suggester chat evidence: one Aho-Corasick pass is 254ms for 497 keys over 5473 messages
  (O(chat), key-count independent); pooling other chats runs 0.28s/MB (22MB ≈ 7s vs 2.5s) and looks
  like a free win — on one book the share of candidates that never occur anywhere fell 51% → 25% — but
  both measured cases are real: a heavily-versioned book's pool collapsed to the open chat (5646 vs 5598
  messages, 0.1pp gain) while a cleanly-bound one picked up a sibling branch (20,045 vs 16,359;
- never-occurring candidates 32.0%→28.2%; 5.8s vs 2.6s). — `extension/studio.mjs:137,:636,:644`.
+ never-occurring candidates 32.0%→28.2%; 5.8s vs 2.6s). — `st/studio.mjs:137,:636,:644`.
 
 - **P3** — Chunking oracle: 992/992 chunks identical on the first book; currently clean across three
  collections (983 + 640 + 1049 chunks); the wrong comparison granularity (per-entry positional vs

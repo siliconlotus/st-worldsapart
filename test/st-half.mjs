@@ -4,11 +4,11 @@
 /** The ST half: worldsapart.js is the ST half proper; the rest inject ST's globals into the pure modules. */
 export const ST_HALF = [
     'worldsapart.js',
-    'extension/studio.mjs',
-    'extension/ui-widgets.mjs',
-    'extension/capture-ui.mjs',
-    'extension/keyword-tools.mjs',
-    'extension/lang-store.mjs',
+    'st/studio.mjs',
+    'st/ui-widgets.mjs',
+    'st/capture-ui.mjs',
+    'st/keyword-tools.mjs',
+    'st/lang-store.mjs',
 ];
 
 /** ST's SERVER half, a different coupling: server.js runs inside ST's node process and imports `../../src/`, which

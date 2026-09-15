@@ -34,13 +34,13 @@ import { textgen_types, textgenerationwebui_settings } from '../../../textgen-se
 import { oai_settings } from '../../../openai.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './st/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
-import { lorebookStudio } from './extension/studio.mjs';
-import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './extension/capture-ui.mjs';
+import { lorebookStudio } from './st/studio.mjs';
+import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './st/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
 import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
-import { packStore, fetchIndex, fetchPack } from './extension/lang-store.mjs';
+import { packStore, fetchIndex, fetchPack } from './st/lang-store.mjs';
 
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';

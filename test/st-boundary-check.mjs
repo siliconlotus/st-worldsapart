@@ -15,7 +15,7 @@ const walk = dir => readdirSync(dir).flatMap(name => {
     return /\.(mjs|js)$/.test(name) ? [full] : [];
 });
 
-const files = ['extension', 'plugin'].flatMap(d => walk(join(ROOT, d))).concat(join(ROOT, 'worldsapart.js'));
+const files = ['extension', 'st', 'plugin'].flatMap(d => walk(join(ROOT, d))).concat(join(ROOT, 'worldsapart.js'));
 
 // A relative specifier that resolves outside the repo is an ST import; a bare one would be a node_modules dependency.
 const IMPORT = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s*['"](\.[^'"]*)['"]/g;

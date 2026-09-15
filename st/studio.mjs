@@ -7,18 +7,18 @@ import { power_user } from '../../../../power-user.js';
 import { escapeHtml, getCharaFilename } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
-import { runState, settings } from './state.mjs';
+import { runState, settings } from '../extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
-import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from './sort.mjs';
-import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from './entry-filter.mjs';
+import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
+import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from './keyword-audit.mjs';
-import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from './keyword-suggest.mjs';
-import { validateSmartKey } from './smartkeys.mjs';
-import { attachedBooks, classifyBookChats, findOrphanBindings } from './bindings.mjs';
-import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from './matcher.mjs';
-import { labMessages, labScan, runBook, windowTip } from './lab.mjs';
-import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from './keyedit.mjs';
+import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
+import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
+import { validateSmartKey } from '../extension/smartkeys.mjs';
+import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
+import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
+import { labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
+import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
 const SEVERITY_COLOR = { severe: '#e06c6c', moderate: '#d9b74a', minor: '#7bbf6a' };

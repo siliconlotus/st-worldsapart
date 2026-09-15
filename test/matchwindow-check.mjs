@@ -195,7 +195,7 @@ console.log('ok   a chat hit is one message, shared by the browser and the serve
 
 // --- keyword-tools.mjs wraps buildKeyPruneScan and must forward the caller options; string-sliced because it imports ST
 {
-    const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../extension/keyword-tools.mjs', import.meta.url), 'utf8'));
+    const src = await import('node:fs').then(fs => fs.readFileSync(new URL('../st/keyword-tools.mjs', import.meta.url), 'utf8'));
     const m = src.match(/export const buildKeyPruneScan = \(([^)]*)\)([\s\S]*?)\n\n/);
     eq(!!m, true, 'the wrapper is still an arrow with a parameter list');
     const [, params, body] = m;

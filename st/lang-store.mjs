@@ -1,7 +1,7 @@
 // lang-store.mjs — the browser side of language packs: a store over ST's user-files endpoints (data/<user>/user/files/) and
 // the two fetchers lang.mjs is handed. ST-coupled.
 import { getRequestHeaders } from '../../../../../script.js';
-import { toBase64 } from './lang.mjs';
+import { toBase64 } from '../extension/lang.mjs';
 
 const PACKS_BASE = 'https://raw.githubusercontent.com/siliconlotus/st-worldsapart-lang/main/';
 const filePath = lang => `user/files/wa-pack-${lang}.json`;

@@ -1,11 +1,11 @@
 // ui-widgets.mjs — DOM controls shared by the settings panel and the Lorebook Studio: sort/tier controls, the
 // floating context menu, entry tooltip and fold, and the injected stylesheet.
 import { escapeHtml } from '../../../../utils.js';
-import { markExcerptText } from './matcher.mjs';
+import { markExcerptText } from '../extension/matcher.mjs';
 import { DOMPurify } from '../../../../../lib.js';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
-import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from './sort.mjs';
+import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from '../extension/sort.mjs';
 
 export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢');
 

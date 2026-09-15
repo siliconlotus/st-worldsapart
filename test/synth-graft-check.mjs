@@ -160,7 +160,7 @@ ok(!/\b(0|1|[1-4][0-9])\b/.test(String(picks(a1.out)).split(', ')[0]) || Number(
 // capture-ui.mjs imports ST, so its POOL_ARMS is read as text. Names only: the VALUES are in two vocabularies on purpose.
 {
     const SRC = readFileSync(join(EVAL, 'synth-scenes.mjs'), 'utf8');
-    const WA = readFileSync(join(HERE, '..', 'extension', 'capture-ui.mjs'), 'utf8');
+    const WA = readFileSync(join(HERE, '..', 'st', 'capture-ui.mjs'), 'utf8');
     const names = src => (src.match(/POOL_ARMS\s*=\s*\{([\s\S]*?)\n\};/) ?? [, ''])[1]
         .split('\n').map(l => (l.match(/^\s*'?([\w-]+)'?\s*:/) ?? [])[1]).filter(Boolean).sort();
     const live = names(WA), mine = names(SRC);
