@@ -390,8 +390,8 @@ function ensureScan(scope, text) {
         // Masked, as foldedHay masks: the prescan and the walk have to agree on what the haystack is.
         counts = scanAutomaton(scope.automaton, fold(maskMarkup(text)));
     } else {
-        // A hit moves to the newest position. Eviction is by insertion order, and a segment two entries share — a repeated
-        // header — was being evicted from under the second entry's pass while it was still the one being read.
+        // A hit moves to the newest position: eviction is by insertion order, and a segment two entries share — a
+        // repeated header — would otherwise evict under the second entry's pass while it is still being read.
         scope.scans.delete(text);
     }
     scope.scans.set(text, counts);
