@@ -167,3 +167,25 @@ eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', {}, false),
     { keysecondary: ['storm'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
     'without SmartKeys the pair degrades to @@additional_keys; @@exclude_keys is dropped');
 console.log('ok   the fallback branch keeps the entry reachable for core');
+
+// --- review findings: the grammar cannot represent everything smartTerm was asked to quote
+eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['the "windy" city'] }),
+    { keysecondary: ['storm'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
+    'a key with an embedded quote has no quoted form in the grammar: refused, and the pair degrades rather than compiling an unsatisfiable term');
+
+eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['? topic && -(spoiler)'] }).key?.[0],
+    '? ((topic && -(spoiler))) && (storm) && -(dream)',
+    'an author-written key that already ends "&& -(...)" is not mistaken for an earlier compile: it still compiles');
+
+eqDeep(keys('@@additional_keys storm\n@@exclude_keys /bad(/\nx'),
+    { keysecondary: ['storm'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
+    'an unparseable regex in @@exclude_keys is filtered like any other unusable key, leaving the group empty, so the pair degrades');
+
+eq(keys('@@additional_keys Xor\n@@exclude_keys dream\nx').key?.[0],
+    '? (villa) && ("Xor") && -(dream)',
+    'a bare reserved operator word is quoted so it is read as a term, not as XOR');
+
+const compiledOnce = keys('@@additional_keys storm\n@@exclude_keys dream\nx').key[0];
+eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: [compiledOnce] }), {},
+    're-running over an already-compiled key does not nest it, nor fall back to keysecondary');
+console.log('ok   review fixes: quote refusal, suffix-matched idempotence, filtered additional/exclude keys, reserved words');

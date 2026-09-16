@@ -1000,16 +1000,26 @@ const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg)
 /** A comma list as trimmed, non-empty strings. */
 const commaList = arg => String(arg ?? '').split(',').map(s => s.trim()).filter(Boolean);
 
-/** One SmartKey term: a regex passes through, a nested SmartKey is unwrapped and grouped, anything holding
- *  an operator character is quoted so it stays a single term. */
+const NEEDS_QUOTING = /[\s()&|!+-]/;
+const RESERVED_WORD = /^(?:AND|OR|NOT|XOR)$/i;
+
+/** One SmartKey term: a regex passes through, a nested SmartKey is unwrapped and grouped, anything holding an
+ *  operator character or a bare AND/OR/NOT/XOR is quoted so it stays a single term. Null when it can't be represented
+ *  at all: the quoted-term lexer (`"([^"]*)"`) has no backslash-escape, so a `"` inside a term that needs quoting has
+ *  no way to survive — quoting it as `\"` would just split the key into further, unmatchable bare terms. */
 const smartTerm = key => {
     const s = String(key ?? '').trim();
     if (isRegexKey(s)) return s;
     if (s.startsWith('?')) return `(${s.slice(1).trim()})`;
-    return /[\s()&|!+-]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+    if (!NEEDS_QUOTING.test(s) && !RESERVED_WORD.test(s)) return s;
+    return s.includes('"') ? null : `"${s}"`;
 };
 
-const orGroup = keys => `(${keys.map(smartTerm).join(' || ')})`;
+/** `keys` OR-joined into one group, dropping any smartTerm refuses; null when nothing survives. */
+const orGroup = keys => {
+    const terms = keys.map(smartTerm).filter(Boolean);
+    return terms.length ? `(${terms.join(' || ')})` : null;
+};
 
 /** The ST field patch an entry's decorators ask for; `{}` when none apply. Pure: mutates nothing.
  *  `ctx` is `{ chatLength, smartKeys }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
@@ -1096,10 +1106,23 @@ export function decoratorFields(entry, ctx = {}) {
         // ST holds one selectiveLogic, so the pair is only expressible as a SmartKey — which only countKey reads.
         if (ctx?.smartKeys) {
             const primary = usableKeys(entry?.key);
-            // Already compiled on an earlier pass over this entry object; recompiling would nest it.
-            const compiled = primary.length === 1 && /&& -\(/.test(primary[0]);
-            if (primary.length && !compiled) {
-                patch.key = [`? ${orGroup(primary)} && ${orGroup(additional)} && -${orGroup(excluded)}`];
+            const primaryGroup = orGroup(primary);
+            const additionalGroup = orGroup(usableKeys(additional));
+            const excludedGroup = orGroup(usableKeys(excluded));
+            const suffix = additionalGroup && excludedGroup ? ` && ${additionalGroup} && -${excludedGroup}` : null;
+            // Already compiled on an earlier pass over this entry object: recompiling would nest it. Matched against
+            // the exact suffix this call would append, so an author's own key ending in "&& -(...)" cannot false-match.
+            const alreadyCompiled = suffix !== null && primary.length === 1 && primary[0].endsWith(suffix);
+            if (!alreadyCompiled) {
+                if (primaryGroup && suffix !== null) {
+                    patch.key = [`? ${primaryGroup}${suffix}`];
+                } else {
+                    // The grammar can't express this pair (a group came up empty, e.g. a key the grammar refused):
+                    // degrade rather than compile an unsatisfiable term.
+                    patch.keysecondary = additional;
+                    patch.selectiveLogic = WI_LOGIC.AND_ANY;
+                    patch.selective = true;
+                }
             }
         } else {
             patch.keysecondary = additional;
