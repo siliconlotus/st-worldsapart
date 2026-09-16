@@ -125,3 +125,19 @@ const addedUids = (entries, text, o = {}) =>
         'at scan the buffer is one segment — core\'s own cross-pass semantics');
     console.log('ok   withExtraTexts: recursion content matchable, seam scoped by the match window');
 }
+
+// --- `delay` sits ABOVE external activation in core's gate order (world-info.js:4845), so WA cannot punch an
+// entry through its own delay. Emitting one anyway makes WA's captures claim an entry that never shipped.
+{
+    eq(addedUids([{ uid: 20, key: ['cosmonaut'], delay: 5, content: 'x' }], 'cosmonaut', { chatLength: 3 }), '',
+        'a delayed entry is not force-activated while the chat is shorter than its delay');
+    eq(addedUids([{ uid: 21, key: ['cosmonaut'], delay: 5, content: 'x' }], 'cosmonaut', { chatLength: 5 }), '21',
+        '...and is once the chat reaches it, core\'s test being chat.length < delay');
+    eq(addedUids([{ uid: 22, key: ['cosmonaut'], delay: 0, content: 'x' }], 'cosmonaut', { chatLength: 0 }), '22',
+        'delay 0 is no delay, as core\'s `if (!entry.delay)` reads it');
+    eq(addedUids([{ uid: 23, key: ['cosmonaut'], content: 'x' }], 'cosmonaut', { chatLength: 0 }), '23',
+        'an entry with no delay is unaffected');
+    eq(addedUids([{ uid: 24, key: ['cosmonaut'], delay: 5, content: 'x' }], 'cosmonaut'), '24',
+        'no chatLength in opts at all leaves the gate off, as before');
+    console.log('ok   delay is honoured, matching core\'s own gate');
+}

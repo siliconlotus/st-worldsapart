@@ -996,6 +996,7 @@ const activationOpts = () => ({
     // Message 0's swipe_id IS the greeting index; a card with no alternates has no swipes array.
     greetingIndex: getContext().chat?.[0]?.swipe_id ?? 0,
     personaName: name1,
+    chatLength: (runState.scanChat ?? []).length,
 });
 
 /** The chat WA reads with the `dropChatTags` elements gone — the one strip, at intake. Copies, never an edit of ST's
