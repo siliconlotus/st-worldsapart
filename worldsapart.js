@@ -1003,7 +1003,10 @@ const activationOpts = () => ({
 /** Entries that have fired a latch decorator in this chat. */
 function firedLatches() {
     const fired = getContext().chatMetadata?.[matcher.WA_METADATA_KEY]?.fired;
-    return new Set(Array.isArray(fired) ? fired : []);
+    // An ARRAY is the pre-index shape and cannot be placed in time; report and gate nothing rather than
+    // guess a firing turn, which would suppress an entry that should still run.
+    if (Array.isArray(fired)) return new Set();
+    return matcher.firedAt(fired, getContext().chat?.length ?? 0);
 }
 
 /** Records the activated entries carrying a latch decorator. */
@@ -1012,13 +1015,17 @@ function recordLatches(entries) {
     const ctx = getContext();
     const meta = ctx.chatMetadata;
     if (!meta) return;
-    const fired = new Set(meta[matcher.WA_METADATA_KEY]?.fired ?? []);
-    const before = fired.size;
+    const prior = meta[matcher.WA_METADATA_KEY]?.fired;
+    const fired = { ...(Array.isArray(prior) ? {} : prior) };   // an array is the pre-index shape: replaced, not migrated
+    const before = Object.keys(fired).length;
+    // The chat length WHEN it fired, so any later moment is a filter and a rewind past it un-latches.
+    const at = ctx.chat?.length ?? 0;
     for (const entry of entries) {
-        if (matcher.hasLatch(entry)) fired.add(matcher.latchKey(entry));
+        const key = matcher.latchKey(entry);
+        if (matcher.hasLatch(entry) && !(key in fired)) fired[key] = at;
     }
-    if (fired.size === before) return;
-    meta[matcher.WA_METADATA_KEY] = { ...(meta[matcher.WA_METADATA_KEY] ?? {}), fired: [...fired] };
+    if (Object.keys(fired).length === before && !Array.isArray(prior)) return;
+    meta[matcher.WA_METADATA_KEY] = { ...(meta[matcher.WA_METADATA_KEY] ?? {}), fired };
     ctx.saveMetadata?.();
 }
 

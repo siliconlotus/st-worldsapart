@@ -994,12 +994,17 @@ export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1
 /** The book a latch key belongs to — the segment before the US. */
 export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F))[0];
 
+/** The latch keys that had fired by `chatLength`. The record maps a key to the chat length when it fired,
+ *  so a rewind past that point drops it, as core drops a timed effect on a chat that has not advanced. */
+export const firedAt = (record, chatLength) => new Set(
+    Object.entries(record ?? {}).filter(([, at]) => Number(at) <= Number(chatLength)).map(([k]) => k));
+
 /** A latch record split by book: `kept` for the record to write back, `dropped` for the delete's undo to
  *  restore. Both halves, because a prune that returns only what it keeps cannot be undone. */
-export function partitionLatches(fired, names) {
+export function partitionLatches(record, names) {
     const drop = new Set(Array.isArray(names) ? names : []);
-    const kept = [], dropped = [];
-    for (const k of Array.isArray(fired) ? fired : []) (drop.has(latchBook(k)) ? dropped : kept).push(k);
+    const kept = {}, dropped = {};
+    for (const [k, at] of Object.entries(record ?? {})) (drop.has(latchBook(k)) ? dropped : kept)[k] = at;
     return { kept, dropped };
 }
 

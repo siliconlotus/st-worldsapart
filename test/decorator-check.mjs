@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, hasLatch, SCENE_UNMODELLED_GATES, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedAt, hasLatch, SCENE_UNMODELLED_GATES, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -255,17 +255,27 @@ eq(latchBook(`W${US}3`), 'W', 'the book is the segment before the US');
 eq(latchBook(`My Book${US}12`), 'My Book', 'a book name may itself contain spaces');
 eq(latchBook(''), '', 'an empty key has no book');
 
+// The record maps a latch key to the chat length when it fired, so any moment is a filter rather than a
+// snapshot, and a rewind past the firing point drops it — as core drops a timed effect on a chat that
+// has not advanced (world-info.js `#checkTimedEffectOfType`).
+const REC = { [`W${US}1`]: 10, [`W${US}2`]: 40, [`X${US}3`]: 25 };
+
+eqDeep([...firedAt(REC, 100)].sort(), [`W${US}1`, `W${US}2`, `X${US}3`].sort(), 'every latch that fired by now');
+eqDeep([...firedAt(REC, 25)].sort(), [`W${US}1`, `X${US}3`].sort(), 'a latch that fires later has not fired yet');
+eqDeep([...firedAt(REC, 10)], [`W${US}1`], 'the firing turn itself counts');
+eqDeep([...firedAt(REC, 9)], [], 'rewound past every firing point: nothing is latched');
+eqDeep([...firedAt(null, 100)], [], 'an absent record is not a crash');
+
 // Deleting a book prunes its latch keys from the open chat's record; the undo puts them back, so the
 // prune has to hand back what it removed rather than only what it kept.
-eqDeep(partitionLatches([`W${US}1`, `W${US}2`, `X${US}3`], ['W']),
-    { kept: [`X${US}3`], dropped: [`W${US}1`, `W${US}2`] }, 'a deleted book\'s keys are separated from the rest');
-eqDeep(partitionLatches([`W${US}1`, `X${US}2`], ['W', 'X']),
-    { kept: [], dropped: [`W${US}1`, `X${US}2`] }, 'several books at once');
-eqDeep(partitionLatches([`W${US}1`], ['X']), { kept: [`W${US}1`], dropped: [] }, 'a book with no latches drops nothing');
-eqDeep(partitionLatches([`My Book${US}1`], ['My Book']), { kept: [], dropped: [`My Book${US}1`] },
-    'a book name with spaces still matches');
-eqDeep(partitionLatches([], ['W']), { kept: [], dropped: [] }, 'an empty record');
-eqDeep(partitionLatches(null, ['W']), { kept: [], dropped: [] }, 'an absent record is not a crash');
+eqDeep(partitionLatches(REC, ['W']),
+    { kept: { [`X${US}3`]: 25 }, dropped: { [`W${US}1`]: 10, [`W${US}2`]: 40 } },
+    'a deleted book\'s keys are separated from the rest, firing turns intact');
+eqDeep(partitionLatches(REC, ['W', 'X']), { kept: {}, dropped: REC }, 'several books at once');
+eqDeep(partitionLatches({ [`W${US}1`]: 10 }, ['X']), { kept: { [`W${US}1`]: 10 }, dropped: {} },
+    'a book with no latches drops nothing');
+eqDeep(partitionLatches({}, ['W']), { kept: {}, dropped: {} }, 'an empty record');
+eqDeep(partitionLatches(null, ['W']), { kept: {}, dropped: {} }, 'an absent record is not a crash');
 
 // Offline scene re-derivation cannot model the gates that read the chat's shape — an assistant/user split,
 // message 0's swipe_id, the persona, the latch record — because a capture stores the chat as one joined

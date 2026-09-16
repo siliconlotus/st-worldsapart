@@ -1396,7 +1396,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
         const meta = getContext().chatMetadata;
         const { kept, dropped } = partitionLatches(meta?.[WA_METADATA_KEY]?.fired, names);
-        if (dropped.length) {
+        if (Object.keys(dropped).length) {
             meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: kept };
             getContext().saveMetadata?.();
         }
@@ -1406,7 +1406,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             name: n,
             sort: s.studioSortByBook?.[n],
             ignore: s.keywordIgnore?.[n],
-            fired: dropped.filter(k => latchBook(k) === n),
+            fired: Object.fromEntries(Object.entries(dropped).filter(([k]) => latchBook(k) === n)),
         }));
         for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
         saveSettingsDebounced();
@@ -1452,11 +1452,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Only into the chat the keys came from: the record is chat-scoped, and writing chat A's latches into
         // chat B would mark entries fired where they never fired. A closed chat has no metadata-only write.
         if (p.chatId && p.chatId === getContext().chatId) {
-            const back = (p.forgotten ?? []).filter(f => !skipped.includes(f.name)).flatMap(f => f.fired ?? []);
-            if (back.length) {
+            const back = Object.assign({}, ...(p.forgotten ?? []).filter(f => !skipped.includes(f.name)).map(f => f.fired ?? {}));
+            if (Object.keys(back).length) {
                 const meta = getContext().chatMetadata;
-                const fired = new Set([...(meta?.[WA_METADATA_KEY]?.fired ?? []), ...back]);
-                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: [...fired] };
+                const prior = meta?.[WA_METADATA_KEY]?.fired;
+                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: { ...(Array.isArray(prior) ? {} : prior), ...back } };
                 getContext().saveMetadata?.();
             }
         }
