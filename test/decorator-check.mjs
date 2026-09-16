@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, latchKey, latchBook, hasLatch, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, hasLatch, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -176,79 +176,44 @@ eqDeep(keys('@@additional_keys cherry\n@@elaborate_custom_match_logic\n@@@additi
     ['cherry', 'apple', 'banana'], '...and accumulates with a direct line rather than losing one of them');
 console.log('ok   each key decorator alone maps to keysecondary');
 
-// --- together, ST cannot express both, so WA compiles one SmartKey
-eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx').key?.[0],
-    '? (villa) && (storm) && -(dream)', 'both present: one compiled SmartKey');
-eq(keys('@@additional_keys storm,rain\n@@exclude_keys dream,fog\nx').key?.[0],
-    '? (villa) && (storm || rain) && -(dream || fog)', 'each list is OR-ed inside its group');
-eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['villa', 'the house'] }).key?.[0],
-    '? (villa || "the house") && (storm) && -(dream)', 'a key with spaces is quoted so it stays one term');
-eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['/vil+a/i'] }).key?.[0],
-    '? (/vil+a/i) && (storm) && -(dream)', 'a regex key is already a valid SmartKey term');
-eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['? villa || manor'] }).key?.[0],
-    '? ((villa || manor)) && (storm) && -(dream)', 'a key that is itself a SmartKey is unwrapped and grouped');
-eq('keysecondary' in keys('@@additional_keys storm\n@@exclude_keys dream\nx'), false,
-    'the compiled branch writes no keysecondary');
-console.log('ok   both together compile to one SmartKey');
+// --- together. ST's single selectiveLogic cannot hold both gates, so `@@additional_keys` keeps the
+// core-native mapping and the exclusions ride on a WA-only field, composed into the gate as AST nodes at
+// match time. The entry's own keys are never rewritten, so nothing in them can be read as syntax.
+eqDeep(keys('@@additional_keys storm,rain\n@@exclude_keys dream,fog\nx'),
+    { keysecondary: ['storm', 'rain'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true, waExcludeKeys: ['dream', 'fog'] },
+    'both present: additional stays core-native, exclusions go to waExcludeKeys');
+eq('key' in keys('@@additional_keys storm\n@@exclude_keys dream\nx'), false,
+    'the entry\'s own keys are never rewritten');
+console.log('ok   both together keep the native mapping and add a WA-only exclusion list');
 
-// --- the fallback branch, for when core will be the matcher
-eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', {}, false),
-    { keysecondary: ['storm'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
-    'without SmartKeys the pair degrades to @@additional_keys; @@exclude_keys is dropped');
-console.log('ok   the fallback branch keeps the entry reachable for core');
-
-// --- review findings: the grammar cannot represent everything smartTerm was asked to quote
-eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['the "windy" city'] }),
-    { keysecondary: ['storm'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
-    'a key with an embedded quote has no quoted form in the grammar: refused, and the pair degrades rather than compiling an unsatisfiable term');
-
-eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['? topic && -(spoiler)'] }).key?.[0],
-    '? ((topic && -(spoiler))) && (storm) && -(dream)',
-    'an author-written key that already ends "&& -(...)" is not mistaken for an earlier compile: it still compiles');
-
-eqDeep(keys('@@additional_keys storm\n@@exclude_keys /bad(/\nx'),
-    { keysecondary: ['storm'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
-    'an unparseable regex in @@exclude_keys is filtered like any other unusable key, leaving the group empty, so the pair degrades');
-
-eq(keys('@@additional_keys Xor\n@@exclude_keys dream\nx').key?.[0],
-    '? (villa) && ("Xor") && -(dream)',
-    'a bare reserved operator word is quoted so it is read as a term, not as XOR');
-
-const compiledOnce = keys('@@additional_keys storm\n@@exclude_keys dream\nx').key[0];
-eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: [compiledOnce] }), {},
-    're-running over an already-compiled key does not nest it, nor fall back to keysecondary');
-
-eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['=weird'] }).key?.[0],
-    '? ("=weird") && (storm) && -(dream)', 'a key starting with = is quoted so smartkeys.mjs\'s flag prefix does not eat it');
-eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['HP::100'] }).key?.[0],
-    '? ("HP::100") && (storm) && -(dream)', 'a key ending in ::N is quoted so smartkeys.mjs\'s weight suffix does not eat it');
-console.log('ok   review fixes: quote refusal, suffix-matched idempotence, filtered additional/exclude keys, reserved words');
-
-// --- the patch is applied to loadWorldInfo's cached objects, so it must be scalars or whole-array
-// REASSIGNMENT: getGlobalLore spreads shallow, and an in-place push would reach worldInfoCache.
-const applied = (content, entry = {}) => {
-    const e = { key: ['villa'], keysecondary: [], content, ...entry };
-    const before = { key: e.key, keysecondary: e.keysecondary };
-    Object.assign(e, decoratorFields(e, { chatLength: 0, smartKeys: true }));
-    return { sameKeyArray: e.key === before.key, sameSecondaryArray: e.keysecondary === before.keysecondary };
+// The gate itself, through the shipped matcher. Every key below previously had to be quoted, escaped or
+// refused because it was spliced into a SmartKey string; none of them needs anything now.
+const PAIR = '@@additional_keys storm,rain\n@@exclude_keys dream,fog\nThe villa';
+const gated = (key, text) => {
+    const e = { key: [key], content: PAIR };
+    Object.assign(e, decoratorFields(e, { chatLength: 0 }));
+    return keywordScore(e, text, e.key, { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).hits.length > 0;
 };
 
-eq(applied('@@additional_keys storm\nx').sameSecondaryArray, false, 'keysecondary is REASSIGNED, never mutated');
-eq(applied('@@additional_keys storm\n@@exclude_keys dream\nx').sameKeyArray, false, 'key is reassigned too');
-eq(applied('@@depth 0\nx').sameKeyArray, true, 'a patch touching no key leaves the arrays alone');
+for (const k of ['villa', 'the house', 'HP::100', '=weird', 'the "windy" city', 'a||b', 'Xor']) {
+    eq(gated(k, `${k} in the storm`), true, `${k}: an additional key present is a match`);
+    eq(gated(k, `${k} in heavy rain`), true, `${k}: any one additional key suffices`);
+    eq(gated(k, `${k} in the storm and a dream`), false, `${k}: an excluded key suppresses it`);
+    eq(gated(k, `${k} on a quiet day`), false, `${k}: no additional key, no match`);
+}
+eq(gated('/vil+a/i', 'the villa in the storm'), true, 'a regex key matches under the pair');
+eq(gated('/vil+a/i', 'the villa in the storm and a dream'), false, '...and is gated by the exclusions');
+console.log('ok   the pair gates correctly for keys that no longer need quoting or refusal');
 
-// Applying twice must land in the same place.
-const twice = content => {
-    const e = { key: ['villa'], content };
-    Object.assign(e, decoratorFields(e, { chatLength: 0, smartKeys: true }));
-    const first = JSON.stringify(e);
-    Object.assign(e, decoratorFields(e, { chatLength: 0, smartKeys: true }));
-    return first === JSON.stringify(e);
-};
-eq(twice('@@depth 0\nx'), true, 'a scalar patch is idempotent');
-eq(twice('@@additional_keys storm\n@@exclude_keys dream\nx'), true,
-    'the compiled key is idempotent: recompiling must not nest the SmartKey again');
-console.log('ok   the patch is scalar-or-reassign, and idempotent across a re-fire');
+// A key that is itself a SmartKey is spliced in as a subtree by keyNode, never re-lexed from text.
+eq(gated('? villa || manor', 'the manor in the storm'), true, 'a ? key still works under the pair');
+eq(gated('? villa || manor', 'the manor in the storm and a dream'), false, '...and is still gated by the exclusions');
+
+// An unusable exclusion is filtered where the gate is built, not silently dropped from the patch.
+eqDeep(keys('@@additional_keys storm\n@@exclude_keys /bad(/, dream\nx').waExcludeKeys, ['/bad(/', 'dream'],
+    'an unparseable regex is carried into waExcludeKeys and filtered at gate-build time');
+eq(gated('villa', 'the villa in the storm'), true, 'sanity: the plain case still matches');
+console.log('ok   ? keys splice in, and an unusable exclusion does not take the gate with it');
 
 // --- @@dont_activate_after_match and @@keep_activate_after_match: WA's own per-chat latch record,
 // read from opts.fired rather than core's timedWorldInfo (see task-8-brief.md for why).

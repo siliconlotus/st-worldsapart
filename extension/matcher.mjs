@@ -765,10 +765,27 @@ export const secondaryKeys = (entry) => {
 /** One primary key under the entry's selective logic, as one synthesised expression whose gate nodes carry weight 0.
  *  The cache id must join every input the tree depends on (US): registerTerms stamps scope-local indices onto it. */
 const SELECTIVE_SEP = '\u001f';
+
+/** The entry's WA-only exclusion list, filtered like any other key list. Set by the `@@exclude_keys`
+ *  decorator when `@@additional_keys` is present too, which ST's single `selectiveLogic` cannot hold. */
+const excludeKeys = entry =>
+    (Array.isArray(entry?.waExcludeKeys) ? entry.waExcludeKeys : []).filter(k => String(k ?? '').trim() && !fatalKey(k));
+
+/** `node` with one NOT per excluded key ANDed on. synthesizeSecondary with no secondaries IS keyNode, so a key
+ *  becomes a leaf whatever it holds — never serialised into an expression that would re-lex its quotes or sigils. */
+const withExclusions = (node, excl, flags) => excl.reduce(
+    (acc, k) => ({ type: 'AND', left: acc, right: { type: 'NOT', operand: synthesizeSecondary(k, [], WI_LOGIC.AND_ANY, flags) } }),
+    node);
+
+/** One primary key under the entry's selective logic, as one synthesised expression whose gate nodes carry weight 0.
+ *  The cache id must join every input the tree depends on (US): registerTerms stamps scope-local indices onto it. */
 function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
     const logic = entry?.selectiveLogic ?? WI_LOGIC.AND_ANY;
-    const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, ...sec].join(SELECTIVE_SEP);
-    return evaluateAst(id, () => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords }), text);
+    const excl = excludeKeys(entry);
+    const flags = { caseSensitive, wholeWords };
+    // sec.length separates the two lists in the id, or [a,b]+[] and [a]+[b] would share a cached tree.
+    const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, sec.length, ...sec, ...excl].join(SELECTIVE_SEP);
+    return evaluateAst(id, () => withExclusions(synthesizeSecondary(key, sec, logic, flags), excl, flags), text);
 }
 
 /** One key's scoring units against one segment; a plain key is one unit seen n times, and a matched expression with no units is one unit (countKey's negation-only floor). */
@@ -776,9 +793,10 @@ function keyUnits(entry, key, text, caseSensitive, wholeWords, sec) {
     const raw = String(key ?? '').trim();
     if (!raw || !text) return [];
 
-    if (sec?.length || raw.startsWith('?')) {
-        const { matched, units } = sec?.length
-            ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec)
+    const gated = Boolean(sec?.length) || excludeKeys(entry).length > 0;
+    if (gated || raw.startsWith('?')) {
+        const { matched, units } = gated
+            ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec ?? [])
             : evaluateSmartKey(raw, text);
         if (!matched) return [];
         return units.length ? units : [{ id: raw, wsum: 1, n: 1 }];
@@ -1029,26 +1047,6 @@ const ROLE_WORDS = { system: WI_ROLE.SYSTEM, user: WI_ROLE.USER, assistant: WI_R
 /** A non-negative integer, or null. */
 const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg) : null);
 
-const NEEDS_QUOTING = /[\s()&|!+-]|^[=^]|(?:::|\^)\d/;
-const RESERVED_WORD = /^(?:AND|OR|NOT|XOR)$/i;
-
-/** One SmartKey term: a regex passes through, a nested SmartKey is unwrapped and grouped, anything holding an
- *  operator character or a bare AND/OR/NOT/XOR is quoted so it stays a single term. Null when it can't be represented
- *  at all: the quoted-term lexer (`"([^"]*)"`) has no backslash-escape, so a `"` inside a term that needs quoting has
- *  no way to survive — quoting it as `\"` would just split the key into further, unmatchable bare terms. */
-const smartTerm = key => {
-    const s = String(key ?? '').trim();
-    if (isRegexKey(s)) return s;
-    if (s.startsWith('?')) return `(${s.slice(1).trim()})`;
-    if (!NEEDS_QUOTING.test(s) && !RESERVED_WORD.test(s)) return s;
-    return s.includes('"') ? null : `"${s}"`;
-};
-
-/** `keys` OR-joined into one group, dropping any smartTerm refuses; null when nothing survives. */
-const orGroup = keys => {
-    const terms = keys.map(smartTerm).filter(Boolean);
-    return terms.length ? `(${terms.join(' || ')})` : null;
-};
 
 /** The ST field patch an entry's decorators ask for; `{}` when none apply. Pure: mutates nothing.
  *  `ctx` is `{ chatLength, smartKeys }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
@@ -1138,32 +1136,13 @@ export function decoratorFields(entry, ctx = {}) {
     }
 
     if (additional && excluded) {
-        // ST holds one selectiveLogic, so the pair is only expressible as a SmartKey — which only countKey reads.
-        if (ctx?.smartKeys) {
-            const primary = usableKeys(entry?.key);
-            const primaryGroup = orGroup(primary);
-            const additionalGroup = orGroup(usableKeys(additional));
-            const excludedGroup = orGroup(usableKeys(excluded));
-            const suffix = additionalGroup && excludedGroup ? ` && ${additionalGroup} && -${excludedGroup}` : null;
-            // Already compiled on an earlier pass over this entry object: recompiling would nest it. Matched against
-            // the exact suffix this call would append, so an author's own key ending in "&& -(...)" cannot false-match.
-            const alreadyCompiled = suffix !== null && primary.length === 1 && primary[0].endsWith(suffix);
-            if (!alreadyCompiled) {
-                if (primaryGroup && suffix !== null) {
-                    patch.key = [`? ${primaryGroup}${suffix}`];
-                } else {
-                    // The grammar can't express this pair (a group came up empty, e.g. a key the grammar refused):
-                    // degrade rather than compile an unsatisfiable term.
-                    patch.keysecondary = additional;
-                    patch.selectiveLogic = WI_LOGIC.AND_ANY;
-                    patch.selective = true;
-                }
-            }
-        } else {
-            patch.keysecondary = additional;
-            patch.selectiveLogic = WI_LOGIC.AND_ANY;
-            patch.selective = true;
-        }
+        // ST holds one selectiveLogic, so only @@additional_keys can be expressed natively. The exclusions ride
+        // on a WA-only field that selectiveEval composes into the gate as NOT nodes; core ignores it and honours
+        // the additional keys alone. The entry's own keys are never rewritten.
+        patch.keysecondary = additional;
+        patch.selectiveLogic = WI_LOGIC.AND_ANY;
+        patch.selective = true;
+        patch.waExcludeKeys = excluded;
     } else if (additional || excluded) {
         patch.keysecondary = additional ?? excluded;
         patch.selectiveLogic = additional ? WI_LOGIC.AND_ANY : WI_LOGIC.NOT_ANY;
