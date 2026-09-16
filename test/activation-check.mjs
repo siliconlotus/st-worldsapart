@@ -126,7 +126,7 @@ const addedUids = (entries, text, o = {}) =>
     console.log('ok   withExtraTexts: recursion content matchable, seam scoped by the match window');
 }
 
-// --- `delay` sits ABOVE external activation in core's gate order (world-info.js:4845), so WA cannot punch an
+// --- `delay` sits ABOVE external activation in core's gate order (world-info.js `checkWorldInfo`, the sticky/delay gates), so WA cannot punch an
 // entry through its own delay. Emitting one anyway makes WA's captures claim an entry that never shipped.
 {
     eq(addedUids([{ uid: 20, key: ['cosmonaut'], delay: 5, content: 'x' }], 'cosmonaut', { chatLength: 3 }), '',

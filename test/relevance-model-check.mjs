@@ -30,7 +30,7 @@ const idx = buildNameDf(book);
 eq(idx.ndoc, 3, 'ndoc counts entries with content, not chunks and not blank entries');
 eq(idx.names.has('B.3'), false, 'a contentless entry contributes no name set');
 
-// Disabled entries stay in the corpus (docs/matching.md; F27).
+// Disabled entries stay in the corpus (docs/matching-architecture.md; F27).
 eq(idx.df.get('maren'), 2, 'a disabled entry still contributes to df');
 eq(idx.df.get('brackenmoor'), 1, 'a name in one entry has df 1');
 

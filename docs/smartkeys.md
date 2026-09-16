@@ -5,25 +5,10 @@ A World Info key in WA can be one of three things:
 | Form | Example | What it is |
 |---|---|---|
 | plain | `moon mission` | substring match, the SillyTavern default |
-| regex | `/co(l|s)monaut/i` | a regular expression, as core already supports |
+| regex | `/co(l\|s)monaut/i` | a regular expression, as core already supports |
 | **SmartKey** | `? moon mission -apollo` | a boolean expression — a leading `?` opts in |
 
-`/…/` is also a **term** inside a SmartKey: `? /co(l|s)monaut/ landed` mixes a pattern and a word.
-The first half of this page is the SmartKeys grammar; the second is how matching works for all three.
-
-## What a SmartKey does today
-
-**SmartKeys activate.** On a generation WA runs, a `?` key pulls its entry into the prompt exactly as
-a plain key does, and it sets the **order** entries appear in, the **score** WA reports in `/wa-debug`
-and the WI panel, and everything in the **Keyword Studio** — colouring, the audit, the pruner.
-Matching uses **WA's** scan depth, not core's *Scan Depth*; a per-entry Scan Depth overrides both.
-SillyTavern's own dry runs (prompt token counts, chat load) are not WA generations, so they keep
-core's matcher, where a `?` key never matches. That is the portability story: a book full of
-SmartKeys loads in a stock SillyTavern, where the keys never match rather than breaking anything.
-
----
-
-# The grammar
+## Quick reference
 
 ```
 ? moon mission -apollo            implicit AND; a leading - negates
@@ -32,214 +17,338 @@ SmartKeys loads in a stock SillyTavern, where the keys never match rather than b
 ? ^NASA                           ^ case-sensitive
 ? ^=NASA                          flags combine, in either order
 ? fire::2.5                       ::N weights the term
-? fire^2.5                        ^N is accepted too (Lucene's boost)
+? fire^3.5                        ^N is accepted too (Lucene's boost)
 ? (rain OR snow) -indoors         parentheses group
 ? /co(l|s)monaut/i landed         /pattern/flags is a term
-? (copper pipe)~3                 ~N: the group's words within 3 words of each other
+? (moon mission)~3                 ~N: up to 3 words between moon and mission
 ```
 
-**Terms.** Anything that is not an operator or a paren, matched as a plain key would be — substring
-by default, so `? fir` finds `confirm`.
+---
 
-**Operators.** `AND` `OR` `NOT` `XOR` as words (any case), or `&&` `&` `+` / `||` `|` / `!` `-` as
-symbols. Adjacent terms get an implicit `AND`, so `? moon mission` requires both. `-` `!` `+` are
-operators only at the *start* of a token, so `sci-fi` and `c++` are single terms; `+` in Lucene's
-per-term position (`? +fire +water`) means "required", which the implicit AND already says.
-**Precedence:** `(...)` before `NOT` before `AND` before `OR`/`XOR`. When in doubt, use parens.
-Groups and negations nest up to **100** deep; a key that nests deeper is refused with an error — a
-keyword that deep is a mistake, and the key editor will say so.
+# How matching works
 
-**Flags** are prefixes on a single term: `=` whole word (`? =cat` will not match `catalogue`), `^`
-case-sensitive (`? ^NASA` will not match `nasa`). They apply per term, and a SmartKey **ignores the
-entry's own** *Case-Sensitive* and *Match Whole Words* checkboxes.
+## Plain keys mostly behave the same
 
-**Weights** apply to a group as well as a term: `? (copper pipe)::3` is the conjunction, tripled. A group's
-weight multiplies each thing inside it, so it scales the group's total whatever the operator; a term's own
-weight and its group's compose (`(fire::2)::3` is 6), and groups nest. A weight attached to nothing —
-`? fire ::3`, or `? fire ^2`, where `^` at the start of a term is the case flag — is refused as an error.
+In SillyTavern, a keyword is an exact substring match, so the term `moon` matches `honmoon` unless
+whole-word matching is enabled for the entry. A plain keyword in WorldsApart (WA) behaves exactly the
+same way; none of your existing keys will behave differently, with one exception: SillyTavern for some
+reason skips whole-word matching on multi-word terms (e.g., terms that contain a space like `hot tub`)
+and applies substring matching, so `hot tub` matches `hot tubs` and `hot tubing`. WA corrects this, so
+it behaves as intended and does not match.
 
-**Weights** are a postfix: `term::2`, `term::0.5`, or the Lucene spelling `term^2`. `::` and not `:`,
-so a single colon stays ordinary text — `? meeting 10:30`, `? Judges 3:16`, `? re:code` and URLs
-work as written; a delimiter followed by anything but digits is part of the term (`fire::abc`).
-Weight `0` means "must be present, but do not rank on it" — a **disambiguator**: `? mercury AND
-planet::0` needs the word *planet* nearby, so the entry does not match on the element or the god, and
-still scores exactly what `? mercury` alone would; without the `::0` the qualifier counts as a second
-thing the passage is about.
+## In some situations, they may behave differently
 
-**Proximity.** `~N` after a group holds its words to a window: `? (copper pipe)~3` matches when *copper*
-and *pipe* are within three words of each other, in either order — *pipe of old copper* (two words between)
-yes, *copper in the bath beside the pipe* no. `~0` is adjacency, either order. N is the words allowed between
-each neighbouring pair, so a group of three can stretch to twice N. An alternation inside takes whichever
-branch is nearer: `? ((Arthur | Kyle) Porsche)~3`, and an alternation of longer things is a choice
-between them, `? (((john james) | quincy) adams)~1`; an `XOR` takes either branch unless the other is
-also within reach: `? ((john XOR quincy) adams)~1` finds *John James Adams* and *Quincy Jefferson
-Adams*, and not *John Quincy Adams*. A negation inside vetoes only within reach: `? (fire
--drill)~2` matches a *fire* with no *drill* within two words of it, where `? fire -drill` gives up on the
-whole window. The negated part can be anything a key can be. A word, a phrase or a group is within reach when
-any part of it is, and a combination is read over what is within reach: `-(drill practice)` vetoes when
-both words are, `-(drill practice)~0` when they are adjacent to each other and that pair is. Each cluster counts once, as one thing: the group scores like a single term, and a weight
-goes on the group, `? (copper pipe)~3::2` or `? (copper pipe)::2~3`, the two being the same key; a weight on a word inside the group is not read. `~N` goes on a
-group only. After a quoted phrase it is refused, since a phrase is already its words adjacent and in order,
-and a `~` anywhere else is an ordinary character. What counts as a word is the *Word boundary* setting below.
+### Tags
 
-**Scoring.** A key's score is the sum over the things it is **about**. `AND` joins two different
-things, so each is scored separately and the scores add: `? moon AND rocket` is worth two. `OR` names
-one thing more than one way, so its mentions pool and count as one thing seen more often: `? (glasses
-OR spectacles)` scores exactly what the bare key `glasses` would on the same number of mentions. `XOR`
-takes the winning side. A branch that did not match contributes nothing, and neither does a negation:
-`? fire -water` is one thing, not two. **What one thing is worth**: being present at all is worth its
-weight, and further mentions add less and less — present once scores 1, mentioned ten times about 3.
-**Weight multiplies the thing, not the mentions**: `? (everest OR kailash::2)` scores 1 on a page
-about Everest and 2 on a page about Kailash — twice as important, not "as if mentioned twice".
+**HTML and XML tags and comments are blanked out before a literal key is matched.** The keys `size`
+and `div` will not match `<div style="font-size:13px">` or `<!-- this div's size is too big -->` like
+it would under ST's own matching system. If you want to match tag contents, use a regex.
 
-A key built **only** from negation — `? -water` — is refused as a key of its own: it would match nearly
-every message. It is legal in exactly one place, as a **secondary** key (below).
+### Orthographic Normalization
 
-## The same SmartKey, spelled out
+WA generally tries to model an author's intent when matching. A user who writes the key `Cap'n Crunch` probably wants it
+whether the apostrophe is the straight form from their keyboard or the fancy curly form that displays
+sometimes, and LLMs frequently emit both on an inconsistent basis. Consequently, WA normalizes a few
+classes of characters to ensure consistent matching regardless of variant forms being used.
 
-Every row is one SmartKey written three ways; they parse and score identically.
-
-| shorthand | | spelled out |
+| class | written | matches |
 |---|---|---|
-| `? moon mission` | = | `? moon AND mission` |
-| `? moon mission -apollo` | = | `? moon AND mission AND NOT apollo` |
-| `? +fire +water` | = | `? fire AND water` &nbsp;=&nbsp; `? fire water` |
-| `? rain \| snow` | = | `? rain OR snow` &nbsp;=&nbsp; `? rain \|\| snow` |
-| `? fire && !water` | = | `? fire AND NOT water` &nbsp;=&nbsp; `? fire -water` |
-| `? fire^2` | = | `? fire::2` |
-| `apollo mission` *(a plain key)* | = | `? "apollo mission"` |
+| Apostrophes, single quotes, and ticks | `'` `’` `‘` `‚` `‛` `ʼ` `ʹ` `′` `´` `` ` `` `‹` `›` | each other |
+| Double quotes | `"` `“` `”` `„` `‟` `″` `ʺ` `«` `»` | each other |
+| Em dash | `—` | `--` (two hyphens) |
+| En dash | `–` | `-` (one hyphen) |
+| Ellipsis | `…` | `...` (three periods) |
+| Spaces | non-breaking space | ordinary space |
+| Accents and combining marks | decomposed `José` (`e` + a combining acute) | composed `José` (NFC, the single letter `é`) |
 
-The two rewrites that *do* change a SmartKey are quoting across a space (`hot tub` vs `"hot tub"`)
-and regrouping with parens.
+What this means is that you don't need to care about any of this — you can write whatever way is
+comfortable to you without needing to provide variant keys for whatever the model may be spitting out.
+If any of your keys use any of these marks, it's very likely that SillyTavern wasn't matching them in
+some cases where you would have expected it to.
 
-## A regex can be one term
+This principle extends to hyphens; WA expands word-internal hyphens to spaces so that `sci-fi` also matches `sci fi`, because often
+the hyphen is a matter of taste or convention. If you specifically want the hyphen, write the key as a regex: `/sci-fi/`. (The reverse is not
+true — key `sci fi` will not match `sci-fi` in the chat, because it would require turning every space in the chat into a hyphen). Leadng and trailing hyphens are exempted from the expansion (e.g., `-gate` will only match `bridge-gate`, not `the bridge gate is broken`.)
 
-`/pattern/flags` inside a SmartKey is a term like any other: it can sit beside a word, be negated,
+**Note:** WA does *not* remove accents like some systems do; `cafe` does not match `café`, because those are only considered the same thing in English, and WA supports many languages (French `a` and `à` are completely separate words.) Use an OR group to capture accent variants if they might arise (models are usually pretty good about using them consistently). 
+
+---
+
+# SmartKeys
+
+A SmartKey is a key with some (optional) special features. They can be identified with their leading `?`
+character[^1]. `astronaut` is a plain keyword; `? astronaut` is a SmartKey (albeit one that behaves
+identically).
+
+## Whole-word and Case-Sensitive Flags
+
+The first feature of a SmartKey is the ability to apply whole-word matching or case sensitive matching
+to *the single key only*. SillyTavern requires all keys in an entry to have the same behavior;
+SmartKeys allow you to get granular.
+
+The `=` flag makes a term (that is, a part of a SmartKey; more on this later) use whole-word matching.
+`? cat` matches `catapult`, same as plain keyword `cat`.
+`? =cat`, on the other hand, ensures that only the literal word `cat` matches.
+
+The `^` flag makes a term case-sensitive in the same way.
+`? NASA` matches `nasal` and `NASA space program` (remember: terms are substring-matched unless you use `=`!)
+`? ^NASA` matches `NASA space program` and `NASAL` but not `nasal`.
+
+You can combine them to get very specific: you probably actually want `? =^NASA` for the space agency.
+(You can write the flags in any order; `? ^=NASA` and `? =^NASA` are equivalent in every way.)
+
+**Note:** SmartKeys flags (or lack thereof) override the entry's own settings. `? NASA` is always
+case-insensitive and substring-matched even if the entry has case sensitivity and whole-word matching
+on. This is what allows you to be more granular with your keys, mixing `? =^NASA` and `? astronaut` to
+get you "NASA space program" and "Apollo 11 astronauts Neil Armstrong and Buzz Aldrin" (note the
+plural!) but not "nasal decongestant".
+
+## Operators
+
+Sometimes you might want a word only when it appears with other words, or only when another word
+*isn't* present, or any of several words. SmartKeys uses boolean operators to accomplish this; they
+read pretty naturally so they don't require too much explanation:
+
+```
+? moon AND mission              both
+? apollo OR soyuz               either
+? astronaut NOT armstrong       astronaut, where armstrong is absent
+? apollo XOR soyuz              one of them, not both (i.e., "exclusive OR")
+```
+
+Each of those individual parts is what we call a term, so `? moon AND mission` is a key with two terms
+(we count the operator as a separate thing).
+
+
+You can combine as many terms as you want:
+
+```
+? moon AND mission AND astronaut AND Armstrong
+? moon OR sun OR mars OR jupiter OR saturn
+? moon AND sun OR star AND jupiter OR saturn
+```
+
+As you can see, when you begin to combine them, things get a bit hard to work out— is that `moon AND sun` OR `star AND jupiter`, or `moon` AND  `sun OR star`? For these cases, you'll want to use groups to make your intent clear: `? moon AND (sun OR star) AND (jupiter OR saturn)`[^2]. These groups can nest: `? ((orion AND pegasus) OR (saturn AND jupiter)) AND telescope`— you need either stars or planets plus telescope. You can nest groups up to 100 deep; if you need more than that, email the maintainer and beg absolution for your sins. 
+
+**Note:** A key built only on negation (e.g., `? NOT water`) is refused in nearly every case, as it would match basically every message. The only exception to this is the AND_ALL secondary keys operator.
+
+## Operator Spelling
+
+There are a few different ways you write the operators.
+
+`AND` = `and` = `&`
+`OR` = `or` = `|`
+`NOT` = `not` = `-` (hyphen/minus)
+`XOR` = `xor` (it has no symbol representation)
+
+Single and double symbols are the same operator, so write `&` or `&&`, `|` or `||`, whichever you prefer, since you probably have muscle memory from programming.
+
+This means that `? moon AND (sun OR star) AND (jupiter OR saturn)` and `? moon and (sun | star) & (jupiter || saturn)` are perfectly equivalent, if somewhat difficult to read; pick one and stick with it (symbolic is most concise: `? moon & (sun | star) & (jupiter | saturn)`)
+
+You might sometimes want to use a term that contains one of these symbols; `? "AT&T"` gets you the company, where `? AT&T` is a two term expression equivalent to `? at AND t`. This works for just about any symbol in the grammar; `? "()"` gets you a Sigur Rós album, where `? ()` evaluates to nothing and matches nothing; `? "/hello/"` includes literal forward slashes and is not a regex. It's worth noting, however, the exception: quotation marks do *not* escape hyphen expansion. `? "sci-fi convention"` will match `we went to the sci fi convention` so you don't have to think about it; if you want the literal span including hyphen, just use a plain regex `/sci-fi convention/`.  
+
+
+## Implicit AND and Quote Escaping
+
+Since AND is the most common operator, we assume it whenever an operator is not provided; `? moon mission` is equivalent to `? moon AND mission`. In many cases, this helps expressions read more easily, like `? apollo OR (moon mission)`. This, however, means that multi-word SmartKeys do not behave the same as multi-word plain keywords; `? apollo astronauts` gets you `the astronauts of the Apollo mission` where plain `moon mission` does not. Sometimes this is desirable and sometimes this is not; `? Neil Armstrong` gets you `Neil's Stretch Armstrong toy`. In those cases, you can use quotes for a literal match: `? "Neil Armstrong"`. In the simple case, this is directly equivalent to plain keyword `Neil Armstrong`, so you might consider using that instead. Where it begins to matter is in more complex expressions: `? "Neil Armstrong" astronaut`. 
+
+Quoted phrases can use the whole-word match and case-sensitive flags like any other term:
+`? ^"Navy SEAL"` does not match `navy seal`; `? ="cat scan"` matches `get a CAT scan` but not `a new CAT scanner`. 
+
+
+| expression | equivalent to |
+|---|---|---|
+| `? moon mission` | `? moon AND mission` |
+| `? moon mission -apollo` | `? moon AND mission AND NOT apollo` |
+| `? moon mission "Neil Armstrong"` | `? moon AND mission AND "Neil Armstrong"` |
+
+
+## Key Scores and Weighting
+
+Matches are assigned scores that help determine the relevancy of a lorebook entry. Broadly, the score attempts to capture how many "things" the match is about.
+
+A plain term scores one: `? moon` or its equivalent `moon` are about one thing.
+
+An AND turns two terms into one thing: `? moon mission` is only valid if both of those terms are present.`? moon mission` is more specific than `moon` alone, so we judge it to be more relevant, and assign it a score of two (1 + 1). Likewise, `? apollo astronaut neil armstrong` is four-things-as-one, so when it matches, it gets a score of four.
+
+An OR, on the other hand, is about options. A chat might call them glasses or spectacles, and both are equally good; `? glasses OR spectacles` is therefore only as good as each term separately, and each match is assigned a score of one. 
+
+Sometimes, however, different terms are differently specific or relevant. If a lorebook entry is about the pair of Ray-Bans that a beloved relative bought your character, you might decide that `sunglass` is an okay term, but `Ray-Bans` is much better. In that case, you can weight the score with the double-colon modifier: `? Ray-Ban::5`[^3], saying "Ray-Ban is a much more important term than any other". A term anywhere in an expression can be weighted: `? (sunglass OR Ray-Ban::5)` means that if it matches on `sunglass` or `sunglasses`, it gets a score of one, but if it matches `Ray-Ban`, it gets five. Groups themselves can also be weighted: `? (sunglass OR ray-ban)::5`
+
+| key | text | matches | score |
+| `? sunglass OR ray-ban` | `I got new Ray-Bans` | Yes | 1 |
+| `? sunglass OR ray-ban` | `I got new sunglasses` | Yes | 1 |
+| `? sunglass OR ray-ban::5` | `I got new Ray-Bans`| Yes | 5 |
+| `? sunglass OR ray-ban::5` | `I got new sunglasses`| Yes | 1 |
+| `? (sunglass OR ray-ban)::5` | `I got new Ray-Bans`| Yes | 5 |
+| `? (sunglass OR ray-ban)::5` | `I got new sunglasses`| Yes | 5 |
+| `? (sunglass OR ray-ban::5)::5` | `I got new sunglasses`| Yes | 5 |
+| `? (sunglass OR ray-ban::5)::5` | `I got new Ray-Bans`| Yes | 25 |
+| `? sunglass AND ray-ban` | `I got new Ray-Bans`| No | 0 |
+(XOR behaves identically to OR in these examples)
+
+It is possible to assign a score of `::0`; in this case, the term is not scored, but only used as a gate. This can be useful for keys that otherwise might overlap: `? saturn OR venus OR (mercury AND planet::0)`, which allows you to specify the planet instead of the singer or the car without it scoring higher than the other planets.
+
+What about multiple matches?
+While you might expect two hits to be worth twice one hit, to prevent keys that have common terms from vastly outweighing keys with less-common terms, we use a saturation curve. On a single unweighted term, one match is worth one. Ten matches is worth about three. OR groups are saturated against all of their terms in any combination; `? sunglass OR ray-ban` may have 2 sunglass hits and 3 Ray-Ban, or five sunglass and no Ray-Ban, but it's still five hits. This can intersect unexpectedly with weights.
+
+Against *"I got new Ray-Ban sunglasses"*:
+
+| key | count | score |
+|---|---|
+| `? sunglass OR ray-ban` | 2 | 1.4055 |
+| `? sunglass OR ray-ban::5` | 2 | 4.2164 |
+| `? (sunglass OR ray-ban)::5` | 2 | 7.0273 |
+| `? sunglass AND ray-ban` | 1 | 2 |
+| `? sunglass::0 AND Ray-Ban` | 1 | 1 |
+| `? sunglass XOR ray-ban` | 0 | 0 |
+
+The math is not super important; just know that the scores you're expecting may not line up with the scores actually assigned. 
+
+
+## A regex can be a term
+
+A regular expression inside a SmartKey is a term like any other: it can take an operator, be negated,
 and carry a weight.
 
 ```
-? /co(l|s)monaut/ landed        a pattern AND a word
+? /(astro|cosmo)naut/ landed    a pattern AND a word
+? /apples?/ /bananas?/          two patterns
 ? -/drill/ fire                 a negated pattern
 ? /fire/::3                     weighted, like any term
 ```
+There are a few things to watch out for:
+- A term is read as a regex only when it begins and ends with a forward slash; `? /24-7/` is a regex, `? 24/7` is four literal characters, `? /home/user/file` is also literal.
+  - Flags supported by JS [dgimsuvy] are allowed: `? /NASA/i` is case-insensitive;  note that ST core does not support /d or /v, so if you write a key with them, it will not work on a WA-less install.
+- Regexes can be escaped with quotes; `? "/re/"` is literal four-character `/re/`. 
+- Two (or more) regexes expect a space between them; `? /apples?/bananas?/` is one regex that contains apple with optional s, a literal forward slash, and banana with optional s. 
+- A slash inside the pattern is fine and does not need to be (but can be) escaped. `/(home/user|~/user)/dir/` behaves identically to `/(home\/user|~\/user)\/dir/`. Note that ST core requires the escape, so you might want to use them for portability.
+- Regexes are not folded, so `/Cap'n Crunch/` written with only a straight apostrophe will not match `Cap’n Crunch` with a curly one; consider a more robust group like `['‘’]`[^4].
+- Whole-word `=` and case-sensitive `^` are not available here. Regexes are case-sensitive without the /i flag and always substring match. If you want to mimic whole-word matching, use a space character or permissive \b:
 
-- **A `/` opens a pattern only at the start of a token**, as `"` and `-` do. `and/or` and `3/4` are
-  ordinary terms.
-- **A `/…/` term reads exactly as the same string reads as a whole key.** `? /home/user/lux/` is the
-  pattern `home/user/lux`; `? /home/user/file` is literal text. `? /a/ /b/` is two terms.
-- **A slash inside the pattern is fine.** `/(home/user|~/user)/file/` runs as the pattern it looks
-  like, whole key or term. See *Porting* below if the book will travel.
-- **A term that follows a pattern needs a space.** `? /[/]/ x`, not `? /[/]/x`; for the two adjacent,
-  put them in the pattern: `? /\/x/`.
-- **Flags come after the close, then the weight**: `/fire/gi::2`.
-- **`=` and `^` are not available here.** `=` means nothing to a pattern, and a regex is already
-  case-sensitive — write `/i` for insensitivity.
-- **A pattern is not folded**, exactly as for a whole-key regex: `? /Cap'n/ crunch` has one term that
-  sees `’` and one that does not.
-- **`^` and `$` anchor within the Match window**, not the whole scan. At the default (paragraph) they
-  anchor per paragraph; at *Whole scan window* a bare `^` anchors to one position in the entire
-  window. `/m` behaves the same at every setting.
+  | pattern | text | match |
+  | `/Sean/` | `my friend Sean` | true |
+  | `/Sean/` | `my friend Seán` | false |
+  | `/Sean/` | `my friend sean` | false |
+  | `/Sean/i` | `my friend sean` | true |
+  | `/Sean/` | `the ASEAN region` | false |
+  | `/Sean/i` | `the ASEAN region` | true |
+  | `/\bSean\b/` | `my friend Seanan and` | false |
+  | `/ Sean /` | `my friend Seanan and` | false |
+  | `/ Sean /` | `with my friend Sean and` | true |
+  | `/\bSean\b/` | `with my friend Sean and` | true |
+  | `/\bSean\b/` | `with my friend Sean. We` | true |
+  | `/ Sean /` | `with my friend Sean. We` | false |
+  | `/\bSean\b/` | `hey Sean-- are you` | true |
+  | `/ Sean /` | `hey Sean-- are you` | false |
+  | `/\bSean\b/` | `my friend Sean's new` | true |
+  | `/ Sean /` | `my friend Sean's new` | false |
+  | `/Sean's/` | `my friend Sean's new` (straight apostrophe) | true |
+  | `/Sean's/` | `my friend Sean’s new` (curly apostrophe) | false |
+  | `/\bSean\b/` | `my friend Sean's new` (straight apostrophe) | true |
+  | `/\bSean\b/` | `my friend Sean’s new` (curly apostrophe) | true |
 
-To search for the literal characters, quote the term: `? "/re/"`.
 
-### Porting a pattern to a non-WA SillyTavern
+Note that JS regex \w, \b, and \d, which can cause unexpected behavior with accented and non-English characters. Additionally, WA normalizes the haystack to composed (NFC) form:
+| pattern | text | match | note |
+| `/André/` | `my friend André and` | true | |
+| `/André/` | `my other friend Andréas` | true | |
+| `/André/` | `my friend André` | true | both composed: \u00e9 |
+| `/André/` | `my friend André` | **false** | Decomposed key e + \u0301, composed text \u00e9 (WA text is always composed); WA will warn you in this case. |
+| `/André/` | `my friend André's new` | true | (assuming both composed forms)|
+| `/\bAndré\b/` | `my friend André and` | **false** | Fails on a non-ASCII edge; a JS regex span delimited by \b must begin and end with an ASCII character, because \w is [A-Za-z0-9_] |
+| `/\bAndré\b/` | `my friend André's new` | false |  |
+| `/\bAndréas\b/` | `my other friend Andréas and` | true | Only the edge has to be ASCII |
+| `/\bAndréas\b/` | `my other friend Andréas's new` | true |  |
 
-If you write a regex containing unescaped slashes and plan to port it to a non-WA system, escape the
-slashes: vanilla SillyTavern's matcher refuses any pattern with an unescaped `/` inside and looks for
-the whole delimited string as literal text instead.
+This is true even if you force unicode awareness with flags /u and /v. The unicode-aware version of \b is a combined lookahead and lookbehind `(?<![\p{L}\p{N}\p{M}])` + `(?![\p{L}\p{N}\p{M}])` with the unicode flag /u (e.g., `/(?<![\p{L}\p{N}\p{M}])André(?![\p{L}\p{N}\p{M}])/u`). For this reason, it is recommended to use plain terms if you want to use accented characters and boundary markers, as WA handles this under the hood. Under permissive mode, `? =André` behaves sensibly, matching `my friend André`,  `"André's new`, and `André-shaped` but not `Andréas`; under strict mode, you must spell out  variants like `? (=^André | =^André's | ^André-)`. This also gets you the curly-quotes normalization and normalization to composed form, so typing e + combining acute `André` will match even though the text is always in composed form.
 
-```
-/(home/user|~/user)/file/         WA: pattern.   vanilla ST: the literal 25 characters.
-/(home\/user|~\/user)\/file/      both: pattern. Identical matches; `\/` is just `/` to a regex.
-```
+**Note:** Regex anchors `^` and `$` are applied against the Match window, not the whole scan. At the default, Paragraph, they
+  anchor once per paragraph (`^` matches at the start of each one); under Message, once per message;
+  under Whole scan window, a bare `^` matches at a single position — the start of the window, however
+  many messages and paragraphs are inside it. Consider `/m`, which anchors at every line break.
 
-Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The
-Studio warns on the first row's shape, for a bare `/regex/` key and a `/…/` term alike.
+  Against `/^Dream/`:
+  
+  `Dream of the Endless is a DC Vertigo character`: Match
+  `I Have a Dream`: No match
+  ```
+  Many pieces of once-popular software have since been shuttered.
+  Dreamweaver, Adobe's once-vaunted web development suite, // No match (segment starts at "Many"; /^Dream/m would have matched)
+  ```
 
-## Quoting is the one escape
+## Proximity
 
-Quoting turns off operator, weight and paren interpretation, and marks punctuation as deliberate:
-Sigur Rós's `"()"` is a real album title. **Quoting a single term never changes what it matches.**
-`"fire"` and `fire` are identical, and flags and weights still compose (`? ="fire"::2`). Quoting
-**across a space** is a different SmartKey:
+Sometimes a group words is only useful when they're close to each other. Consider `? copper pipe`. This gets you `a copper pipe` and `a pipe made of copper`, but it also gets you `Pipes are made of PVC, and come in several stylish colors including white, black, silver, copper, and gold.`. In these cases, you might consider a proximity match. (This section gets complicated, so it might take a couple of reads— highly recommend trying things in the Lab to see how they work.)
 
-```
-? hot tub       two terms, implicit AND — matches a hot bath beside a cold tub
-? "hot tub"     one phrase — the words adjacent, in that order
-```
+You need two things for a proximity match: a group of things delimited by parenths, and a slack value, delimited by a tilde (`~`) character[^5].
+`? (mission mars)~2` means "both of these words, with at most 2 words in between them", or "mars within 2 words of mission".
+`a mars mission`: Match
+`the mission to Mars`: Match (1 word in between; order doesn't matter)
+`Missions have slowed in recent years, and Mars seems unlikely` No match (6 words in between)
 
-A phrase is matched as written, including its single space: `"hot tub"` does not match `hot  tub`.
+`~0` is a useful case because it means "the words can be in either order as long as they're next to each other": `? (Akira Kurosawa)~0` gets you both Western style `Akira Kurosawa`, family name last, and Eastern style `Kurosawa Akira`, family name first. Note that this only applies to *words*, not punctuation: `Born in Kurosawa, Akira had two brothers` matches. For strict phrasal order invariance, use an OR group: `? ("Akira Kurosawa" OR "Kurosawa Akira")`.
 
-**A plain multi-word key is already a quoted phrase.** The ordinary key `apollo mission` means exactly
-`? "apollo mission"`. Against the message **"The astronauts of the Apollo mission"**:
+Groups can be used as proximity terms; proximity is counted from whatever hits. `? ((Neil OR Yuri) Porsche)~3` matches `Neil and his husband Yuri bought a Porsche` because `Yuri` is separated from `Porsche` by 2 words. Note that the proximity operator is distributive: `? ( (john james) adams)~0` gets you `John James Adams` and not `John and his big brother James Adams`, but could also get you `John Adams Jameson`. To insist that the inner group stay together, you can assign slack there as well: `? ((john james)~0 adams)~0` gets you `John James Adams`, `James John Adams`, but not `John Adams Jameson`. XOR behaves as expected: `? ((john XOR quincy) adams)~1` gets you `John James Adams` and `Quincy Adams` but not `John Quincy Adams` (which the simpler `? ((john OR quincy) adams)~1` would match on).
 
-```
-apollo astronauts        plain key    NO MATCH — that exact string never appears
-? "apollo astronauts"    identical    NO MATCH
-? apollo astronauts      SmartKey     MATCHES  — two terms, either order, anywhere in the window
-```
+Negation works in just the same way. `? (fire -drill)~1` means "any use of the word `fire` as long as `drill` is not within 1 word". So `there was a great fire` matches, `we had a fire drill` does not, and `Home Depot sells drills, saws and fire extinguishers` matches because there are two words in between where the simpler `? fire -drill` would exclude it even though it's not discussing fire drills. An entire group can likewise be negated: `? (fire -(drill today))~2` is "any use of fire UNLESS both drill and today are within 2 words". So `We had a fire drill today` does *not* match (`drill` and `today` are both within 2 of `fire`), but `Today we had a fire drill` *does* match, because only `drill` is within 2 of `fire` while `today` is 3 away. Again: Highly recommend to use the Lab to verify that these keys are doing what you want.
 
-That equivalence is between the two *keys*, not the two entries: neither checkbox reaches inside a
-SmartKey. With *Match Whole Words* ticked the plain key `apollo astronauts` checks boundaries and
-`? "apollo astronauts"` still does not, so the matching spelling is `? ="apollo astronauts"`;
-*Case-Sensitive* is `? ^"apollo astronauts"`.
-
-**Which form to reach for.** If you want the literal string, use a plain key; it takes any character
-without ceremony — `6" pipe` is a plain key, quote and all. Reach for a SmartKey for **order
-invariance** and **tolerance of words in between**: `? 6" copper pipe` matches on *"that copper pipe is
-6" in diameter"*, where the plain key `6" copper pipe` does not.
+---
 
 ## Secondary keys
 
-SillyTavern's *Secondary Keywords* box, with its AND_ANY / AND_ALL / NOT_ANY / NOT_ALL dropdown, is a
-second way to write a condition, and WA reads it exactly as SillyTavern does. **The two boxes say one
-thing: every primary against every secondary, under one operator.** Keys `astronaut, cosmonaut,
-taikonaut` with secondaries `Gagarin, Armstrong, "Yang Liwei"` under AND_ANY is nine pairs, and it
-matches on all nine:
+SillyTavern's only way of writing a boolean condition is the *Secondary Keywords* box, with its AND_ANY / AND_ALL / NOT_ANY / NOT_ALL dropdown. WA reads it exactly as SillyTavern does, so nothing you have already built will behave differently. The problem with this system is that the two boxes only ever say one thing: every primary paired with every secondary, under a single
+operator, applied with the same case-sensitivity and whole-word criteria.
 
-| text | two boxes | what you probably meant |
+Say you have an entry about Sally Ride's missions. In ST, you might write that as ["Ash", "Ketchum"] AND_ANY ["Pikachu", "Bulbasaur", "Charmander"].
+
+That can be written boolean-style as `(Ash OR Ketchum) AND (Pikachu OR Bulbasaur OR Charmander)`. The problem is that ST case-sensitivity and whole-word matching is equally applied to all keys in an entry; if you turn whole-word on so `Ash` doesn't match `Rapidash`, then `Pikachu` no longer matches `Pickachus` and you have to spell it out. Likewise, if you turn on case-sensitivity so that `Ash` doesn't match `the campfire burned to ash`, you miss out on `PIKACHU! I CHOOSE YOU!`. WA, by contrast, allows you to have it all quite simply:
+`? (=^Ash OR =^Ash's OR Ketchum OR Satoshi) AND (pikachu OR bulbasaur OR charmander)` gets you everything at the cost of having to spell out `Ash's`. 
+
+It also allows you to easily express things that ST simply does not allow:
+`? (=^Ash AND pikachu -=^Oak) OR (=^Misty AND squirtle -cerulean)`
+
+**WARNING:** WorldsApart supports secondary keys because one of our goals is that a book performs essentially identically under WA as under ST core. That means that if you have pre-existing secondary keys, they will be applied. So if you have an entry with keys ["Ash", "Ketchum"] AND_ANY ["Pikachu", "Bulbasaur"], if you then add key `? =^Ash AND ^Misty`, the text must contain Ash, Misty, *and* Pikachu or Bulbasaur. You can't exempt keys from this; it's all or nothing. Either you leave the secondary keys and accept that, or you rewrite the conditions as a SmartKey: `? (=^Ash OR ^Ketchum) AND (pikachu OR bulbasaur)`. It's not necessary to delete the secondary keys if you rewrite them— you can simply set them to OFF in case you ever need to port to a non-WA system where the SmartKeys won't work.
+
+
+## Settings that change matching
+
+**Word boundary** decides what counts as *inside* a word, for whole-word matching only:
+
+| | inside a word | so `Joe` matches |
 |---|---|---|
-| the astronaut Armstrong stepped down | matches | matches |
-| the cosmonaut Gagarin orbited | matches | matches |
-| the taikonaut **Gagarin** waved | matches | — |
-| the astronaut waited | — | — |
+| **Strict** (default) | letters, digits, marks, `-` `'` | *Joe*, not *Joe's* or *Joe-adjacent* |
+| **Permissive** | letters, digits, marks | *Joe*, *Joe's* and *Joe-adjacent* |
 
-Written out, the boxes are:
+Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_`
+matches: underscore is a word character for programming identifiers, not for prose. **Word boundaries
+are Unicode-aware**: a word character is any letter, digit or underscore in any script, so whole-word
+`caf` does not match `café` and `Мари` does not match `Марию`.
+
+**Match window** is the unit every part of a key must match within — *Paragraph* (the default),
+*Message*, or *Whole scan window* (SillyTavern's own behaviour). Under *Paragraph*, `? apple banana`
+needs both words in the same paragraph. A block element's open or close ends a window as a blank line
+does, so a preset that writes chat bubbles or a tracker panel as `<div>`s gives each one its own;
+`<b>`, `<em>`, `<span>` and `<br>` do not.
+
+## Known limits
+
+**Scripts without word boundaries.** Chinese, Japanese, Thai, Lao, Khmer and Burmese do not write them,
+so a whole-word key like `猫` matches where it appears among Latin text or punctuation — a sign name
+inside an English sentence, or beside `・` `、` `。` — and misses wherever it sits between two
+characters of running text. Leave the box off for entries keyed in these scripts; the Studio marks the
+whole-words control on any entry where this applies.
+
+**Markdown.** Chat prose is Markdown and the markup sits in the text being scanned, so emphasis
+*inside* a word cuts both ways:
 
 ```
-? (astronaut OR cosmonaut OR taikonaut) AND (Gagarin OR Armstrong OR "Yang Liwei")
+"*sister*hood"    sisterhood         MISSES  — the asterisks break the substring
+"*sister*hood"    sister (=/whole)   MATCHES — the * reads as a word boundary
 ```
 
-If you meant the pairs, write the pairs — no arrangement of the two boxes can:
-
-```
-? (astronaut AND Armstrong) OR (cosmonaut AND Gagarin) OR (taikonaut AND "Yang Liwei")
-```
-
-**One dropdown means one operator for the whole list.** `Yang Liwei` and `Liwei Yang` are one person
-and belong in an OR; a name you require belongs in an AND; under AND_ALL a pair of spellings means
-"both spellings must appear". Grouped:
-
-```
-? taikonaut AND ("Yang Liwei" OR "Liwei Yang")
-```
-
-**A secondary scores like any other term.** On `the mercury in the planet core`, key `mercury` with
-secondary `planet` scores 2. To gate without ranking, weight it `0`: `? planet::0` in the secondary
-box scores 1 and still refuses text that omits *planet*. **The score scales with how many primary keys
-you have**, since the gate is applied to each primary separately: on `astronaut cosmonaut taikonaut
-Gagarin`, three primaries with a `Gagarin` secondary score 6, the three primaries alone 3, one primary
-with the same secondary 2 — the arithmetic of three keys that each mention *Gagarin*.
-
-**Negation-only keys are legal here, and only here.** As a secondary, the primary decides activation
-and the negation can only narrow what it matched: `astronaut` with `["cosmonaut", "? -gagarin"]`
-under AND_ALL is "both crews, but not Gagarin's". Under AND_ANY it is refused, because an OR branch
-satisfied by absence never gates. Under the NOT operators the dropdown negates it a second time, so
-`? -gagarin` there *requires* Gagarin — the Studio warns when you switch.
-
-**OFF is the fifth position in the Studio's operator control**, and not a fifth logic: it sets the
-entry's `selective` flag off, which SillyTavern reads as "ignore this list" — the keys stay written
-down and stop gating. Character cards can arrive this way; nothing you author will unless you ask.
+Emphasis around a whole word is fine in every mode; this only bites mid-word. Making `*` a word
+character would break the case that works, and stripping markup would destroy the asterisk as content.
 
 ## What the Studio will tell you
 
@@ -258,109 +367,37 @@ meant. The last row applies to a bare `/regex/` key as well.
 | **warn** | a punctuation-only term (usually a second `?`: only the first one is the sentinel) |
 | **warn** | unbalanced parens — it still parses, but probably not the way you grouped it |
 | **warn** | when all terms in an expression are weighted 0, the key ranks on nothing. In the secondary box that is a deliberate gate; as a key of its own it still counts as one thing present |
-| **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (above) |
+| **warn** | a `/pattern/` with an unescaped `/` inside — vanilla SillyTavern will not run it (below) |
 
 Whether a term ever occurs in your book is a different question, and the audit answers it. The Studio's
 Key Lab answers it against any text you paste or load. It reports keyword hits only — probability,
 delay, cooldown, inclusion groups, character and tag filters, decorators, recursion
 and vector retrieval are not applied — so a key that hits there has not necessarily activated its entry.
 
----
+## Porting to a non-WA SillyTavern
 
-# How matching works
+**A book full of SmartKeys loads in a stock SillyTavern**, where the keys never match rather than
+breaking anything. Core's matcher has no `?` sentinel, so it reads the whole key as literal text that
+no message contains. The same is true inside WA for SillyTavern's own dry runs — prompt token counts,
+chat load — which are not WA generations and so keep core's matcher.
 
-This half applies to plain keys and SmartKey terms alike.
-
-**Substring by default.** `fir` matches `confirm`. Whole-word matching is opt-in — the entry's *Match
-Whole Words* checkbox for a plain key, the `=` flag for a SmartKey term. **The checkbox reaches every
-key, including multi-word ones.** SillyTavern core skips any key with a space in it, so its checkbox
-is a no-op there and `hot tub` goes on matching `hot tubs`. WA applies the label as written: ticked,
-`hot tub` matches *hot tub* and not *hot tubs*, and `? ="hot tub"` behaves identically. If you want
-the plural too, key it — or leave the box off, which is the default.
-
-**Tags and HTML comments are blanked out before a literal key is matched.** `size` does not match
-`<div style="font-size:13px">`, and `div` does not match the tag itself. A `/regex/` key matches the raw
-text instead, so `/font-size/` finds the attribute — that is the only way to reach one. SillyTavern core
-matches inside tags.
-
-**A block element's open or close ends a match window**, as a blank line does. So at the default
-*Paragraph* setting, `? apple banana` needs both terms inside the same `<div>`: a preset that writes chat
-bubbles or a tracker panel as `<div>`s gives each one its own window. `<b>`, `<em>`, `<span>` and `<br>`
-do not end one.
-
-**What counts as *inside* a word is the Word boundary setting**, in the WA panel:
-
-| | inside a word | so `Joe` matches |
-|---|---|---|
-| **Strict** (default) | letters, digits, marks, `-` `'` | *Joe*, not *Joe's* or *Joe-adjacent* |
-| **Permissive** | letters, digits, marks | *Joe*, *Joe's* and *Joe-adjacent* |
-
-Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_`
-matches: underscore is a word character for programming identifiers, not for prose. A `/regex/` key
-written with `\b` gets permissive behaviour for that one key (`\b` is ASCII-only, in WA as in
-SillyTavern). **Word boundaries are Unicode-aware**: a word character is any letter, digit or
-underscore in any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`.
-
-**Known limit — scripts without word boundaries.** Chinese, Japanese, Thai, Lao, Khmer and Burmese do
-not write them, so a whole-word key like `猫` matches where it appears among Latin text or punctuation —
-a sign name inside an English sentence, or beside `・` `、` `。` — and misses wherever it sits between
-two characters of running text. Leave the box off for entries keyed in these scripts; the Studio
-marks the whole-words control on any entry where this applies.
-
-**Case-insensitive by default**, opt out with the entry checkbox or `^`.
-
-**Orthography is normalised on both sides.** These are the same character in a different encoding:
-
-| written | matches |
-|---|---|
-| `'` `’` `‘` `‚` `‛` `ʼ` `ʹ` `′` `´` `` ` `` `‹` `›` | each other |
-| `"` `“` `”` `„` `‟` `″` `ʺ` `«` `»` | each other |
-| `—` (em dash) | `--` |
-| `–` (en dash) | `-` |
-| `…` | `...` |
-| non-breaking space | ordinary space |
-| decomposed `José` | composed `José` (NFC) |
-
-So a key typed `Cap'n Joe` matches against prose written `Cap’n Joe`. Em and en dashes do **not**
-collapse together: one separates clauses, the other joins. Nothing that can *carry meaning* is
-folded: a fold applies to the text being scanned, so it erases a distinction for every key at once
-and no flag can ask for it back — case is the one exception, because `^` exists to opt out. That is
-why the CJK brackets `《》` and `「」` are **not** in the table: `《》` marks titles and `「」`
-speech, so folding them would throw a distinction away.
-
-**Hyphens are literal, in both directions.** `sci-fi` does not match `sci fi`, and `sci fi` does not
-match `sci-fi`. If a compound is written both ways in your chats, key both (`? sci-fi OR "sci fi"`).
-**Accents are literal.** `Gerard` does not match `Gérard`; whether stripping an accent is safe depends
-on the language (`du` and `dû` are different French words), so key both forms when your model writes
-both.
-
-**No wildcards, no fuzzy matching.** `*` is an ordinary character, and so is `~` except as `~N` after a
-group (*Proximity*, above): `M*A*S*H` matches `M*A*S*H` and `fire~2` matches `fire~2`.
-Substring matching already covers what a leading or trailing `*` would buy you; for anything more,
-write a `/regex/` — as the whole key, or as one term inside a SmartKey.
-
-**Regex keys are matched raw.** A `/pattern/` key sees the text unfolded, so `/Cap'n/` will *not* find
-`Cap’n`; write the alternation or the class yourself. A regex also ignores the entry's checkboxes — it
-is case-sensitive unless you write `/i`, and *Match Whole Words* means nothing to it.
-
-**Known limit — Markdown.** Chat prose is Markdown and the markup sits in the text being scanned, so
-emphasis *inside* a word cuts both ways:
+If you write a regex containing unescaped slashes and plan to port it to a non-WA system, escape the
+slashes: vanilla SillyTavern's matcher refuses any pattern with an unescaped `/` inside and looks for
+the whole delimited string as literal text instead.
 
 ```
-"*sister*hood"    sisterhood         MISSES  — the asterisks break the substring
-"*sister*hood"    sister (=/whole)   MATCHES — the * reads as a word boundary
+/(home/user|~/user)/file/         WA: pattern.   vanilla ST: the literal 25 characters.
+/(home\/user|~\/user)\/file/      both: pattern. Identical matches; `\/` is just `/` to a regex.
 ```
 
-Emphasis around a whole word is fine in every mode; this only bites mid-word. Making `*` a word
-character would break the case that works, and stripping markup would destroy the asterisk as content.
+Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The
+Studio warns on the first row's shape, for a bare `/regex/` key and a `/…/` term alike.
 
----
-
-# Coming from Lucene
-
-Carried over: `AND` `OR` `NOT` `+` `-` `&&` `||` `!`, parentheses, quoted phrases, `^N` boost
-(aliased onto `::N`), and `~N` as proximity — on a group, `(a b)~3`, rather than Lucene's phrase slop
-`"a b"~3`, which is refused. Not implemented, and matched literally instead: wildcards `*` `?`, fuzzy
-`~` on a term, field syntax `field:value`, and ranges — a key that expected one of these will never
-match, and the Studio's audit reports it as a dead key. `XOR` and `::` weights are not Lucene at all;
-`::` is Midjourney's multi-prompt weight, borrowed because it cannot collide with a time or a ratio.
+[^1]: **Q:** Why a question mark?
+      **A:** Because it's easy to see at a glance, easy to parse, and fails as a string match. `? (moon OR planet) AND mission` will never appear in a text, so you'll never get a false positive. 
+      **Q:** Couldn't it just be plain?
+      **A:** That would silently change the semantics of existing keys like `Law and Order` or `Florence & the Machine`.
+[^2]: If you don't use parentheses, they're evaluated in this order: NOT, AND, OR/XOR. `? moon AND sun NOT saturn OR jupiter` becomes `? (moon AND (sun NOT saturn)) OR jupiter` when you probably wanted `? (moon AND sun) NOT (saturn OR jupiter)`
+[^3]: Lucene `^` syntax is also supported: `? term^3`. Note that there cannot be a space between the term and the carat; `? term ^3` is invalid, as it's impossible to determine if it should be a weight or a literal.
+[^4]: The full fold class WA uses is ['‘’‚‛ʼʹ´′‹›]
+[^5]: Lucene `^` is also accepted: `? (copper pipe)^3`

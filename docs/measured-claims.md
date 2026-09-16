@@ -9,7 +9,7 @@ not published; the docs cite those by ID too, and the ID is all a reader gets.
 moves between the two files without changing its number, so `grep <ID>` always finds one entry.
 
 **Citations name a symbol, not a line.** A claim points at the exported function or constant its evidence
-lives in, or at a heading — `extension/keyword-audit.mjs buildKeyPruneScan`, `docs/matching.md Stage 3 — Scoring
+lives in, or at a heading — `extension/keyword-audit.mjs buildKeyPruneScan`, `docs/matching-architecture.md Stage 3 — Scoring
 (onScanDone)` — so it survives an edit and `grep` finds it at any version. Several are separated by `,`
 in code and by `§` in prose; a claim that cites a file and no place in it names the file alone.
 `test/claims-check.mjs` asserts every cited path and symbol still exists; a citation marked
@@ -32,21 +32,21 @@ does not carry "rare in one corpus" as a reason.
 
 - **R1** — Removing the stage-1 admission gate was a no-op: `bm25 > 0` admitted 99.9% of every book's
  indexed entries; removing `scoreThreshold` moved admission by 6 entries in 10,103 and recovered no
- relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching.md Divergences from ST core`; `CLAUDE.md Pure vs ST-coupled`.
+ relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching-architecture.md Divergences from ST core`; `CLAUDE.md Pure vs ST-coupled`.
 
 - **R2** — A strict cosine gate would lose 110 of 672 graded-relevant entries: chunks below the corpus
- mean carrying the query's exact terms (70 scenes). — `plugin/scoring.mjs poolEntries`; `docs/matching.md Divergences from ST core`.
+ mean carrying the query's exact terms (70 scenes). — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Divergences from ST core`.
 
 - **R3** — The old admitCeiling (100 entries / 300 chunks) bound on routine scenes — it sat below two
  of the seven books in the graded corpus: dropped 23 of 672 grade≥3 rows on 20 scenes; 200 recovered all but 2 and
  saturated; the gates admitted 100% of indexed entries on every scene measured.
- — `plugin/scoring.mjs poolEntries`; `docs/matching.md Divergences from ST core`.
+ — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Divergences from ST core`.
 
 - **R4** — Largest measured book: 208 vectorized entries, against the 1000-entry ceiling.
- — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching.md Divergences from ST core`; `CLAUDE.md countKey is the only matcher`.
+ — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching-architecture.md Divergences from ST core`; `CLAUDE.md countKey is the only matcher`.
 
 - **R5** — Chunks-per-entry ratio 9.1–10.3 (why no-plugin K counts 10,000 chunks).
- — `plugin/scoring.mjs selectTopK`; `docs/matching.md Divergences from ST core`.
+ — `plugin/scoring.mjs selectTopK`; `docs/matching-architecture.md Divergences from ST core`.
 
 - **R6** — Per-entry chunk maxima don't stabilise until K≈150–300 (three graded corpora) — why pooling
  is server-side. — `plugin/scoring.mjs scoreCollection`.
@@ -106,7 +106,7 @@ does not carry "rare in one corpus" as a reason.
 
 - **E4** — Delivered count is a corpus property, not a model property: at cutoff 0.10 all seven models
  deliver 13.3–14.2 entries; spread stays under 1 entry across 0.10–0.30 (eight fits quoted 13.2–14.2
- in matcher-design). — `eval/embedding-models.md Context length: check it against your scan window`; `extension/state.mjs runState`; `docs/matching.md Divergences from ST core`.
+ in matcher-design). — `eval/embedding-models.md Context length: check it against your scan window`; `extension/state.mjs runState`; `docs/matching-architecture.md Divergences from ST core`.
 
 - **E5** — Cutoff sweep (shipped model): 0.05→26.8 delivered / 27.1% P / 83.9% R; 0.10→13.3/38.1/69.5;
  0.15→9.2/43.6/59.7; 0.20→6.5/45.5/52.1; 0.30→4.1/47.9/42.0. ~1.8k tokens per delivered entry (≈24k
@@ -147,7 +147,7 @@ does not carry "rare in one corpus" as a reason.
  both embedders is the control. Caveats: own-fit diagonal is in-sample; 32 of 74 scenes rank unjudged
  rows in the window (lower bounds); interior fits measured only at 0.10. Every margin inside the
  corpus's noise floor. — `eval/eval-data/fit-transfer-2026-08-30/README.md` (gitignored);
- `docs/matching.md Divergences from ST core`; `extension/relevance.mjs fitKey` (mxbai beta +0.337, low-middle of seven).
+ `docs/matching-architecture.md Divergences from ST core`; `extension/relevance.mjs fitKey` (mxbai beta +0.337, low-middle of seven).
 
 - **E14** — Fits do not transfer across embedders: memory-tier cosine +0.3113 under bge-m3 vs +0.7460
  under Qwen3-8B (text and properNouns compensating); the signal ORDER inverts across models — bge-m3:
@@ -161,32 +161,32 @@ does not carry "rare in one corpus" as a reason.
  book costs ~2.5% relative AUC). Shipped five-column model (cosine, text, keys, properNouns,
  density): AUC 0.7989 / AP 0.346 / F2 0.5139, delivering 17.5 entries against 4.0 relevant.
  Regression was measured no worse than RRF+nDCG and chosen for explainability.
- — `docs/matching.md`.
+ — `docs/matching-architecture.md`.
 
 - **F3** — The asymmetric bar: hard ≥3 vs ≥2 on one scene reads P 0.542 vs 0.708, F1 0.703 vs 0.829
  with arm ordering barely moving; over 73 scenes the symmetric bar ranks shallow cuts on top and
- inverts at F4, the asymmetric bar keeps depth winning at every beta. — `docs/matching.md`.
+ inverts at F4, the asymmetric bar keeps depth winning at every beta. — `docs/matching-architecture.md`.
 
 - **F4** — Offline budget replay is exact against the runtime's verdicts on 315 rows across 7 arms;
- the token budget binds on every graded scene measured. — `docs/matching.md Divergences from ST core`.
+ the token budget binds on every graded scene measured. — `docs/matching-architecture.md Divergences from ST core`.
 
 - **F6** — The idf weighting is what makes it work: idf beats count 45 up / 14 down (p 0.0001);
  Jaccard is worse than count (27 up / 33 down); restricting to the gazetteer loses 15 up / 44 down
- (p 0.0002). — `docs/matching.md`; `extension/relevance.mjs properDensity`; `eval/relevance-regress.mjs`.
+ (p 0.0002). — `docs/matching-architecture.md`; `extension/relevance.mjs properDensity`; `eval/relevance-regress.mjs`.
 
 - **F7** — The `entity` extractor beats the private ASCII regex it replaced: F2 0.5443→0.5476 paired
- over 88 scenes (47/17/24, p 0.0002); validation-fold AP 0.873→0.883. — `docs/matching.md`;
+ over 88 scenes (47/17/24, p 0.0002); validation-fold AP 0.873→0.883. — `docs/matching-architecture.md`;
  `eval/relevance-regress.mjs`.
 
 - **F8** — Multi-token spans add nothing: −0.0019 F2 (18/28/48, p 0.184), 2 of 5 books, AUC identical
  to the third decimal, signal weaker solo (AUC 0.755→0.739, beta 0.325→0.247). 105 bundles / 102
- scored scenes. — `docs/matching.md`.
+ scored scenes. — `docs/matching-architecture.md`.
 
 - **F10** — Length is earned but over-read: P(grade≥3) rises 5.6→6.3→9.6→13.0% across entry-length
  quartiles (6107 rows), but the signals track length ~3x harder than relevance does — r(log length, ·):
  grade 0.100, text 0.308, properNouns 0.284, cosine 0.349. Under a budget it binds: one turn's 25,083
  tokens bought 13 entries averaging 1945 tokens against a population mean of 1385.
- — `docs/matching.md`.
+ — `docs/matching-architecture.md`.
 
 - **F11** — The length/density lattice: `length` costs wherever it sits (F2 0.4801→0.4723 alone;
  −0.0094 mean given properNouns; −0.0069 given both, 12 up / 53 down; −0.5 precision points at
@@ -194,10 +194,10 @@ does not carry "rare in one corpus" as a reason.
  points at matched recall; the pair peaks at cutoff 0.08 where properNouns alone peaks at 0.13 (17.7
  vs 10.9 delivered). What `length` did was correct properNouns' un-normalised count (its coefficient
  −0.366 without text, collapsing to −0.128 (SE 0.049) without properNouns); shipped-with-length reads
- 0.7958 / 0.345 / 0.5070 at 20.0 delivered. — `docs/matching.md`.
+ 0.7958 / 0.345 / 0.5070 at 20.0 delivered. — `docs/matching-architecture.md`.
 
 - **F13** — Story-time position (uid) carries nothing: −0.0055 mean F2, 24 up / 53 down (p 0.0013),
- AUC flat. — `docs/matching.md`.
+ AUC flat. — `docs/matching-architecture.md`.
 
 - **F14** — Polynomial and interaction terms measured worse: `--degree 2` costs AUC 0.7989→0.7966, AP
  0.346→0.336, F2 0.5139→0.5109 while gaining in-sample; only properNouns² nears 2 SE (−0.066, SE
@@ -206,30 +206,30 @@ does not carry "rare in one corpus" as a reason.
  +0.135 (SE 0.070) the only near-2-SE term, the two carrying keys pure noise (−0.017 and −0.021, both
  under one SE); retried with properNouns live: cosine*properNouns −0.059 (SE 0.063),
  text*properNouns −0.016 (SE 0.039), AUC 0.7980→0.7973, paired 14/12/42.
- — `docs/matching.md`.
+ — `docs/matching-architecture.md`.
 
 - **F16** — An ungraded row is not a negative: `--ungraded-negative` moves rows 6051→7088, prevalence
  6.26→5.35%, AUC 0.8015→0.8185 while AP falls 0.342→0.321, precision at 50/75/90% recall
- 27.6/14.3/8.8→26.0/13.6/8.6%, F2 0.5081→0.5021 delivering 18.9 vs 17.9. — `docs/matching.md`.
+ 27.6/14.3/8.8→26.0/13.6/8.6%, F2 0.5081→0.5021 delivering 18.9 vs 17.9. — `docs/matching-architecture.md`.
 
 - **F17** — AUC flatters rare bands: at grade ≥4 it reads 0.975 while 90% recall costs 17.5%
  precision. Grade-4 on the shipped design: AUC 0.8877 at 0.63% prevalence, AP 0.139, precision 3.4%
  at 75% recall — and half the grade-4 rows were straddlers; removing them halved prevalence and cut
- AP 0.324→0.139 (the signals were finding the paraphrase). — `docs/matching.md`.
+ AP 0.324→0.139 (the signals were finding the paraphrase). — `docs/matching-architecture.md`.
 
 - **F18** — Tier signal coverage: 99.8% of memory rows vectorized; 84% of reference rows keyword-only;
  solo AUC memory/reference — cosine 0.713/0.448, text 0.759/0.662, keys 0.687/0.668.
- — `docs/matching.md`; `extension/relevance.mjs properNounsOf`.
+ — `docs/matching-architecture.md`; `extension/relevance.mjs properNounsOf`.
 
 - **F19** — `density` inverts on reference: −0.935 (SE 0.185) vs +0.215 on memory, solo AUC 0.336
  there.
- — `docs/matching.md`; `extension/relevance.mjs properDensity`; `worldsapart.js init`.
+ — `docs/matching-architecture.md`; `extension/relevance.mjs properDensity`; `worldsapart.js init`.
 
 - **F25** — Per-book standardisation reverses the pathology and loses the score: share-vs-scene-max
  correlation −0.158→+0.486, size-dependence 0.928→0.652, share spread 7.1→11.9 points, mean delivered
  17.8→9.4 (94 scenes); F2 0.5102→0.4671 with AUC 0.8076 vs 0.8198; `--beta 1.5` halves the gap
  (0.4594 vs 0.4396) — mostly the smaller delivered set, but no beta closes it.
- — `docs/matching.md`.
+ — `docs/matching-architecture.md`.
 
 - **F28** — Straddling entries are the haystack paraphrased: 66 of 446 memory positives straddle their
  scene, within-scene z 2.795 vs clean positives' 0.800, ranking first in 53% of their scenes vs 7%.
@@ -241,23 +241,23 @@ does not carry "rare in one corpus" as a reason.
 - **F29** — The scale is ordinal in the signals and the flat spot is memory's: cosine across the four
  boundaries +0.682 / +0.625 / **+0.468** / +0.901 (the operational ≥3 cut is the flattest); grades 2
  and 3 sit together and cosine inverts across them (+0.748 vs +0.694); reference is monotone
- (+0.123 / +0.588 / +1.397). — `docs/matching.md`; `extension/relevance.mjs postDates`.
+ (+0.123 / +0.588 / +1.397). — `docs/matching-architecture.md`; `extension/relevance.mjs postDates`.
 
 - **F30** — Calibration: P(≥3) indistinguishable from calibrated (ECE 0.0077 vs 0.0067 null, p 0.252);
  P(≥2) 0.0112 vs 0.0080 (p 0.080) — no longer the leaked corpus's p 0.002; most of that bias was the
  straddlers. Reference unmeasurable at n=342 (ECE p 0.336 / 0.044); the tiers differ 25-fold in rows.
- — `docs/matching.md`; `eval/lib/logistic.mjs`.
+ — `docs/matching-architecture.md`; `eval/lib/logistic.mjs`.
 
 - **F31** — The probability clamp: 39 of 8975 rows invert P(≥3) > P(≥2), by at most 0.0002.
- — `docs/matching.md`; `extension/relevance.mjs scoreRelevance`; `eval/relevance-regress.mjs`.
+ — `docs/matching-architecture.md`; `extension/relevance.mjs scoreRelevance`; `eval/relevance-regress.mjs`.
 
 - **F32** — Grade-2 rows are a steady ~20% of what E[credit] surfaces at every depth (22.0% of top-5,
- 19.4% of top-20) — they pay into precision, not recall. — `docs/matching.md`.
+ 19.4% of top-20) — they pay into precision, not recall. — `docs/matching-architecture.md`.
 
 - **F34** — Two cutoffs, one per tier: memory peaks at 0.08 (F2 0.5139, 17.5 vs 4.0 relevant),
  reference at 0.19 (F2 0.806, 6.5 vs 2.5); both curves flat (memory within 0.012 of best across
  0.10–0.20, reference within 0.03 across 0.05–0.25) — a cutoff is a range, a third decimal is false
- precision. — `docs/matching.md`.
+ precision. — `docs/matching-architecture.md`.
 
 - **F35** — Reference cosine wants `denseAllEntries`: fitted only on entries that happen to carry one
  it is an absence indicator (−0.281, SE 0.119, solo AUC 0.442 — below chance, inverting on the
@@ -266,16 +266,16 @@ does not carry "rare in one corpus" as a reason.
  0.17 (25/9/32, p 0.0090), 6.4 vs 6.8 delivered for 2.9 relevant; 647 rows / 84 scenes. Cosine was
  missing on 124 of 135 reference entries — missing because nobody computed one, not because the
  quantity does not exist.
- — `docs/matching.md`; `worldsapart.js init`.
+ — `docs/matching-architecture.md`; `worldsapart.js init`.
 
 - **F37** — Reference tolerates a weak fit: AUC 0.733→0.698 held out (vs memory's 0.820→0.799), on 342
- vs 6051 rows. — `docs/matching.md`.
+ vs 6051 rows. — `docs/matching-architecture.md`.
 
 - **F38** — The tier base-rate argument was measured wrong: pooled the tiers look 3.7x apart [5x at
  `:1522` — D6], but base rate correlates −0.63 with grading depth, and at matched rank the tiers are
  indistinguishable at the head (38.4% vs 37.7% at K=10, gap growing with K). Depth-filtering selects
  the rater: `judged >= 50` drops 39% of human grades while keeping 8536 of 8546 judge rows.
- — `docs/matching.md`.
+ — `docs/matching-architecture.md`.
 
 - **F39** — Tier base rates as the eval uses them: memory ~7%, reference ~30%; a threshold that read
  as a clean win (69% less material for 29% less relevance) kept 93% of relevant reference rows but
@@ -303,10 +303,10 @@ does not carry "rare in one corpus" as a reason.
  cosine coefficient could read, so it needs no refit. The
  displacement the switch fixes: memory centroid at 0.99106–0.99896 of the pooled mean vs the
  reference centroid's 0.81806–0.97998 (memory is 59–93% of chunks; worst at 7.3% reference; 7 books).
- — `docs/matching.md`; `worldsapart.js`; `eval/lib/scene.mjs makeCandidateSet`.
+ — `docs/matching-architecture.md`; `worldsapart.js`; `eval/lib/scene.mjs makeCandidateSet`.
 
 - **F52** — Runtime/harness parity: on one browser capture (16 scored rows), `properNouns` reproduces
- from `extension/relevance.mjs` to the capture's own rounding. — `docs/matching.md`.
+ from `extension/relevance.mjs` to the capture's own rounding. — `docs/matching-architecture.md`.
 
 - **F53** — Per-book and per-scene standardisation lie on ONE cost curve, so the F25 loss was a cutoff
  artefact rather than a model difference. Both fits refit on the same 100 scenes (`--lobo --cutoff`,
@@ -318,7 +318,7 @@ does not carry "rare in one corpus" as a reason.
  13.3; book 0.5096 at 0.12 delivering 11.4) on `relevance-regress`'s held-out ROWS, which is not the
  delivered set: the gap does not survive scoring the set the system actually chooses. NOT PAIRED — a
  macro-mean per cell, no sign test; the claim is that no gap is visible, not that one is excluded.
- — `docs/matching.md`.
+ — `docs/matching-architecture.md`.
 
 - **F55** — Pooled standardisation sits above per-scene on the WHOLE-SYSTEM cost curve, at matched
  token spend, at every point read. Both tiers, delivered set, `eval/cost-curve.mjs`, 105 bundles, both
@@ -329,7 +329,7 @@ does not carry "rare in one corpus" as a reason.
  F53, where per-book alternated sign under the same instrument. NOT PAIRED — a macro-mean per cell, as
  F53 was; the claim is that no crossing is visible, not that the gap is established. At the SERVED
  cutoff (0.10, the `relevanceCutoff` default) the delta is +0.0011, so the shipped configuration is not
- measurably improved. — `docs/matching.md`.
+ measurably improved. — `docs/matching-architecture.md`.
 
 - **F56** — The gain is the REFERENCE tier's; memory is flat with a negative lean. Reference held-out
  AUC rises for all seven models: 0.7314->0.7553, 0.7315->0.7550, 0.7019->0.7307, 0.7767->0.7884,
@@ -340,7 +340,7 @@ does not carry "rare in one corpus" as a reason.
  pooled over all seven views of the same rows, +172/-195/=291. Delivered counts move under 0.4 entries,
  so it is not a spend artefact. The two nominally significant cells point OPPOSITE ways across seven
  uncorrected tests. Memory held-out AUC nonetheless rises in 7 of 7 (+0.0019 to +0.0063). Seven models
- are seven views of ONE corpus, not seven draws. — `docs/matching.md`.
+ are seven views of ONE corpus, not seven draws. — `docs/matching-architecture.md`.
 
 - **F58** — The English lists in the scoring path are measured flat. (a) `COMMON_WORDS` subtracted
  inside `properNames`, the shipped properNouns extractor: `--sweep properNounsExtract=entity,bare`
@@ -353,32 +353,32 @@ does not carry "rare in one corpus" as a reason.
  scenes: off +0.0024 (17/12/76, p 0.46), 0.15 −0.0048 (28/14/63, p 0.044, Holm 0.13), 0.4 +0.0009
  (14/10/81); no arm consistent per lineage. So neither list is load-bearing at the cut, and the
  suggester/audit (`ZIPF_EN`, `english common`) are the only places English is assumed.
- — `docs/matching.md`, *Evidence*.
+ — `docs/matching-architecture.md`, *Evidence*.
 
 ## K — Keys and matching
 
 - **K1** — Quoting worked example (default paragraph window): `? (your | my) husband` scores 2/2/2
  across the three probe texts where `? ("your husband" | "my husband")` scores 1/0/0 — the loose form
- outranks a genuine phrase match. — `docs/matching.md The pipeline`.
+ outranks a genuine phrase match. — `docs/matching-architecture.md The pipeline`.
 
 - **K2** — Regex keys off the automaton: 100 regex keys × 300 entries × ~1KB = 9.8ms with no matches,
  18.4ms at 630,000 hits; a compile cache would recover ~5ms (not worth the code).
- — `docs/matching.md Selective logic (keysecondary)`.
+ — `docs/matching-architecture.md Selective logic (keysecondary)`.
 
 - **K3** — Entry flags reach plain keys only (the `?`/`/re/` branches return before flag args are
  read) — measured against `countKey`; the 16,000-comparison fuzz it replaced never caught it because
- it only ran flags-off. — `docs/matching.md Matching — countKey (matcher.mjs)`; `test/core-matcher-check.mjs`.
+ it only ran flags-off. — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`; `test/core-matcher-check.mjs`.
 
 - **K4** — The fold×strict em-dash interaction broke four of the seven dash spacings prose uses.
- — `docs/matching.md Stage 1 — Retrieval`.
+ — `docs/matching-architecture.md Stage 1 — Retrieval`.
 
 - **K5** — Window segmentation is safe and cheap: 8 segments vs one join measured 1.01x (200 patterns,
  18KB, n=2000); literal keys are slice-invariant — 8 books, 8970 distinct keys (6353 multi-word),
- 0 change df, 0 change occurrence totals. — `docs/matching.md Stage 3 — Scoring (onScanDone)`; `extension/keyword-audit.mjs buildKeyPruneScan`;
+ 0 change df, 0 change occurrence totals. — `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`; `extension/keyword-audit.mjs buildKeyPruneScan`;
  `test/matchwindow-check.mjs`.
 
 - **K6** — Unclosed preset tags are real: five `<internal_states>` opens across ten messages, no
- close, on the motivating chat. — `docs/matching.md Stage 3 — Scoring (onScanDone)`; `extension/matcher.mjs textSegments`.
+ close, on the motivating chat. — `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`; `extension/matcher.mjs textSegments`.
 
 - **K7** — PARAGRAPH_BREAK is blank-line, not single-newline: 27.6% of messages carry blank-line
  breaks AND single newlines within a paragraph; only 3.8% use single newlines alone (one author's
@@ -489,7 +489,7 @@ does not carry "rare in one corpus" as a reason.
  rows across 107 bundles; the reader's resolution rule reproduces all 11,946 stored v2 `llmGrade`
  scalars; 611 bare grades in `/wa-grade` documents are human while 37 in synth documents were llm
  verdicts in the wrong field; every one of the 107 frozen haystacks re-derives from its source chat. — `CLAUDE.md Pure vs ST-coupled`; `eval/bundle-schema.md A rater is whoever passed a verdict`;
- `extension/grading.mjs searchedBook`; `docs/matching.md`.
+ `extension/grading.mjs searchedBook`; `docs/matching-architecture.md`.
 
 - **G2** — Human vs contract at matched rank (n=258 rows graded by both, joined on shipped-arm rank):
  contract mean 0.68x the human's at rank 0–19 and 1.03x at 20–44; every contract 4 fell on a human 4
@@ -501,7 +501,7 @@ does not carry "rare in one corpus" as a reason.
 - **G3** — Contract self-agreement (re-grade at original job size: 179 rows / 12 jobs / 4 books):
  87.7% exact, 98.3% within one; 79% at the head of the pool vs 90–93% deeper; 4 of the 13 rows
  originally ≥3 came back below. The labels are the ceiling: ~a third of boundary positives change
- side between passes of the same judge. — `CLAUDE.md Pure vs ST-coupled`; `docs/matching.md`;
+ side between passes of the same judge. — `CLAUDE.md Pure vs ST-coupled`; `docs/matching-architecture.md`;
  `eval/judge-agree.mjs`; `extension/grading.mjs searchedBook`.
 
 - **G4** — Job size does not move grades: the same 64 rows at 4 vs 16 rows/job scored +0.11, 10 up / 5

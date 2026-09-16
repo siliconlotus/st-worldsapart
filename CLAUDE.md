@@ -13,11 +13,12 @@ whose shape is not obvious, an inline comment one line.
 
 ## The docs document how the code works
 
-`docs/matching.md` owns the matcher and the pipeline: how a key is written and matched, and what each
+`docs/matching-architecture.md` owns the matcher and the pipeline: how a key is written and matched, and what each
 stage does. `docs/keyword-suggestions.md` owns the suggester and the audit. `eval/st-worldinfo.md` is ST
 core's own scan; `eval/bundle-schema.md` the graded bundle; `eval/embedding-models.md` the model guidance;
-`SMARTKEYS.md` the user's page, which must neither run ahead of the code nor lag it. Read the owning
-doc before changing what it covers, and update it rather than re-deriving it in conversation.
+`docs/smartkeys.md` and `docs/matching.md` are the user's pages, which must neither run ahead of the code
+nor lag it. Read the owning doc before changing what it covers, and update it rather than re-deriving it
+in conversation.
 
 A doc carries how the code works now and the architectural decisions behind it, and nothing else: not
 how it used to work, how it could work, how it does not work, speculation, or measurements nothing
@@ -88,7 +89,7 @@ temperature, so they can confirm a finding transfers but cannot be where it is f
 
 ## Four stages, and the three orderings
 
-The stages are `docs/matching.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
+The stages are `docs/matching-architecture.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
 **2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
 **3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
 per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, the dynamic

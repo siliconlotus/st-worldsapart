@@ -2,7 +2,7 @@
 
 Reference for core's behaviour, not WA's. WA's own pipeline is the stages in `CLAUDE.md`; core's scan
 is what WA's stage 2 shares the entry list with and what stage 4 deletes from. Matching itself
-(`matchKeys`, the fold, whole-word) is `docs/matching.md` *Divergences from ST core*. Core defects go
+(`matchKeys`, the fold, whole-word) is `docs/matching-architecture.md` *Divergences from ST core*. Core defects go
 in `upstream-st.md` in the SillyTavern root. Read off `public/scripts/world-info.js` and
 `public/script.js`; identifiers are the contract.
 
