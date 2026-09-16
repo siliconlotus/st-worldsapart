@@ -43,11 +43,12 @@ settings as parameters.
    winners plus the keyword adds. Then it sets `waOwnsScan`. ST skips interceptors on its dry runs, so
    those scans are core's own with live keys and WA only records the result.
 2. **`onEntriesLoaded`** (`WORLDINFO_ENTRIES_LOADED`) reads `@@promote` off the raw content into
-   `waPromote`, stashes the author's `ignoreBudget` on `waIgnoreBudget` and sets `ignoreBudget` true so
-   core's budget stands down, and — on a scan WA owns — stashes every keyword-activating entry's keys and
-   secondaries on `waKeys`/`waSecondary` and blanks them, so core's matcher matches nothing and the
-   inclusion-group filter runs over WA's verdicts. Constants and `@@activate` entries keep their keys:
-   core short-circuits both before matching, and the group filter's `getScore` reads `entry.key`.
+   `waPromote`, runs the decorator desugar (*The decorator desugar*, below), stashes the author's
+   `ignoreBudget` on `waIgnoreBudget` and sets `ignoreBudget` true so core's budget stands down, and — on
+   a scan WA owns — stashes every keyword-activating entry's keys and secondaries on
+   `waKeys`/`waSecondary` and blanks them, so core's matcher matches nothing and the inclusion-group
+   filter runs over WA's verdicts. Constants and `@@activate` entries keep their keys: core
+   short-circuits both before matching, and the group filter's `getScore` reads `entry.key`.
 3. **`onScanDone`** (`WORLDINFO_SCAN_DONE`, once per scan loop) feeds the next pass (`feedScanLoop`),
    then on every pass scores what core activated (stage 3), lays it out, cuts on relevance on the last
    pass only (stage 4), applies the caps and the budget (stage 5), rewrites `order` so assembly reads the
@@ -67,6 +68,144 @@ someone else's prompt. A `quiet` generation never displaces one the user has in 
 down and runs core-native. A scan ranks only while its generation is the armed one (`armedToken`).
 ST labels no scans, so two generations interleaving inside one arming window are one limitation WA
 accepts; the token bounds it to a single degraded turn.
+
+## The decorator desugar
+
+A pre-stage-1 step: `onEntriesLoaded` reads an entry's leading `@@` lines and, for the thirteen CCv3
+decorators ST core parses and then drops, writes the ST fields core reads natively or gates activation
+itself — before anything in the numbered stages runs. It runs beside the `waPromote` read, the last
+point the lines still exist (core strips them at `parseDecorators`), and before the key stash, so
+`waKeys`/`waSecondary` capture the desugared `keysecondary`. **Gated on `settings().enabled`**: with WA
+off, nothing is written and the install behaves exactly as it would with WA not installed. ST's own dry
+runs are not excluded — the core-readable fields apply there too — only the compiled SmartKey below is
+further gated.
+
+`resolveDecorators` walks the leading run and keeps the names in `WA_DECORATORS` (core's two, `@@promote`,
+and the thirteen below), applying core's own `@@@` fallback chain: a `@@@name` line counts only when the
+line before it was unrecognised. `decoratorFor`/`hasDecorator` read the stash (`entry.waDecorators`) on
+a parsed entry, never core's own `decorators` field, which keeps only names prefix-matching core's two.
+
+`decoratorFields(entry, ctx)` is pure and returns a field patch, `{}` when none apply; `ctx` is
+`{ chatLength, smartKeys }`. `onEntriesLoaded` applies it with `Object.assign`.
+
+| decorator | patch |
+|---|---|
+| `@@depth N` | `position: atDepth, depth: N` |
+| `@@reverse_depth N` | `position: atDepth, depth: chatLength - N` |
+| `@@role assistant\|system\|user` | `role` (`extension_prompt_roles` number); may also set `position` — see below |
+| `@@scan_depth N` | `scanDepth: N` |
+| `@@position` | `before_desc` -> `before`; `after_desc`, `personality`, `scenario` -> `after` |
+| `@@activate_only_after N` | not a field: an `activationAdds` gate — see below |
+| `@@is_greeting N` | not a field: an `activationAdds` gate — see below |
+| `@@activate_only_every N` | not a field: an `activationAdds` gate — see below |
+| `@@is_user_icon NAME` | not a field: an `activationAdds` gate — see below |
+| `@@additional_keys a,b` | alone: `keysecondary`, `selectiveLogic: AND_ANY` |
+| `@@exclude_keys c,d` | alone: `keysecondary`, `selectiveLogic: NOT_ANY` |
+| both of the above | one compiled SmartKey in `key` — see below |
+| `@@dont_activate_after_match` | WA-owned latch — see below |
+| `@@keep_activate_after_match` | WA-owned latch — see below |
+
+`@@ignore_on_max_context` is not implemented — `ignoreBudget: false` is already the default, so the
+patch would be a no-op with or without it. An unparseable or out-of-range argument is refused: the
+decorator is ignored rather than applying a clamped or default value.
+
+**The decorator wins over a field the entry also sets.** An importer or the Studio can leave `position`
+and `depth` at their defaults; the patch overwrites them, because the decorator is what the author wrote.
+
+**Conflicts.** Decorators run in document order and the first write to a field wins; a later decorator
+never overwrites an earlier one, including a repeat of the same decorator. This covers `@@depth` against
+`@@position` — both write `position`, and an entry cannot be in two places — and reads left-to-right like
+the `@@@` chain. Three cases sit outside it:
+
+- **The key pair is expressible together**, so it is not a conflict — see below.
+- **The latch pair writes no field**, so first-write-wins does not reach it — see below.
+- **`@@role` implies at-depth, and an explicit `@@position` beats it.** Core reads `entry.role` only in
+  the at-depth branch, because at-depth is the only position where an entry becomes a message; every
+  other position concatenates into the story string, one block with a single role. Applied after the
+  whole run, not as a write in the first-write-wins sense, so it does not depend on where `@@role` sits
+  relative to `@@depth`/`@@position`:
+  - `@@role` with no `@@position`, on an entry not already at-depth: also sets `position: atDepth`, at
+    the entry's own `depth` or `DEFAULT_WI_DEPTH` (4) when unset.
+  - `@@role` with `@@depth`: harmonious, `@@depth` already sets at-depth.
+  - `@@role` with a non-at-depth `@@position`: the position wins and `role` is not written.
+
+**The key pair.** `selectiveLogic` holds one value, so core cannot express `@@additional_keys` and
+`@@exclude_keys` at once; WA's SmartKeys can (`OPS`, `smartkeys.mjs`). With both present, `key` is
+REASSIGNED to one compiled SmartKey:
+
+    ? (<original keys, OR-joined>) && (a || b) && -(c || d)
+
+Compiling the original keys into terms quotes a key containing spaces, passes a `/regex/` key through
+unchanged, and unwraps and parenthesises a key that is itself a SmartKey. With only one of the pair
+present, the `keysecondary` + `selectiveLogic` mapping is used instead — core-compatible, since the
+escalation is only for the case core cannot represent.
+
+**This one write is gated; everything else in the desugar is not.** Core does not understand SmartKeys —
+a `?` key reaches `countKey` only when WA owns the scan — so the compiled key is written only when
+`ctx.smartKeys` (`!runState.generationIsDryRun`), not `waOwnsScan`: WA's own `getSortedEntries` calls
+also need the compiled key, and gating on `waOwnsScan` would hand that path the core-compatible fallback
+instead. On ST's dry run the fallback branch (`keysecondary` + `AND_ANY`) applies, moving the entry's
+match at most by the entries carrying both key decorators; core still reads `key` and `keysecondary`
+there, so the entry is never unreachable.
+
+**The latch decorators** (`@@dont_activate_after_match`, `@@keep_activate_after_match`) need per-chat,
+per-entry state that survives WA being switched off, so they are not desugared to core's `sticky`/
+`cooldown`: core deletes a stored timed effect the moment the entry's own field is absent, and the
+desugar is gated on `settings().enabled`, so one generation with WA off would destroy the latch
+permanently. WA owns the record instead, in `chat_metadata.worldsApart.fired` (`WA_METADATA_KEY`), an
+array of `latchKey(entry)` — the entry's world and uid joined with US (`CLAUDE.md`), never NUL. Written
+at scan-done for activated entries carrying either decorator (never on a dry run, which arms no timed
+effect and must not arm this either), and read in `activationAdds`: a recorded
+`@@dont_activate_after_match` entry is skipped, a recorded `@@keep_activate_after_match` entry is
+included unconditionally — both present resolves to latches ON, below. Deleting a book prunes its
+entries' latch keys from the current chat's record (`latchBook(key)` recovers the segment before the US;
+`st/studio.mjs` `deleteBooks`), alongside its settings.
+
+**`@@activate_only_after N`, `@@is_greeting N`, `@@activate_only_every N`, `@@is_user_icon NAME`** are
+`activationAdds` gates, not fields: WA owns activation, so these route through the same window and
+matching every other activation decision uses, rather than through core's fields. `@@activate_only_after`
+counts assistant messages only (`is_user` and `is_system` messages are not assistant messages, the same
+distinction core makes building `coreChat`) — never core's `delay`, which counts every remaining message
+regardless of speaker, and no fixed number converts one into the other. **Ceiling:** the gate and the scan
+window are independent, so an entry can become eligible after its trigger has already scrolled out of the
+window — a property of the decorator itself, not of this mapping. `@@is_greeting` reads the active
+greeting off `chat[0].swipe_id` (`?? 0` when the card has no alternates). `@@activate_only_every 0` and
+any other out-of-range argument are refused, not treated as a gate of zero.
+
+**`@@activate` and `@@dont_activate`, core's own two, keep their existing precedence: `activationAdds`
+skips an entry carrying either** — `@@activate` is core's to honour like `constant`, and forcing it again
+would be noise. This is also the rule the latch pair borrows: an entry carrying both latches resolves to
+latches ON, the same precedence CCv3 gives `@@activate` over `@@dont_activate`.
+
+**Aliasing.** `getGlobalLore` spreads a loaded book shallow, so `key`, `keysecondary`, `extensions` and
+`triggers` on a cache-hit-or-miss return can be shared references. Every write the desugar makes is
+therefore a scalar assignment or a whole-array REASSIGN, never `push`/`splice` — the existing
+`REASSIGN key, never mutate it` convention, and what makes the desugar idempotent across the per-generation
+re-fire.
+
+### Rulings
+
+Each ruling below is a judgement where CCv3 is silent or core cannot comply — not something the spec
+mandates. Three discard something the author wrote.
+
+| ruling | authority | what is lost |
+|---|---|---|
+| document order, first write to a field wins | WA — CCv3 silent | the later duplicate, or `@@position` after `@@depth` |
+| `@@role` implies at-depth when no position decorator appears | WA — CCv3 silent | nothing |
+| an explicit `@@position` beats `@@role`'s implied at-depth | WA — CCv3 silent | **the `@@role` line, dropped** |
+| both latch decorators present: latches ON | WA, modelled on CCv3's `@@activate` precedence | `@@dont_activate_after_match` |
+| `@@position personality\|scenario` -> after char defs | WA — no ST slot | exact placement |
+| key pair: SmartKey under WA, `keysecondary` otherwise | WA — ST cannot express both | **`@@exclude_keys`, in the fallback branch** |
+| `@@activate_only_after` counted over assistant messages | CCv3's own wording; ST's `delay` differs | nothing |
+| `@@ignore_on_max_context` not implemented | WA — already the default | nothing |
+| `@@activate` beats `@@dont_activate` | CCv3 | — |
+
+### Out of scope
+
+No ST substrate. `@@instruct_depth`, `@@instruct_scan_depth` and `@@reverse_instruct_depth` count
+TOKENS where ST positions and scans by message index; `@@reverse_depth` is message-counted (the spec
+defines it as `@@depth <total message count> - value`) and is implemented. `@@disable_ui_prompt` asks
+the application to disable a UI prompt by type, which is not WA's concern.
 
 ## Keys
 

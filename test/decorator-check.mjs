@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, latchKey, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, latchKey, latchBook, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -243,3 +243,10 @@ eq(adds([ent(5, ['@@dont_activate_after_match', '@@keep_activate_after_match'])]
 eq(adds([ent(6, ['@@dont_activate_after_match'])], undefined), '6',
     'no latch state at all behaves exactly as before');
 console.log('ok   the latch decorators, read from WA\'s own record');
+
+// --- latchBook: the deleted-book prune's pure half (st/studio.mjs deleteBooks reads the current
+// chat's fired list and drops any key whose book segment names a deleted book).
+eq(latchBook(`W${US}3`), 'W', 'the book is the segment before the US');
+eq(latchBook(`My Book${US}12`), 'My Book', 'a book name may itself contain spaces');
+eq(latchBook(''), '', 'an empty key has no book');
+console.log('ok   latchBook recovers the book name from a latch key');

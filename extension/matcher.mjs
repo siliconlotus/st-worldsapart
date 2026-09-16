@@ -948,8 +948,14 @@ const decoratorCount = (entry, name) => {
     return arg === null ? null : wholeNumber(arg);
 };
 
+/** WA's chat_metadata key for the latch record. */
+export const WA_METADATA_KEY = 'worldsApart';
+
 /** An entry's key in WA's latch record. US, not NUL: NUL makes git treat the file as binary. */
 export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1F)}${entry?.uid ?? ''}`;
+
+/** The book a latch key belongs to — the segment before the US. */
+export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F))[0];
 
 /** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled, `constant` and
  *  `@@dont_activate`; `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives. */

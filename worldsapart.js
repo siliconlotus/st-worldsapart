@@ -1000,11 +1000,9 @@ const activationOpts = () => ({
     fired: firedLatches(),
 });
 
-const WA_METADATA_KEY = 'worldsApart';
-
 /** Entries that have fired a latch decorator in this chat. */
 function firedLatches() {
-    const fired = getContext().chatMetadata?.[WA_METADATA_KEY]?.fired;
+    const fired = getContext().chatMetadata?.[matcher.WA_METADATA_KEY]?.fired;
     return new Set(Array.isArray(fired) ? fired : []);
 }
 
@@ -1014,7 +1012,7 @@ function recordLatches(entries) {
     const ctx = getContext();
     const meta = ctx.chatMetadata;
     if (!meta) return;
-    const fired = new Set(meta[WA_METADATA_KEY]?.fired ?? []);
+    const fired = new Set(meta[matcher.WA_METADATA_KEY]?.fired ?? []);
     const before = fired.size;
     for (const entry of entries) {
         const lines = Array.isArray(entry?.waDecorators) ? entry.waDecorators : matcher.resolveDecorators(entry?.content);
@@ -1023,7 +1021,7 @@ function recordLatches(entries) {
         }
     }
     if (fired.size === before) return;
-    meta[WA_METADATA_KEY] = { ...(meta[WA_METADATA_KEY] ?? {}), fired: [...fired] };
+    meta[matcher.WA_METADATA_KEY] = { ...(meta[matcher.WA_METADATA_KEY] ?? {}), fired: [...fired] };
     ctx.saveMetadata?.();
 }
 

@@ -16,7 +16,7 @@ import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, S
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
-import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
+import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
 import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
@@ -1398,6 +1398,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const forgotten = names.map(n => ({ name: n, sort: s.studioSortByBook?.[n], ignore: s.keywordIgnore?.[n] }));
         for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
         saveSettingsDebounced();
+        // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
+        const meta = getContext().chatMetadata;
+        const fired = meta?.[WA_METADATA_KEY]?.fired;
+        if (Array.isArray(fired)) {
+            const kept = fired.filter(k => !names.includes(latchBook(k)));
+            if (kept.length !== fired.length) {
+                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: kept };
+                getContext().saveMetadata?.();
+            }
+        }
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
             data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
