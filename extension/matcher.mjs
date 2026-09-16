@@ -971,7 +971,7 @@ export function activationAdds(entries, windowFor, opts = {}) {
         const wantsPersona = decoratorFor(entry, '@@is_user_icon');
         if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) continue;   // `!== undefined`, not a truthy check: an empty persona name is still a value
 
-        // Core gates delay above external activation, so an emitted delayed entry is discarded there anyway.
+        // `&&`, not `!= null`: delay 0 means no delay, as core's `if (!entry.delay)` reads it.
         if (entry.delay && Number(opts.chatLength ?? Infinity) < Number(entry.delay)) continue;
 
         const keys = usableKeys(entry.key);

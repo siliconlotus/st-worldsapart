@@ -271,7 +271,9 @@ recursion control and prompt assembly; WA replaces one question, *did a key matc
 constant, sticky and key matching; disable, triggers, character and tag filters, delay, cooldown,
 `delayUntilRecursion`, `excludeRecursion` and the probability roll all run before it, so a forced entry
 inherits them. The emit is blind: WA emits every entry whose keys match and lets core refuse what it
-refuses. With core's matcher blanked, an entry WA declines to emit has no other route in.
+refuses — except `delay`, which WA pre-checks against `runState.scanChat.length` itself, since core would
+discard the entry anyway and an unchecked emit would only make WA's own captures list an entry that never
+shipped. With core's matcher blanked, an entry WA declines to emit has no other route in.
 
 **`keywordActivations`** fetches the candidates with live keys, registers every usable key and secondary
 once, and calls `activationAdds`: for each enabled, non-constant entry without `@@dont_activate`, the
