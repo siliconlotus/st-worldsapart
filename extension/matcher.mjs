@@ -997,6 +997,20 @@ const ROLE_WORDS = { system: WI_ROLE.SYSTEM, user: WI_ROLE.USER, assistant: WI_R
 /** A non-negative integer, or null. */
 const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg) : null);
 
+/** A comma list as trimmed, non-empty strings. */
+const commaList = arg => String(arg ?? '').split(',').map(s => s.trim()).filter(Boolean);
+
+/** One SmartKey term: a regex passes through, a nested SmartKey is unwrapped and grouped, anything holding
+ *  an operator character is quoted so it stays a single term. */
+const smartTerm = key => {
+    const s = String(key ?? '').trim();
+    if (isRegexKey(s)) return s;
+    if (s.startsWith('?')) return `(${s.slice(1).trim()})`;
+    return /[\s()&|!+-]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+};
+
+const orGroup = keys => `(${keys.map(smartTerm).join(' || ')})`;
+
 /** The ST field patch an entry's decorators ask for; `{}` when none apply. Pure: mutates nothing.
  *  `ctx` is `{ chatLength, smartKeys }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
 export function decoratorFields(entry, ctx = {}) {
@@ -1007,6 +1021,8 @@ export function decoratorFields(entry, ctx = {}) {
     const set = (field, value) => { if (!(field in patch)) patch[field] = value; };
     let sawPosition = false;
     let role = null;
+    let additional = null;
+    let excluded = null;
 
     for (const line of lines) {
         let arg;
@@ -1051,6 +1067,18 @@ export function decoratorFields(entry, ctx = {}) {
             if (r !== undefined && role === null) role = r;
             continue;
         }
+
+        if ((arg = decoratorArg(line, '@@additional_keys')) !== null) {
+            const list = commaList(arg);
+            if (list.length && !additional) additional = list;
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@exclude_keys')) !== null) {
+            const list = commaList(arg);
+            if (list.length && !excluded) excluded = list;
+            continue;
+        }
     }
 
     // Applied after the run, not as a write, so the outcome does not depend on where @@role was written.
@@ -1062,6 +1090,26 @@ export function decoratorFields(entry, ctx = {}) {
             patch.position = WI_POSITION.atDepth;
             patch.depth = entry?.depth ?? DEFAULT_WI_DEPTH;
         }
+    }
+
+    if (additional && excluded) {
+        // ST holds one selectiveLogic, so the pair is only expressible as a SmartKey — which only countKey reads.
+        if (ctx?.smartKeys) {
+            const primary = usableKeys(entry?.key);
+            // Already compiled on an earlier pass over this entry object; recompiling would nest it.
+            const compiled = primary.length === 1 && /&& -\(/.test(primary[0]);
+            if (primary.length && !compiled) {
+                patch.key = [`? ${orGroup(primary)} && ${orGroup(additional)} && -${orGroup(excluded)}`];
+            }
+        } else {
+            patch.keysecondary = additional;
+            patch.selectiveLogic = WI_LOGIC.AND_ANY;
+            patch.selective = true;
+        }
+    } else if (additional || excluded) {
+        patch.keysecondary = additional ?? excluded;
+        patch.selectiveLogic = additional ? WI_LOGIC.AND_ANY : WI_LOGIC.NOT_ANY;
+        patch.selective = true;
     }
 
     return patch;

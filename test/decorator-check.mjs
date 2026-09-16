@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -130,3 +130,40 @@ eq(activationAdds([parsed], winA(), { greetingIndex: 1, k1: 1.2, caseSensitiveDe
 eq(activationAdds([parsed], winA(), { greetingIndex: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 0,
     '...and is gated out when the greeting does not match');
 console.log('ok   the gates read the stash on a parsed entry');
+
+// --- @@additional_keys and @@exclude_keys: alone each maps to keysecondary + selectiveLogic, together
+// ST cannot express both so WA compiles one SmartKey.
+const keys = (content, entry = {}, smartKeys = true) =>
+    decoratorFields({ key: ['villa'], content, ...entry }, { chatLength: 0, smartKeys });
+
+// --- alone, each maps to the core-compatible fields
+eqDeep(keys('@@additional_keys storm,rain\nx'),
+    { keysecondary: ['storm', 'rain'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
+    '@@additional_keys: at least one of them must be present');
+eqDeep(keys('@@exclude_keys dream\nx'),
+    { keysecondary: ['dream'], selectiveLogic: WI_LOGIC.NOT_ANY, selective: true },
+    '@@exclude_keys: none of them may be present');
+eqDeep(keys('@@additional_keys  storm , rain \nx').keysecondary, ['storm', 'rain'], 'the comma list is trimmed');
+eqDeep(keys('@@additional_keys\nx'), {}, 'an empty list is ignored');
+console.log('ok   each key decorator alone maps to keysecondary');
+
+// --- together, ST cannot express both, so WA compiles one SmartKey
+eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx').key?.[0],
+    '? (villa) && (storm) && -(dream)', 'both present: one compiled SmartKey');
+eq(keys('@@additional_keys storm,rain\n@@exclude_keys dream,fog\nx').key?.[0],
+    '? (villa) && (storm || rain) && -(dream || fog)', 'each list is OR-ed inside its group');
+eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['villa', 'the house'] }).key?.[0],
+    '? (villa || "the house") && (storm) && -(dream)', 'a key with spaces is quoted so it stays one term');
+eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['/vil+a/i'] }).key?.[0],
+    '? (/vil+a/i) && (storm) && -(dream)', 'a regex key is already a valid SmartKey term');
+eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['? villa || manor'] }).key?.[0],
+    '? ((villa || manor)) && (storm) && -(dream)', 'a key that is itself a SmartKey is unwrapped and grouped');
+eq('keysecondary' in keys('@@additional_keys storm\n@@exclude_keys dream\nx'), false,
+    'the compiled branch writes no keysecondary');
+console.log('ok   both together compile to one SmartKey');
+
+// --- the fallback branch, for when core will be the matcher
+eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', {}, false),
+    { keysecondary: ['storm'], selectiveLogic: WI_LOGIC.AND_ANY, selective: true },
+    'without SmartKeys the pair degrades to @@additional_keys; @@exclude_keys is dropped');
+console.log('ok   the fallback branch keeps the entry reachable for core');
