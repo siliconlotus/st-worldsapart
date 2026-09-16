@@ -347,7 +347,9 @@ Survivors stay in core's map, the rest are deleted. Then the **prompt order**: o
 survivors by the `presentationOrder` setting (any `SORT_FNS` key, `best-first` or `best-last` on
 `E[credit]`), grouped by tier first under `presentationTiered`, by book tier first under `sequential`;
 each survivor's `order` is rewritten to a base plus its index, since assembly sorts by `order`. The
-delivery panel and `/wa-debug` read `runState.lastPromptOrder` and `lastSkipped`.
+delivery panel and `/wa-debug` read `runState.lastPromptOrder` and `lastSkipped`. The panel also shows
+what each row cost and what the budget had left, off `runState.lastBudget` — the per-survivor counts and
+the totals `applyBudget` already computed, null when no token budget was in force.
 
 ## Divergences from ST core
 

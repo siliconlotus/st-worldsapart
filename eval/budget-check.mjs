@@ -50,6 +50,14 @@ eq(r.survivors.size, 4, 'token cap 45 at 10 each = 4 entries');
 eq(r.budgeted, 40, 'token cap reports budgeted tokens');
 eq(r.inPrompt, 40, 'with nothing exempt, budgeted and in-prompt agree');
 
+// The per-item counts the delivery panel reads back: survivors only, and they must add up to what was delivered.
+const sum = m => [...m.values()].reduce((a, x) => a + x, 0);
+eq(r.tokens.size, r.survivors.size, 'every survivor carries its token count');
+eq([...r.survivors].every(x => r.tokens.has(x)), true, 'and the map is keyed by the item itself');
+eq(sum(r.tokens), r.inPrompt, 'the per-item counts add up to inPrompt');
+eq(r.skipped.every(x => !r.tokens.has(x.item)), true, 'a skipped row is not in the map; it carries its own cost');
+eq(r.skipped.every(x => x.tokens === 10), true, 'and that cost is what it would have spent');
+
 const mixed = [mk('big', 100), mk('small1', 10), mk('small2', 10)];
 r = await run({ walk: mixed, isDynamic: () => true, maxTokens: 25 });
 eq(r.survivors.size, 2, 'oversized entry is skipped, smaller ones behind it still fit');
@@ -75,6 +83,8 @@ const withVip = [mk('vip2', 40, { ignoreBudget: true }), ...dynamic];
 r = await run({ walk: withVip, isDynamic: () => true, maxTokens: 60 });
 eq(r.budgeted, 60, 'the exempt entry does not spend the budget');
 eq(r.inPrompt, 100, '...so the prompt is the budget PLUS what was marked mandatory');
+eq(sum(r.tokens), 100, '...and the per-item counts follow the prompt, not the budget');
+eq(r.tokens.get(withVip[0]), 40, 'the exempt entry carries its own count like any other');
 
 r = await run({ walk: withVip, isDynamic: () => true, maxTokens: 60, exemptIsBudgeted: true });
 eq(r.budgeted, 60, 'with it on, the exempt entry takes its tokens off the top');
