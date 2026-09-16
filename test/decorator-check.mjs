@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, hasLatch, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, hasLatch, SCENE_UNMODELLED_GATES, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -266,6 +266,18 @@ eqDeep(partitionLatches([`My Book${US}1`], ['My Book']), { kept: [], dropped: [`
     'a book name with spaces still matches');
 eqDeep(partitionLatches([], ['W']), { kept: [], dropped: [] }, 'an empty record');
 eqDeep(partitionLatches(null, ['W']), { kept: [], dropped: [] }, 'an absent record is not a crash');
+
+// Offline scene re-derivation cannot model the gates that read the chat's shape — an assistant/user split,
+// message 0's swipe_id, the persona, the latch record — because a capture stores the chat as one joined
+// string. It reports what it cannot model rather than over-admitting in silence.
+const gateEntry = (uid, content) => ({ uid, world: 'W', key: ['villa'], content });
+eqDeep(unmodelledGates([gateEntry(1, '@@is_greeting 2\nx')]), ['@@is_greeting'], 'a gate it cannot model is named');
+eqDeep(unmodelledGates([gateEntry(1, '@@depth 0\nx')]), [], 'a decorator that is a plain field patch is not a gate');
+eqDeep(unmodelledGates([gateEntry(1, 'The villa')]), [], 'an entry with no decorators names nothing');
+eqDeep(unmodelledGates([gateEntry(1, '@@is_greeting 2\nx'), gateEntry(2, '@@is_user_icon Mara\nx'), gateEntry(3, '@@is_greeting 0\nx')]),
+    ['@@is_greeting', '@@is_user_icon'], 'names are reported once each, in SCENE_UNMODELLED_GATES order');
+eq(SCENE_UNMODELLED_GATES.includes('@@keep_activate_after_match'), true, 'the latch pair is unmodellable too: a capture holds no latch record');
+eqDeep(unmodelledGates([]), [], 'no entries, nothing to report');
 console.log('ok   latchBook recovers the book name from a latch key');
 
 // --- hasLatch: the one predicate for "carries a latch decorator", shared by the activationAdds gate and

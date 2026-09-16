@@ -969,6 +969,18 @@ const decoratorCount = (entry, name) => {
 };
 
 /** Whether the entry carries either latch decorator, regardless of which. */
+/** Gates whose verdict rests on the chat's SHAPE — an assistant/user split, message 0's swipe_id, the
+ *  persona, the latch record — none of which a graded scene capture stores; it holds the chat as one joined
+ *  string. `eval/lib/scene.mjs` reports these rather than over-admitting in silence. */
+export const SCENE_UNMODELLED_GATES = Object.freeze([
+    '@@activate_only_after', '@@activate_only_every', '@@is_greeting', '@@is_user_icon',
+    '@@dont_activate_after_match', '@@keep_activate_after_match',
+]);
+
+/** Which of SCENE_UNMODELLED_GATES appear across `entries`, once each, in that array's order. */
+export const unmodelledGates = entries =>
+    SCENE_UNMODELLED_GATES.filter(name => (entries ?? []).some(e => decoratorFor(e, name) !== null));
+
 export const hasLatch = entry =>
     decoratorFor(entry, '@@dont_activate_after_match') !== null
     || decoratorFor(entry, '@@keep_activate_after_match') !== null;

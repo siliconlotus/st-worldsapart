@@ -513,6 +513,11 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // --- STAGE 2: activation, keyword route, run to a fixpoint. May admit only what core could activate, so never a
         // disabled entry (F49), and on the initial pass never a delayUntilRecursion one. Its LEVEL is not modelled:
         // core walks distinct levels (world-info.js currentRecursionDelayLevel), this admits at the first pass.
+        // Reported, not applied: these gates read the chat's shape, which a capture holds only as a joined string.
+        const ungated = matcher.unmodelledGates(entries);
+        if (ungated.length) {
+            console.error(`  ${ungated.join(', ')}: gate(s) this re-derivation cannot model, so rows they would have gated OUT are admitted here`);
+        }
         const admitted = new Set(rows.map(r => entryKey(r.entry)));
         // The retrieval winners feed recursion too: WA force-activates them, so core counts them in new.successful.
         const feeds = e => P.recursive && !e.preventRecursion && Boolean(String(e.content ?? '').trim());
