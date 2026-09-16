@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedUpTo, latchActive, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedUpTo, latchActive, latchSuppressed, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -283,6 +283,18 @@ eq(latchActive(keepE(1, ' 0'), REC1, 10), true, 'a duration of 0 lasts the firin
 eq(latchActive(keepE(1, ' 0'), REC1, 11), false, '...and is over the next turn');
 eq(latchActive({ uid: 1, world: 'W', key: ['villa'], content: 'no decorator' }, REC1, 10), false,
     'an entry without the decorator is never latch-active');
+
+// @@dont_activate_after_match mirrors it. Measured from the FIRST firing, so a duration delays re-entry
+// once rather than repeating: the record keeps no later turn, and a latch-admitted row cannot be told
+// from a genuinely matched one at scan-done, so re-recording would never let the window close.
+const dontE = (uid, arg = '') => ({ uid, world: 'W', key: ['villa'], content: `@@dont_activate_after_match${arg}\nx` });
+
+eq(latchSuppressed(dontE(1), REC1, 9999), true, 'bare: suppressed forever after it fires');
+eq(latchSuppressed(dontE(1), {}, 50), false, 'not fired yet, so not suppressed');
+eq(latchSuppressed(dontE(1, ' 5'), REC1, 15), true, 'a duration still suppresses at fired + N');
+eq(latchSuppressed(dontE(1, ' 5'), REC1, 16), false, '...and lets it back in past that');
+eq(latchSuppressed(dontE(1, ' 0'), REC1, 11), false, 'a duration of 0 is over the next turn');
+eq(latchSuppressed(keepE(1), REC1, 10), false, 'the other latch is not this one');
 
 // Deleting a book prunes its latch keys from the open chat's record; the undo puts them back, so the
 // prune has to hand back what it removed rather than only what it kept.

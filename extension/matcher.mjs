@@ -995,8 +995,8 @@ export function gateVerdict(entry, opts = {}) {
     // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and keeps only
     // names prefix-matching its own two. Both present latches ON, as @@activate beats @@dont_activate.
     if (opts.fired && latchActive(entry, opts.fired, opts.chatLength)) return 'admit';
-    if (opts.fired && latchKey(entry) in opts.fired && decoratorFor(entry, '@@keep_activate_after_match') === null
-        && decoratorFor(entry, '@@dont_activate_after_match') !== null) return 'skip';
+    if (opts.fired && decoratorFor(entry, '@@keep_activate_after_match') === null
+        && latchSuppressed(entry, opts.fired, opts.chatLength)) return 'skip';
 
     const onlyAfter = decoratorCount(entry, '@@activate_only_after');
     if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) return 'skip';   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0
@@ -1032,6 +1032,17 @@ export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F
  *  chat that has not advanced, and a frozen scene reads the record as of its own turn. */
 export const firedUpTo = (record, chatLength) => Object.fromEntries(
     Object.entries(record ?? {}).filter(([, at]) => Number(at) <= Number(chatLength)));
+
+/** Whether `@@dont_activate_after_match` still holds this entry out: it has fired, and either carries no
+ *  duration (WA's extension — bare is CCv3's "in any case") or the chat is still inside it. Measured from
+ *  the FIRST firing, the record keeping no later one, so a duration delays re-entry rather than repeating. */
+export function latchSuppressed(entry, record, chatLength) {
+    if (decoratorFor(entry, '@@dont_activate_after_match') === null) return false;
+    const at = (record ?? {})[latchKey(entry)];
+    if (at === undefined) return false;
+    const n = decoratorCount(entry, '@@dont_activate_after_match');
+    return n === null || Number(chatLength) <= Number(at) + n;   // `=== null`, not falsy: a duration of 0 expires at once
+}
 
 /** Whether `@@keep_activate_after_match` still holds this entry in: it has fired, and either carries no
  *  duration (WA's extension — bare is CCv3's "in any case") or the chat is still inside it. Sticky by
