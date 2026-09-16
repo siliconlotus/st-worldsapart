@@ -828,6 +828,17 @@ function onEntriesLoaded(loaded) {
     for (const entry of entries) entry.waPromote = matcher.hasPromoteDecorator(entry);
     for (const entry of entries) entry.waDecorators = matcher.resolveDecorators(entry?.content);
 
+    // Gated: with WA off the install behaves as it would with WA not installed.
+    if (settings().enabled) {
+        const chatLength = (runState.scanChat ?? getContext().chat ?? []).length;
+        // A compiled SmartKey only countKey can read, so not on ST's dry run, where core is still the matcher.
+        const smartKeys = !runState.generationIsDryRun;
+        // Before the stash below, so waSecondary captures the desugared keysecondary.
+        for (const entry of entries) {
+            if (entry) Object.assign(entry, matcher.decoratorFields(entry, { chatLength, smartKeys }));
+        }
+    }
+
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
     if (settings().enabled && !runState.generationIsDryRun) {
         for (const entry of entries) {

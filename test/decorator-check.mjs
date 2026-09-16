@@ -189,3 +189,29 @@ const compiledOnce = keys('@@additional_keys storm\n@@exclude_keys dream\nx').ke
 eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: [compiledOnce] }), {},
     're-running over an already-compiled key does not nest it, nor fall back to keysecondary');
 console.log('ok   review fixes: quote refusal, suffix-matched idempotence, filtered additional/exclude keys, reserved words');
+
+// --- the patch is applied to loadWorldInfo's cached objects, so it must be scalars or whole-array
+// REASSIGNMENT: getGlobalLore spreads shallow, and an in-place push would reach worldInfoCache.
+const applied = (content, entry = {}) => {
+    const e = { key: ['villa'], keysecondary: [], content, ...entry };
+    const before = { key: e.key, keysecondary: e.keysecondary };
+    Object.assign(e, decoratorFields(e, { chatLength: 0, smartKeys: true }));
+    return { sameKeyArray: e.key === before.key, sameSecondaryArray: e.keysecondary === before.keysecondary };
+};
+
+eq(applied('@@additional_keys storm\nx').sameSecondaryArray, false, 'keysecondary is REASSIGNED, never mutated');
+eq(applied('@@additional_keys storm\n@@exclude_keys dream\nx').sameKeyArray, false, 'key is reassigned too');
+eq(applied('@@depth 0\nx').sameKeyArray, true, 'a patch touching no key leaves the arrays alone');
+
+// Applying twice must land in the same place.
+const twice = content => {
+    const e = { key: ['villa'], content };
+    Object.assign(e, decoratorFields(e, { chatLength: 0, smartKeys: true }));
+    const first = JSON.stringify(e);
+    Object.assign(e, decoratorFields(e, { chatLength: 0, smartKeys: true }));
+    return first === JSON.stringify(e);
+};
+eq(twice('@@depth 0\nx'), true, 'a scalar patch is idempotent');
+eq(twice('@@additional_keys storm\n@@exclude_keys dream\nx'), true,
+    'the compiled key is idempotent: recompiling must not nest the SmartKey again');
+console.log('ok   the patch is scalar-or-reassign, and idempotent across a re-fire');
