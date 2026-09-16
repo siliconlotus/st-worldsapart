@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, hasLatch, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, hasLatch, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -254,6 +254,18 @@ console.log('ok   the latch decorators, read from WA\'s own record');
 eq(latchBook(`W${US}3`), 'W', 'the book is the segment before the US');
 eq(latchBook(`My Book${US}12`), 'My Book', 'a book name may itself contain spaces');
 eq(latchBook(''), '', 'an empty key has no book');
+
+// Deleting a book prunes its latch keys from the open chat's record; the undo puts them back, so the
+// prune has to hand back what it removed rather than only what it kept.
+eqDeep(partitionLatches([`W${US}1`, `W${US}2`, `X${US}3`], ['W']),
+    { kept: [`X${US}3`], dropped: [`W${US}1`, `W${US}2`] }, 'a deleted book\'s keys are separated from the rest');
+eqDeep(partitionLatches([`W${US}1`, `X${US}2`], ['W', 'X']),
+    { kept: [], dropped: [`W${US}1`, `X${US}2`] }, 'several books at once');
+eqDeep(partitionLatches([`W${US}1`], ['X']), { kept: [`W${US}1`], dropped: [] }, 'a book with no latches drops nothing');
+eqDeep(partitionLatches([`My Book${US}1`], ['My Book']), { kept: [], dropped: [`My Book${US}1`] },
+    'a book name with spaces still matches');
+eqDeep(partitionLatches([], ['W']), { kept: [], dropped: [] }, 'an empty record');
+eqDeep(partitionLatches(null, ['W']), { kept: [], dropped: [] }, 'an absent record is not a crash');
 console.log('ok   latchBook recovers the book name from a latch key');
 
 // --- hasLatch: the one predicate for "carries a latch decorator", shared by the activationAdds gate and

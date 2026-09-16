@@ -16,7 +16,7 @@ import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, S
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
-import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
+import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, partitionLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
 import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
@@ -1393,28 +1393,30 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (d) books.push({ name: n, data: structuredClone(d) });
             await deleteWorldInfo(n);
         }
-        // The per-book settings go with the book; restoreBook puts them back when the delete is undone.
-        const s = settings();
-        const forgotten = names.map(n => ({ name: n, sort: s.studioSortByBook?.[n], ignore: s.keywordIgnore?.[n] }));
-        for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
-        saveSettingsDebounced();
         // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
         const meta = getContext().chatMetadata;
-        const fired = meta?.[WA_METADATA_KEY]?.fired;
-        if (Array.isArray(fired)) {
-            const kept = fired.filter(k => !names.includes(latchBook(k)));
-            if (kept.length !== fired.length) {
-                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: kept };
-                getContext().saveMetadata?.();
-            }
+        const { kept, dropped } = partitionLatches(meta?.[WA_METADATA_KEY]?.fired, names);
+        if (dropped.length) {
+            meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: kept };
+            getContext().saveMetadata?.();
         }
+        // The per-book settings and latch keys go with the book; restoreBook puts them back when the delete is undone.
+        const s = settings();
+        const forgotten = names.map(n => ({
+            name: n,
+            sort: s.studioSortByBook?.[n],
+            ignore: s.keywordIgnore?.[n],
+            fired: dropped.filter(k => latchBook(k) === n),
+        }));
+        for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
+        saveSettingsDebounced();
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
             data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
         }
         dirty = false;
         if (undoTimer) clearTimeout(undoTimer);
-        pendingUndo = { books, forgotten };
+        pendingUndo = { books, forgotten, chatId: getContext().chatId };
         undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; renderBooks(); }, 30000);
         renderBooks();
         if (wasOpen) { if (selected) openBook(selected); else renderExplorer(); }
@@ -1447,6 +1449,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (f.ignore) (settings().keywordIgnore ??= {})[f.name] = f.ignore;
         }
         if (p.forgotten?.some(f => !skipped.includes(f.name))) saveSettingsDebounced();
+        // Only into the chat the keys came from: the record is chat-scoped, and writing chat A's latches into
+        // chat B would mark entries fired where they never fired. A closed chat has no metadata-only write.
+        if (p.chatId && p.chatId === getContext().chatId) {
+            const back = (p.forgotten ?? []).filter(f => !skipped.includes(f.name)).flatMap(f => f.fired ?? []);
+            if (back.length) {
+                const meta = getContext().chatMetadata;
+                const fired = new Set([...(meta?.[WA_METADATA_KEY]?.fired ?? []), ...back]);
+                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: [...fired] };
+                getContext().saveMetadata?.();
+            }
+        }
         await updateWorldInfoList();
         if (restored && !selected) selected = p.books.find(b => world_names.includes(b.name))?.name ?? null;
         renderBooks();

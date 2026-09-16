@@ -982,6 +982,15 @@ export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1
 /** The book a latch key belongs to — the segment before the US. */
 export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F))[0];
 
+/** A latch record split by book: `kept` for the record to write back, `dropped` for the delete's undo to
+ *  restore. Both halves, because a prune that returns only what it keeps cannot be undone. */
+export function partitionLatches(fired, names) {
+    const drop = new Set(Array.isArray(names) ? names : []);
+    const kept = [], dropped = [];
+    for (const k of Array.isArray(fired) ? fired : []) (drop.has(latchBook(k)) ? dropped : kept).push(k);
+    return { kept, dropped };
+}
+
 /** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled,
  *  `constant`, `@@dont_activate`/`@@activate`, an unarrived `delay`, and any of the four conditional gates
  *  (`@@activate_only_after`, `@@is_greeting`, `@@activate_only_every`, `@@is_user_icon`) an entry fails.
