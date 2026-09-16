@@ -948,3 +948,88 @@ export function activationAdds(entries, windowFor, opts = {}) {
     }
     return out;
 }
+
+/** `position` values; must match core's `world_info_position` (world-info.js). */
+export const WI_POSITION = { before: 0, after: 1, ANTop: 2, ANBottom: 3, atDepth: 4, EMTop: 5, EMBottom: 6, outlet: 7 };
+
+/** `role` values; must match core's `extension_prompt_roles` (script.js). */
+export const WI_ROLE = { SYSTEM: 0, USER: 1, ASSISTANT: 2 };
+
+/** Core's DEFAULT_DEPTH (world-info.js). */
+export const DEFAULT_WI_DEPTH = 4;
+
+const POSITION_WORDS = { before_desc: WI_POSITION.before, after_desc: WI_POSITION.after, personality: WI_POSITION.after, scenario: WI_POSITION.after };
+const ROLE_WORDS = { system: WI_ROLE.SYSTEM, user: WI_ROLE.USER, assistant: WI_ROLE.ASSISTANT };
+
+/** A non-negative integer, or null. */
+const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg) : null);
+
+/** The ST field patch an entry's decorators ask for; `{}` when none apply. Pure: mutates nothing.
+ *  `ctx` is `{ chatLength, smartKeys }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
+export function decoratorFields(entry, ctx = {}) {
+    const lines = resolveDecorators(entry?.content);
+    if (!lines.length) return {};
+
+    const patch = {};
+    const set = (field, value) => { if (!(field in patch)) patch[field] = value; };
+    let sawPosition = false;
+    let role = null;
+
+    for (const line of lines) {
+        let arg;
+
+        if ((arg = decoratorArg(line, '@@depth')) !== null) {
+            const n = wholeNumber(arg);
+            if (n === null) continue;
+            sawPosition = true;
+            set('position', WI_POSITION.atDepth);
+            if (patch.position === WI_POSITION.atDepth) set('depth', n);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@reverse_depth')) !== null) {
+            const n = wholeNumber(arg);
+            // Counted from the START, so it moves with the chat; the spec defines it as @@depth <total> - N.
+            const d = n === null ? null : Number(ctx?.chatLength ?? 0) - n;
+            if (d === null || d < 0) continue;
+            sawPosition = true;
+            set('position', WI_POSITION.atDepth);
+            if (patch.position === WI_POSITION.atDepth) set('depth', d);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@position')) !== null) {
+            const p = POSITION_WORDS[arg.toLowerCase()];
+            if (p === undefined) continue;
+            sawPosition = true;
+            set('position', p);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@scan_depth')) !== null) {
+            const n = wholeNumber(arg);
+            if (n === null) continue;
+            set('scanDepth', n);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@role')) !== null) {
+            const r = ROLE_WORDS[arg.toLowerCase()];
+            if (r !== undefined && role === null) role = r;
+            continue;
+        }
+    }
+
+    // Applied after the run, not as a write, so the outcome does not depend on where @@role was written.
+    if (role !== null) {
+        if (patch.position === WI_POSITION.atDepth || (!sawPosition && entry?.position === WI_POSITION.atDepth)) {
+            patch.role = role;
+        } else if (!sawPosition) {
+            patch.role = role;
+            patch.position = WI_POSITION.atDepth;
+            patch.depth = entry?.depth ?? DEFAULT_WI_DEPTH;
+        }
+    }
+
+    return patch;
+}
