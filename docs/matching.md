@@ -4,7 +4,7 @@ A World Info key in WA can be one of three things:
 
 | Form | Example | What it is |
 |---|---|---|
-| plain | `moon mission` | substring match, the SillyTavern default |
+| plain key | `moon mission` | substring match, the SillyTavern default |
 | regex | `/co(l\|s)monaut/i` | a regular expression, as core already supports |
 | **SmartKey** | `? moon mission -apollo` | a boolean expression — a leading `?` opts in |
 
@@ -14,27 +14,17 @@ This page is about how any key matches. The `?` syntax has its own page: [SmartK
 
 ## Plain keys mostly behave the same
 
-In SillyTavern, a keyword is an exact substring match, so the term `moon` matches `honmoon` unless
-whole-word matching is enabled for the entry. A plain keyword in WorldsApart (WA) behaves exactly the
-same way; none of your existing keys will behave differently, with one exception: SillyTavern for some
-reason skips whole-word matching on multi-word terms (e.g., terms that contain a space like `hot tub`)
-and applies substring matching, so `hot tub` matches `hot tubs` and `hot tubing`. WA corrects this, so
-it behaves as intended and does not match.
+In SillyTavern, a keyword is an exact substring match, so the term `moon` matches `honmoon` unless whole-word matching is enabled for the entry. A plain keyword in WorldsApart (WA) behaves exactly the same way; none of your existing keys will behave differently, with one exception: SillyTavern for some reason skips whole-word matching on multi-word terms (e.g., terms that contain a space like `hot tub`) and applies substring matching, so `hot tub` matches `hot tubs` and `hot tubing`. WA corrects this, so it behaves as intended and does not match.
 
 ## In some situations, they may behave differently
 
 ### Tags
 
-**HTML and XML tags and comments are blanked out before a literal key is matched.** The keys `size`
-and `div` will not match `<div style="font-size:13px">` or `<!-- this div's size is too big -->` like
-it would under ST's own matching system. If you want to match tag contents, use a regex.
+**HTML and XML tags and comments are blanked out before a literal key is matched.** The keys `size` and `div` will not match `<div style="font-size:13px">` or `<!-- this div's size is too big -->` like it would under ST's own matching system. If you want to match tag contents, use a regex.
 
 ### Orthographic Normalization
 
-WA generally tries to model an author's intent when matching. A user who writes the key `Cap'n Crunch` probably wants it
-whether the apostrophe is the straight form from their keyboard or the fancy curly form that displays
-sometimes, and LLMs frequently emit both on an inconsistent basis. Consequently, WA normalizes a few
-classes of characters to ensure consistent matching regardless of variant forms being used.
+WA generally tries to model an author's intent when matching. A user who writes the key `Cap'n Crunch` probably wants it whether the apostrophe is the straight form from their keyboard or the fancy curly form that displays sometimes, and LLMs frequently emit both on an inconsistent basis. Consequently, WA normalizes a few classes of characters to ensure consistent matching regardless of variant forms being used.
 
 | class | written | matches |
 |---|---|---|
@@ -46,14 +36,9 @@ classes of characters to ensure consistent matching regardless of variant forms 
 | Spaces | non-breaking space | ordinary space |
 | Accents and combining marks | decomposed `José` (`e` + a combining acute) | composed `José` (NFC, the single letter `é`) |
 
-What this means is that you don't need to care about any of this — you can write whatever way is
-comfortable to you without needing to provide variant keys for whatever the model may be spitting out.
-If any of your keys use any of these marks, it's very likely that SillyTavern wasn't matching them in
-some cases where you would have expected it to.
+What this means is that you don't need to care about any of this — you can write whatever way is comfortable to you without needing to provide variant keys for whatever the model may be spitting out. If any of your keys use any of these marks, it's very likely that SillyTavern wasn't matching them in some cases where you would have expected it to.
 
-This principle extends to hyphens; WA expands word-internal hyphens to spaces so that `sci-fi` also matches `sci fi`, because often
-the hyphen is a matter of taste or convention. If you specifically want the hyphen, write the key as a regex: `/sci-fi/`. (The reverse is not
-true — key `sci fi` will not match `sci-fi` in the chat, because it would require turning every space in the chat into a hyphen). Leadng and trailing hyphens are exempted from the expansion (e.g., `-gate` will only match `bridge-gate`, not `the bridge gate is broken`.)
+This principle extends to hyphens; WA expands word-internal hyphens to spaces so that `sci-fi` also matches `sci fi`, because often the hyphen is a matter of taste or convention. If you specifically want the hyphen, write the key as a regex: `/sci-fi/`. (The reverse is not true — key `sci fi` will not match `sci-fi` in the chat, because it would require turning every space in the chat into a hyphen). Leading and trailing hyphens are exempted from the expansion (e.g., `-gate` will only match `bridge-gate`, not `the bridge gate is broken`.)
 
 **Note:** WA does *not* remove accents like some systems do; `cafe` does not match `café`, because those are only considered the same thing in English, and WA supports many languages (French `a` and `à` are completely separate words.) Use an OR group to capture accent variants if they might arise (models are usually pretty good about using them consistently). 
 
@@ -61,15 +46,15 @@ true — key `sci fi` will not match `sci-fi` in the chat, because it would requ
 
 ## Regex keys
 
-A `/pattern/flags` key is matched by JavaScript's own engine on the raw text. Everything here is true
-of a whole-key regex and of a `/…/` term inside a SmartKey alike.
+A `/pattern/flags` key is matched by JavaScript's own engine on the text, NFC-normalised but otherwise unfolded. Everything here is true of a whole-key regex and of a `/…/` term inside a SmartKey alike.
 
-- Flags supported by JS [dgimsuvy][^1] are allowed: `? /NASA/i` is case-insensitive;  note that ST core does not support /d or /v, so if you write a key with them, it will not work on a WA-less install.
+- Flags supported by JS [dgimsuvy][^1] are allowed: `? /NASA/i` is case-insensitive; note that ST core does not support /d or /v, so if you write a key with them, it will not work on a WA-less install.
 - A slash inside the pattern is fine and does not need to be (but can be) escaped. `/(home/user|~/user)/dir/` behaves identically to `/(home\/user|~\/user)\/dir/`. Note that ST core requires the escape, so you might want to use them for portability.
 - Regexes are not folded, so `/Cap'n Crunch/` written with only a straight apostrophe will not match `Cap’n Crunch` with a curly one; consider a more robust group like `['‘’]`[^2].
 - Whole-word `=` and case-sensitive `^` are not available here. Regexes are case-sensitive without the /i flag and always substring match. If you want to mimic whole-word matching, use a space character or permissive \b:
 
   | pattern | text | match |
+  | --- | --- | --- |
   | `/Sean/` | `my friend Sean` | true |
   | `/Sean/` | `my friend Seán` | false |
   | `/Sean/` | `my friend sean` | false |
@@ -91,34 +76,32 @@ of a whole-key regex and of a `/…/` term inside a SmartKey alike.
   | `/\bSean\b/` | `my friend Sean's new` (straight apostrophe) | true |
   | `/\bSean\b/` | `my friend Sean’s new` (curly apostrophe) | true |
 
+Note that JS regex `\w`, `\b` and `\d` are ASCII-only, which can cause unexpected behavior with accented and non-English characters. Additionally, WA normalizes the haystack to composed (NFC) form:
 
-Note that JS regex \w, \b, and \d, which can cause unexpected behavior with accented and non-English characters. Additionally, WA normalizes the haystack to composed (NFC) form:
 | pattern | text | match | note |
+| --- | --- | --- | --- |
 | `/André/` | `my friend André and` | true | |
 | `/André/` | `my other friend Andréas` | true | |
 | `/André/` | `my friend André` | true | both composed: \u00e9 |
 | `/André/` | `my friend André` | **false** | Decomposed key e + \u0301, composed text \u00e9 (WA text is always composed); WA will warn you in this case. |
 | `/André/` | `my friend André's new` | true | (assuming both composed forms)|
-| `/\bAndré\b/` | `my friend André and` | **false** | Fails on a non-ASCII edge; a JS regex span delimited by \b must begin and end with an ASCII character, because \w is [A-Za-z0-9_] |
+| `/\bAndré\b/` | `my friend André and` | **false** | Fails on a non-ASCII edge; a JS regex span delimited by \b must begin and end with an ASCII character, because \w is `[A-Za-z0-9_]` |
 | `/\bAndré\b/` | `my friend André's new` | false |  |
 | `/\bAndréas\b/` | `my other friend Andréas and` | true | Only the edge has to be ASCII |
 | `/\bAndréas\b/` | `my other friend Andréas's new` | true |  |
 
-This is true even if you force unicode awareness with flags /u and /v. The unicode-aware version of \b is a combined lookahead and lookbehind[^3] `(?<![\p{L}\p{N}\p{M}])` + `(?![\p{L}\p{N}\p{M}])` with the unicode flag /u (e.g., `/(?<![\p{L}\p{N}\p{M}])André(?![\p{L}\p{N}\p{M}])/u`). For this reason, it is recommended to use plain terms if you want to use accented characters and boundary markers, as WA handles this under the hood. Under permissive mode, `? =André` behaves sensibly, matching `my friend André`,  `"André's new`, and `André-shaped` but not `Andréas`; under strict mode, you must spell out  variants like `? (=^André | =^André's | ^André-)`. This also gets you the curly-quotes normalization and normalization to composed form, so typing e + combining acute `André` will match even though the text is always in composed form.
+This is true even if you force unicode awareness with flags /u and /v. The unicode-aware version of \b is a combined lookahead and lookbehind[^3] `(?<![\p{L}\p{N}\p{M}])` + `(?![\p{L}\p{N}\p{M}])` with the unicode flag /u (e.g., `/(?<![\p{L}\p{N}\p{M}])André(?![\p{L}\p{N}\p{M}])/u`). For this reason, it is recommended to use plain terms if you want to use accented characters and boundary markers, as WA handles this under the hood. Under permissive mode, `? =André` behaves sensibly, matching `my friend André`, `André's new`, and `André-shaped` but not `Andréas`; under strict mode, you must spell out variants like `? (=^André | =^André's | ^André-)`. This also gets you the curly-quotes normalization and normalization to composed form, so typing e + combining acute `André` will match even though the text is always in composed form.
 
-**Note:** Regex anchors `^` and `$` are applied against the Match window, not the whole scan. At the default, Paragraph, they
-  anchor once per paragraph (`^` matches at the start of each one); under Message, once per message;
-  under Whole scan window, a bare `^` matches at a single position — the start of the window, however
-  many messages and paragraphs are inside it. Consider `/m`, which anchors at every line break.
+> **Note:** Regex anchors `^` and `$` are applied against the Match window, not the whole scan. At the default, Paragraph, they anchor once per paragraph (`^` matches at the start of each one); under Message, once per message; under Whole scan window, a bare `^` matches at a single position — the start of the window, however many messages and paragraphs are inside it. Consider `/m`, which anchors at every line break.
 
-  Against `/^Dream/`:
-  
-  `Dream of the Endless is a DC Vertigo character`: Match
-  `I Have a Dream`: No match
-  ```
-  Many pieces of once-popular software have since been shuttered.
-  Dreamweaver, Adobe's once-vaunted web development suite, // No match (segment starts at "Many"; /^Dream/m would have matched)
-  ```
+Against `/^Dream/`:
+
+`Dream of the Endless is a DC Vertigo character`: Match
+`I Have a Dream`: No match
+```
+Many pieces of once-popular software have since been shuttered.
+Dreamweaver, Adobe's once-vaunted web development suite, // No match (segment starts at "Many"; /^Dream/m would have matched)
+```
 
 ---
 
@@ -126,60 +109,40 @@ This is true even if you force unicode awareness with flags /u and /v. The unico
 
 **Word boundary**[^3] decides what counts as *inside* a word, for whole-word matching only:
 
-| | inside a word | so `Joe` matches |
+| | inside a word | `Joe` matches |
 |---|---|---|
 | **Strict** (default) | letters, digits, marks, `-` `'` | *Joe*, not *Joe's* or *Joe-adjacent* |
 | **Permissive** | letters, digits, marks | *Joe*, *Joe's* and *Joe-adjacent* |
 
-Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_`
-matches: underscore is a word character for programming identifiers, not for prose. **Word boundaries
-are Unicode-aware**: a word character is any letter, digit or combining mark in any script, so whole-word
-`caf` does not match `café` and `Мари` does not match `Марию`.
+Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_` matches: underscore is a word character for programming identifiers, not for prose. **Word boundaries are Unicode-aware**: a word character is any letter, digit or combining mark in any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`.
 
-**Match window** is the unit every part of a key must match within — *Paragraph* (the default),
-*Message*, or *Whole scan window* (SillyTavern's own behaviour). Under *Paragraph*, `? apple banana`
-needs both words in the same paragraph. A block element's open or close ends a window as a blank line
-does, so a preset that writes chat bubbles or a tracker panel as `<div>`s gives each one its own;
-`<b>`, `<em>`, `<span>` and `<br>` do not.
+**Match window** is the unit every part of a key must match within — *Paragraph* (the default), *Message*, or *Whole scan window* (SillyTavern's own behaviour). Under *Paragraph*, `? apple banana` needs both words in the same paragraph. A block element's open or close ends a window as a blank line does, so a preset that writes chat bubbles or a tracker panel as `<div>`s gives each one its own; `<b>`, `<em>`, `<span>` and `<br>` do not.
 
 ## Known limits
 
-**Scripts without word boundaries.** Chinese, Japanese, Thai, Lao, Khmer and Burmese do not write them,
-so a whole-word key like `猫` matches where it appears among Latin text or punctuation — a sign name
-inside an English sentence, or beside `・` `、` `。` — and misses wherever it sits between two
-characters of running text. Leave the box off for entries keyed in these scripts; the Studio marks the
-whole-words control on any entry where this applies.
+**Scripts without word boundaries.** Chinese, Japanese, Thai, Lao, Khmer and Burmese do not write them, so a whole-word key like `猫` matches where it appears among Latin text or punctuation — a sign name inside an English sentence, or beside `・` `、` `。` — and misses wherever it sits between two characters of running text. Leave the box off for entries keyed in these scripts; the Studio marks the whole-words control on any entry where this applies.
 
-**Markdown.** Chat prose is Markdown and the markup sits in the text being scanned, so emphasis
-*inside* a word cuts both ways:
+**Markdown.** Chat prose is Markdown and the markup sits in the text being scanned, so emphasis *inside* a word cuts both ways:
 
 ```
 "*sister*hood"    sisterhood         MISSES  — the asterisks break the substring
 "*sister*hood"    sister (=/whole)   MATCHES — the * reads as a word boundary
 ```
 
-Emphasis around a whole word is fine in every mode; this only bites mid-word. Making `*` a word
-character would break the case that works, and stripping markup would destroy the asterisk as content.
+Emphasis around a whole word is fine in every mode; this only bites mid-word. Making `*` a word character would break the case that works, and stripping markup would destroy the asterisk as content.
 
 ## Porting to a non-WA SillyTavern
 
-**A book full of SmartKeys loads in a stock SillyTavern**, where the keys never match rather than
-breaking anything. Core's matcher has no `?` sentinel, so it reads the whole key as literal text that
-no message contains. The same is true inside WA for SillyTavern's own dry runs — prompt token counts,
-chat load — which are not WA generations and so keep core's matcher.
+**A book full of SmartKeys loads in a stock SillyTavern**, where the keys never match rather than breaking anything. Core's matcher has no `?` sentinel, so it reads the whole key as literal text that no message contains.
 
-If you write a regex containing unescaped slashes and plan to port it to a non-WA system, escape the
-slashes: vanilla SillyTavern's matcher refuses any pattern with an unescaped `/` inside and looks for
-the whole delimited string as literal text instead.
+If you write a regex containing unescaped slashes and plan to port it to a non-WA system, escape the slashes: vanilla SillyTavern's matcher refuses any pattern with an unescaped `/` inside and looks for the whole delimited string as literal text instead.
 
 ```
 /(home/user|~/user)/file/         WA: pattern.   vanilla ST: the literal 25 characters.
 /(home\/user|~\/user)\/file/      both: pattern. Identical matches; `\/` is just `/` to a regex.
 ```
 
-Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The
-Studio warns on the first row's shape, for a bare `/regex/` key and a `/…/` term alike.
-
+Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The Studio warns on the first row's shape, for a bare `/regex/` key and a `? /re/` term alike.
 
 [^1]: `REGEX_KEY_RE` in `extension/matcher.mjs` is the authority for which flags a key may carry.
       Core's own list is the narrower `CORE_REGEX_KEY_RE` beside it, which is why `/d` and `/v` are
