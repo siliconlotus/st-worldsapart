@@ -1,9 +1,9 @@
 # WorldsApart for SillyTavern
 WorldsApart is set of tools for SillyTavern that allow a user to manage their lorebooks, their entry keywords, and the selection and insertion of lorebook entries into the prompt.
 
-Keys get their own page: **[SmartKeys](docs/smartkeys.md)** — the `?` boolean expression syntax, and how WA
-matches every kind of key (substring by default, what the fold normalises, word boundaries, the
-Lucene delta).
+Keys get two pages: **[Matching](docs/matching.md)** for how WA matches every kind of key (substring by
+default, what the fold normalises, word boundaries, regex behaviour), and **[SmartKeys](docs/smartkeys.md)**
+for the `?` boolean expression syntax.
 
 ## Install
 
