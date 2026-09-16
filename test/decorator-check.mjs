@@ -167,6 +167,13 @@ eqDeep(keys('@@additional_keys storm\n@@additional_keys rain\nx').keysecondary, 
     'a repeated @@additional_keys accumulates');
 eqDeep(keys('@@exclude_keys dream\n@@exclude_keys fog\nx').keysecondary, ['dream', 'fog'],
     '...and so does a repeated @@exclude_keys');
+
+// The realistic way a repeat arises: an author guards an app-specific decorator with a `@@@` fallback,
+// so the chain contributes a second list alongside any direct one.
+eqDeep(keys('@@elaborate_custom_match_logic\n@@@additional_keys apple, banana\nx').keysecondary,
+    ['apple', 'banana'], 'a @@@ fallback supplies the list when the decorator above it is unrecognised');
+eqDeep(keys('@@additional_keys cherry\n@@elaborate_custom_match_logic\n@@@additional_keys apple, banana\nx').keysecondary,
+    ['cherry', 'apple', 'banana'], '...and accumulates with a direct line rather than losing one of them');
 console.log('ok   each key decorator alone maps to keysecondary');
 
 // --- together, ST cannot express both, so WA compiles one SmartKey
