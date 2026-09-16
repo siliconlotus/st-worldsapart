@@ -1,7 +1,7 @@
 // How WA relates to ST core on an unmodified lorebook: parity with matchKeys/matchSecondaryKeys, and the named divergences.
 // An assertion citing core as the authority goes here; one about what a matched expression is WORTH goes in matcher-check.mjs.
-import { countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, resolveDecorators, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
-import { synthesizeSecondary } from '../extension/smartkeys.mjs';
+import { coreReadsAsRegex, countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, resolveDecorators, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
+import { synthesizeSecondary, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const { AND_ANY, NOT_ALL, NOT_ANY, AND_ALL } = WI_LOGIC;
@@ -339,7 +339,7 @@ console.log('ok   withPromote: add/remove round-trips through the reader and lea
 eq(splitKeys('/a/,/b/').join(' | '), '/a/ | /b/', 'a regex straight after a comma is seen (upstream-st.md #17: core\'s customTokenizer misses it)');
 console.log('ok   splitKeys: the key-field tokenizer diverges from core where core skips the character after a comma');
 
-// --- decorator names match EXACTLY: core's gates are `.includes('@@activate')` (world-info.js:4875), so a
+// --- decorator names match EXACTLY: core's gates are `.includes('@@activate')` (world-info.js `checkWorldInfo`), so a
 // longer name that merely starts with one of core's two must not read as it.
 const dec = (decorators, name) => hasDecorator({ uid: 1, key: ['x'], decorators, content: 'y' }, name);
 
@@ -357,7 +357,7 @@ eq(decoratorArg('@@depthly 3', '@@depth'), null, 'a longer name is null, not an 
 eq(decoratorArg('@@@depth 0', '@@depth'), '0', 'the @@@ fallback spelling is the same decorator');
 console.log('ok   decorator names match exactly, with the argument and the @@@ spelling');
 
-// --- the `@@@` fallback chain, by core's parseDecorators grammar (world-info.js:4676-4692): a `@@@name`
+// --- the `@@@` fallback chain, by core's parseDecorators grammar (world-info.js `parseDecorators`): a `@@@name`
 // line counts only when the decorator BEFORE it was unrecognised.
 const res = content => resolveDecorators(content).join(',');
 
@@ -380,3 +380,24 @@ console.log('ok   the divergence from core that follows from a larger recognised
 eq(res('@@ignore_on_max_context\n@@@depth 0\nx').includes('@@depth 0'), false,
     '@@ignore_on_max_context is recognised, so the @@@depth after it does NOT apply');
 console.log('ok   @@ignore_on_max_context closes the @@@ chain');
+
+// --- DIVERGENCE: a key is a JS regex. Core takes a narrower set, and coreReadsAsRegex models THAT, never WA's own.
+{
+    // Core's own list (`parseRegexFromString`): g i m s u y. `d` and `v` postdate it.
+    for (const f of ['', 'i', 'gi', 'm', 's', 'u', 'y']) {
+        eq(countKey(`/ca[t]/${f}`, 'the cat', false, false), f === 'y' ? 0 : 1, `core's own flag "${f}" runs in WA too`);
+        eq(coreReadsAsRegex(`/ca[t]/${f}`), true, `...and core reads it as a pattern`);
+    }
+    for (const f of ['d', 'v', 'iv']) {
+        eq(countKey(`/ca[t]/${f}`, 'the cat', false, false), 1, `DIVERGENCE: WA runs the post-2021 flag "${f}"`);
+        eq(coreReadsAsRegex(`/ca[t]/${f}`), false, `...where core reads the whole thing as literal text`);
+    }
+    // u and v are mutually exclusive, so the pattern never compiles — refused, not silently run.
+    eq(countKey('/ca[t]/uv', 'the cat', false, false), 0, 'uv together is an invalid regex, so it counts 0');
+    eq(validateSmartKey('/ca[t]/uv')[0]?.code, 'regex-invalid', '...and is reported as one');
+    // The same divergence the unescaped slash is: WA runs what JS runs, and the Studio says core will not.
+    eq(validateSmartKey('/ca[t]/v')[0]?.code, 'regex-core-refuses', 'a v key warns that core refuses it');
+    eq(validateSmartKey('/one/(two|three)/')[0]?.code, 'regex-core-refuses', '...the same warn the unescaped slash gets');
+    eq(validateSmartKey('/ca[t]/i')?.length, 0, 'a flag core shares warns about nothing');
+}
+console.log('ok   regex flags: WA takes every JS flag, core takes its own list, and the gap is warned');

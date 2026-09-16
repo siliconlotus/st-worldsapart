@@ -1,7 +1,7 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
 import { countKey, dropTags, keyExcerpts, segment, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
-import { validateSmartKey } from '../extension/smartkeys.mjs';
+import { keyVariants, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 // keywordScore with the production defaults injected; k1 is 2 here, and passing a cfg to this wrapper does nothing.
@@ -466,3 +466,39 @@ eq(digest('? (copper pipe)~1', 'copper hot pipe', { ww: false }), '? (copper pip
 eq(keyExcerpts('? (copper pipe)~1', 'copper hot pipe', false, false).map(e => `${e.term}:${e.n}`).join(' '), 'copper:1 pipe:1',
     'a matched proximity group excerpts its leaves');
 console.log('ok   proximity: witness spans report leaves, the verdict is the cluster');
+
+// --- keyVariants: an interior hyphen opens to a space, an edge one does not — ` gate` would match almost anything
+{
+    eq(keyVariants('sci-fi').join('|'), 'sci-fi|sci fi', 'an interior hyphen still expands');
+    eq(keyVariants('-gate').join('|'), '-gate', 'a leading hyphen interns no variant');
+    eq(keyVariants('gate-').join('|'), 'gate-', 'nor a trailing one');
+    eq(keyVariants('-a-b-').join('|'), '-a-b-', 'edges win over the interior hyphens');
+    eq(countKey('-gate', 'a gate in the wall', false, false), 0, 'so the suffix key does not match a bare gate');
+    eq(countKey('-gate', 'the -gate suffix', false, false), 1, '...and still matches what it says');
+    eq(countKey('sci-fi', 'a sci fi novel', false, false), 1, 'the interior expansion is untouched');
+}
+console.log('ok   keyVariants: only an interior hyphen opens to a space');
+
+// --- a decomposed regex pattern meets an always-composed haystack: warned, never silently dead
+{
+    const DE = `Andr${'é'}`, CO = `Andr${'é'}`;
+    const codes = k => validateSmartKey(k).map(f => `${f.severity}:${f.code}`).join(',');
+
+    eq(codes(`/${DE}/`), 'warn:regex-decomposed', 'a decomposed pattern is flagged');
+    eq(codes(`/${CO}/`), '', '...and a composed one is not');
+    eq(codes(`? /${DE}/ hat`), 'warn:regex-decomposed', 'a decomposed REGEX TERM is flagged too');
+    eq(countKey(`/${DE}/`, `my friend ${CO} and`, false, false), 0, 'the flag is earned: it matches nothing');
+    eq(countKey(`/${DE}/`, `my friend ${DE} and`, false, false), 0, '...not even decomposed text, which is composed first');
+
+    // A literal key NFCs BOTH sides, so the same spelling is fine and must not be flagged.
+    eq(codes(`? "${DE}"`), '', 'a decomposed literal term is not flagged');
+    eq(countKey(`? ="${DE}"`, `my friend ${CO} and`, false, false), 1, '...because it matches composed text');
+
+    // warn, not error: the decomposed run can sit in an optional group the rest of the pattern survives.
+    eq(countKey(`/(?:é)?cat/`, 'a cat', false, false), 1, 'an optional decomposed group still matches');
+    eq(codes(`/(?:é)?cat/`), 'warn:regex-decomposed', '...so it is a warn and not an error');
+
+    // An uncompilable pattern reports THAT, and returns before the composition question.
+    eq(codes(`/${DE}(/`), 'error:regex-invalid', 'a pattern that cannot compile reports only that');
+}
+console.log('ok   regex-decomposed: a pattern the haystack composes out of reach is warned');

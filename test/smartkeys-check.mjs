@@ -31,6 +31,7 @@ eq(matches('? "moon mission"', 'mission to the moon'), false, 'quoted phrase, no
 // Lexer edge cases the spec requires.
 eq(matches('? sci-fi', 'a sci-fi novel'), true, 'internal hyphen stays in the term');
 eq(matches('? sci-fi', 'a fantasy novel'), false, 'sci-fi does not degrade to sci AND NOT fi (would match here)');
+eq(matches('? sci-fi', 'a sci fi novel'), true, 'a term\'s hyphen expands to a space inside a SmartKey too');
 eq(matches('? c-3po', 'c-3po beeped'), true, 'digits and hyphens in terms');
 eq(countKey('? fire::2.5', 'fire everywhere', false, false), 2.5, '::weight scales the matched score');
 // --- group weights ----------------------------------------------------------------------------------
@@ -488,7 +489,7 @@ console.log('ok   a plain multi-word key is a quoted phrase');
     eq(countKey('? "apollo astronauts"', msg, false, false), 0, '...and the quoted term is the same key');
     eq(countKey('? apollo astronauts', msg, false, false) > 0, true, 'unquoted, order and distance stop mattering');
 }
-console.log('ok   the SMARTKEYS.md worked example holds');
+console.log('ok   the docs/smartkeys.md worked example holds');
 
 // --- proximity: `(…)~N` holds a group to a window — its things within N words of each other, in any order
 {

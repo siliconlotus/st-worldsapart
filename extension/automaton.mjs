@@ -38,7 +38,8 @@ export const fold = s => normalizeOrthography(s).toLowerCase();
 export function keyVariants(key) {
     const s = normalizeOrthography(key);
     const open = s.replaceAll('-', ' ');
-    return open === s ? [s] : [s, open];
+    // A hyphen at either edge opens to a leading or trailing space, a literal that matches almost everything.
+    return open === s || open.trim() !== open ? [s] : [s, open];
 }
 
 /** Aho-Corasick automaton over folded literals: `{next, fail, out, len}`. */

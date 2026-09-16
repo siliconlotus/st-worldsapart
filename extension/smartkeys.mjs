@@ -1,5 +1,5 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys. Entry point evaluateSmartKey(); countKey() routes `?` keys here.
-// The grammar is SMARTKEYS.md's; docs/matching.md holds what each operator is worth.
+// The grammar is docs/smartkeys.md's; docs/matching-architecture.md holds what each operator is worth.
 
 import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
@@ -168,6 +168,19 @@ const hasPositiveTerm = (node, negated = false) => {
 };
 
 /** Structural problems in a key: `error` cannot do what the author meant under any text, `warn` is legal and probably a typo. Structure only; whether a term ever occurs is the audit's df question. */
+/** A pattern body NFC composes away: countRegexKey normalises the haystack, so that sequence meets a composed text and
+ *  never matches. A warn, not an error — the decomposed run may sit in an optional group the rest of the pattern survives. */
+const decomposedFinding = raw => {
+    const m = String(raw).match(REGEX_KEY_RE);
+    if (!m) return null;
+    const nfc = m[1].normalize('NFC');
+    if (nfc === m[1]) return null;
+    return {
+        severity: 'warn', code: 'regex-decomposed',
+        message: `The pattern “${raw}” holds a decomposed character — a letter written as a base plus a combining mark. WA composes the text before matching, so that sequence can never match. Written composed it is “/${nfc}/${m[2]}”.`,
+    };
+};
+
 export function validateSmartKey(raw) {
     const out = [];
     const src = String(raw ?? '');
@@ -186,12 +199,14 @@ export function validateSmartKey(raw) {
                 });
                 return out;   // the reading question below is moot for a pattern that cannot run
             }
+            const decomposed = decomposedFinding(bare);
+            if (decomposed) out.push(decomposed);
         }
         if (isRegexKey(bare) && !coreReadsAsRegex(bare)) {
             const hatch = bare.includes('"') ? '' : ` If you meant the literal string, use ? "${bare}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it, so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
+                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
             });
         }
         return out;   // not a SmartKey; nothing further to say
@@ -297,11 +312,13 @@ export function validateSmartKey(raw) {
             });
             continue;
         }
+        const decomposed = decomposedFinding(val);
+        if (decomposed) out.push(decomposed);
         if (!coreReadsAsRegex(val)) {
             const hatch = val.includes('"') ? '' : ` If you meant the literal string, quote the term: "${val}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it, so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
+                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
             });
         }
     }
