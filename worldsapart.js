@@ -1003,7 +1003,7 @@ const activationOpts = () => ({
 /** Entries that have fired a latch decorator in this chat. */
 function firedLatches() {
     const ctx = getContext();
-    return matcher.firedAt(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, ctx.chat?.length ?? 0);
+    return matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, ctx.chat?.length ?? 0);
 }
 
 /** Records the activated entries carrying a latch decorator. */
@@ -1369,7 +1369,10 @@ async function rankOwnedScan(activated, args, skip) {
     const priorityList = charPriority() ?? [];
     const priorityMode = settings().worldPriorityMode;
     const { sticky, constant, promoted, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
-        isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)),
+        // A latched @@keep_activate_after_match is sticky by another name, so it is durable too: hoisted past
+        // the relevance cut rather than scored and cut like an ordinary activation.
+        isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry))
+            || matcher.latchActive(entry, firedLatches(), getContext().chat?.length ?? 0),
         isPromoted: entry => Boolean(entry?.waPromote),
         priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
         priorityMode,

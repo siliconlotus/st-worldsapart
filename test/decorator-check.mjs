@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedAt, firedUpTo, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedUpTo, latchActive, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -225,19 +225,19 @@ const adds = (entries, fired) => activationAdds(entries, win(), opts(fired)).map
 const ent = (uid, waDecorators) => ({ uid, world: 'W', key: ['villa'], waDecorators, content: 'x' });
 
 eq(latchKey({ world: 'W', uid: 3 }), `W${US}3`, 'the latch key is US-separated, per CLAUDE.md');
-eq(adds([ent(1, [])], new Set()), '1', 'an ordinary entry activates on its keyword');
-eq(adds([ent(2, ['@@dont_activate_after_match'])], new Set()), '2',
+eq(adds([ent(1, [])], {}), '1', 'an ordinary entry activates on its keyword');
+eq(adds([ent(2, ['@@dont_activate_after_match'])], {}), '2',
     'a one-shot entry activates the FIRST time: it has not fired yet');
-eq(adds([ent(2, ['@@dont_activate_after_match'])], new Set([`W${US}2`])), '',
+eq(adds([ent(2, ['@@dont_activate_after_match'])], { [`W${US}2`]: 1 }), '',
     '...and never again once recorded');
-eq(adds([ent(3, ['@@keep_activate_after_match'])], new Set([`W${US}3`])), '3',
+eq(adds([ent(3, ['@@keep_activate_after_match'])], { [`W${US}3`]: 1 }), '3',
     'a latched-on entry activates');
 
 // It must activate with no keyword hit at all — that is the whole point.
-const noMatch = activationAdds([ent(4, ['@@keep_activate_after_match'])], () => ['nothing here'], opts(new Set([`W${US}4`])));
+const noMatch = activationAdds([ent(4, ['@@keep_activate_after_match'])], () => ['nothing here'], opts({ [`W${US}4`]: 1 }));
 eq(noMatch.length, 1, 'a latched-on entry activates with no keyword hit');
 
-eq(adds([ent(5, ['@@dont_activate_after_match', '@@keep_activate_after_match'])], new Set([`W${US}5`])), '5',
+eq(adds([ent(5, ['@@dont_activate_after_match', '@@keep_activate_after_match'])], { [`W${US}5`]: 1 }), '5',
     'both decorators: latches ON, as @@activate beats @@dont_activate in CCv3');
 eq(adds([ent(6, ['@@dont_activate_after_match'])], undefined), '6',
     'no latch state at all behaves exactly as before');
@@ -260,16 +260,29 @@ eq(latchBook(''), '', 'an empty key has no book');
 // has not advanced (world-info.js `#checkTimedEffectOfType`).
 const REC = { [`W${US}1`]: 10, [`W${US}2`]: 40, [`X${US}3`]: 25 };
 
-eqDeep([...firedAt(REC, 100)].sort(), [`W${US}1`, `W${US}2`, `X${US}3`].sort(), 'every latch that fired by now');
-eqDeep([...firedAt(REC, 25)].sort(), [`W${US}1`, `X${US}3`].sort(), 'a latch that fires later has not fired yet');
-eqDeep([...firedAt(REC, 10)], [`W${US}1`], 'the firing turn itself counts');
-eqDeep([...firedAt(REC, 9)], [], 'rewound past every firing point: nothing is latched');
-eqDeep([...firedAt(null, 100)], [], 'an absent record is not a crash');
+eqDeep(Object.keys(firedUpTo(REC, 100)).sort(), [`W${US}1`, `W${US}2`, `X${US}3`].sort(), 'every latch that fired by now');
+eqDeep(Object.keys(firedUpTo(REC, 10)), [`W${US}1`], 'the firing turn itself counts');
+eqDeep(Object.keys(firedUpTo(REC, 9)), [], 'rewound past every firing point: nothing is latched');
 
 // The capture writes the MAP, so a bundle sliced to an earlier end can re-filter it; the gate wants the Set.
 eqDeep(firedUpTo(REC, 25), { [`W${US}1`]: 10, [`X${US}3`]: 25 }, 'the record as it stood at a given turn');
 eqDeep(firedUpTo(REC, 9), {}, 'nothing had fired yet');
 eqDeep(firedUpTo(null, 100), {}, 'an absent record is not a crash');
+
+// @@keep_activate_after_match is sticky by another name, so layoutOrder treats it as durable. WA extends it
+// with an optional duration, bare staying CCv3's "in any case".
+const keepE = (uid, arg = '') => ({ uid, world: 'W', key: ['villa'], content: `@@keep_activate_after_match${arg}\nx` });
+const REC1 = { [`W${US}1`]: 10 };
+
+eq(latchActive(keepE(1), REC1, 10), true, 'bare: active on the turn it fired');
+eq(latchActive(keepE(1), REC1, 9999), true, 'bare: active forever after');
+eq(latchActive(keepE(1), {}, 50), false, 'not fired yet, so not active');
+eq(latchActive(keepE(1, ' 5'), REC1, 15), true, 'a duration is still inside its window at fired + N');
+eq(latchActive(keepE(1, ' 5'), REC1, 16), false, '...and expires past it');
+eq(latchActive(keepE(1, ' 0'), REC1, 10), true, 'a duration of 0 lasts the firing turn only');
+eq(latchActive(keepE(1, ' 0'), REC1, 11), false, '...and is over the next turn');
+eq(latchActive({ uid: 1, world: 'W', key: ['villa'], content: 'no decorator' }, REC1, 10), false,
+    'an entry without the decorator is never latch-active');
 
 // Deleting a book prunes its latch keys from the open chat's record; the undo puts them back, so the
 // prune has to hand back what it removed rather than only what it kept.

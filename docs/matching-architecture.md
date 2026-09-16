@@ -162,6 +162,15 @@ import (it survives only in the book's `originalData`) while writing `use_regex:
 on the grounds that "ST keys are always regex" — which they are not, being substrings unless written
 `/re/`.
 
+**A latched `@@keep_activate_after_match` is durable**, sorted with `constant` and armed sticky by
+`layoutOrder` rather than scored and cut like an ordinary activation. It is sticky by another name — "in
+the prompt by intent rather than because relevance chose it" — and CCv3's "in any case" is about
+activation, a stage before the cut WA adds. WA extends it with an optional duration,
+`@@keep_activate_after_match 5`, which the record's firing turn makes free: active while
+`chatLength <= firedAt + N`, and forever when bare. A duration of 0 lasts the firing turn only. CCv3
+defines no value for this decorator, so a reader that validates values may ignore the whole line — the
+bare form is the portable one.
+
 **The latch decorators** (`@@dont_activate_after_match`, `@@keep_activate_after_match`) need per-chat,
 per-entry state that survives WA being switched off, so they are not desugared to core's `sticky`/
 `cooldown`: core deletes a stored timed effect the moment the entry's own field is absent, and the
@@ -210,6 +219,8 @@ mandates. Four discard something the author wrote.
 | `@@role` implies at-depth when no position decorator appears | WA — CCv3 silent | nothing |
 | an explicit `@@position` beats `@@role`'s implied at-depth | WA — CCv3 silent | **the `@@role` line, dropped** |
 | both latch decorators present: latches ON | WA, modelled on CCv3's `@@activate` precedence | **`@@dont_activate_after_match`** |
+| a latched `@@keep_activate_after_match` is durable | WA — CCv3 has no delivery stage to rule on | nothing |
+| `@@keep_activate_after_match` takes an optional duration | WA extends CCv3, which defines no value | portability: a strict reader may ignore a decorator whose value it calls invalid |
 | `@@position personality\|scenario` -> after char defs | WA — no ST slot | exact placement |
 | `@@additional_keys`/`@@exclude_keys` | WA — CCv3 silent | **an authored `keysecondary` and `selectiveLogic`** |
 | both key decorators read as gates, never as extra triggers | WA — CCv3 is incoherent here | the `use_regex` reading; every authored line is still honoured |

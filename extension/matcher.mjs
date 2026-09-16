@@ -992,12 +992,11 @@ export function gateVerdict(entry, opts = {}) {
     // latched-on entry is not exempt. `&&`, not `!= null`: delay 0 means no delay, as core's `if (!entry.delay)` reads it.
     if (entry?.delay && Number(opts.chatLength ?? Infinity) < Number(entry.delay)) return 'skip';
 
-    if (opts.fired instanceof Set && opts.fired.has(latchKey(entry))) {
-        // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and keeps only
-        // names prefix-matching its own two. Both present latches ON, as @@activate beats @@dont_activate.
-        if (decoratorFor(entry, '@@keep_activate_after_match') !== null) return 'admit';
-        if (decoratorFor(entry, '@@dont_activate_after_match') !== null) return 'skip';
-    }
+    // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and keeps only
+    // names prefix-matching its own two. Both present latches ON, as @@activate beats @@dont_activate.
+    if (opts.fired && latchActive(entry, opts.fired, opts.chatLength)) return 'admit';
+    if (opts.fired && latchKey(entry) in opts.fired && decoratorFor(entry, '@@keep_activate_after_match') === null
+        && decoratorFor(entry, '@@dont_activate_after_match') !== null) return 'skip';
 
     const onlyAfter = decoratorCount(entry, '@@activate_only_after');
     if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) return 'skip';   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0
@@ -1034,8 +1033,16 @@ export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F
 export const firedUpTo = (record, chatLength) => Object.fromEntries(
     Object.entries(record ?? {}).filter(([, at]) => Number(at) <= Number(chatLength)));
 
-/** The same, as the key Set the activation gate reads. */
-export const firedAt = (record, chatLength) => new Set(Object.keys(firedUpTo(record, chatLength)));
+/** Whether `@@keep_activate_after_match` still holds this entry in: it has fired, and either carries no
+ *  duration (WA's extension — bare is CCv3's "in any case") or the chat is still inside it. Sticky by
+ *  another name, so `layoutOrder` treats it as durable. */
+export function latchActive(entry, record, chatLength) {
+    if (decoratorFor(entry, '@@keep_activate_after_match') === null) return false;
+    const at = (record ?? {})[latchKey(entry)];
+    if (at === undefined) return false;
+    const n = decoratorCount(entry, '@@keep_activate_after_match');
+    return n === null || Number(chatLength) <= Number(at) + n;   // `=== null`, not falsy: a duration of 0 expires at once
+}
 
 /** A latch record split by book: `kept` for the record to write back, `dropped` for the delete's undo to
  *  restore. Both halves, because a prune that returns only what it keeps cannot be undone. */

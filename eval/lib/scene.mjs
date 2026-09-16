@@ -401,7 +401,10 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     // The gate inputs ride the scene so every makeCandidateSet caller gets them from its `{...scene}` spread.
     // Read off the sample's scene entry when it has one (schemaVersion 3.1), else off the sample itself.
     const sc = (S.scenes ?? [])[0] ?? S;
-    const gates = { assistantCount: sc.assistantCount, greetingIndex: sc.greetingIndex, personaName: sc.personaName, firedLatches: sc.firedLatches };
+    // chatLength IS sceneEnd at the frozen turn: a chat of length L ends at file record L, the header being 0.
+    const frozen = Number(sc.sceneEnd ?? S.generatedFrom?.msg);
+    const gates = { assistantCount: sc.assistantCount, greetingIndex: sc.greetingIndex, personaName: sc.personaName,
+        firedLatches: sc.firedLatches, chatLength: Number.isFinite(frozen) ? frozen : undefined };
     return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, embedModel: embedModelOf(S), modelLabel, chunkCfg: chunkConfig(S), gates };
 }
 
@@ -523,7 +526,8 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             assistantCount: gates.assistantCount,
             greetingIndex: gates.greetingIndex,
             personaName: gates.personaName,
-            fired: gates.firedLatches === undefined ? undefined : new Set(Object.keys(gates.firedLatches ?? {})),
+            chatLength: gates.chatLength,
+            fired: gates.firedLatches,   // the record, not a key set: a duration reads the firing turn
         };
         const missing = matcher.unmodelledGates(entries, gateOpts);
         if (missing.length) {
