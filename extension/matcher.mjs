@@ -1110,14 +1110,18 @@ export function decoratorFields(entry, ctx = {}) {
         if ((arg = decoratorArg(line, '@@additional_keys')) !== null) {
             // splitKeys, not split(","): a /regex/ or a "quoted" argument keeps its commas, as every key list does.
             const list = splitKeys(arg);
-            if (list.length && !additional) additional = list;
+            // CCv3 allows this decorator more than once, so the lists accumulate; not a field write, so
+            // first-write-wins does not reach it.
+            if (list.length) additional = [...(additional ?? []), ...list];
             continue;
         }
 
         if ((arg = decoratorArg(line, '@@exclude_keys')) !== null) {
             // splitKeys, not split(","): a /regex/ or a "quoted" argument keeps its commas, as every key list does.
             const list = splitKeys(arg);
-            if (list.length && !excluded) excluded = list;
+            // CCv3 allows this decorator more than once, so the lists accumulate; not a field write, so
+            // first-write-wins does not reach it.
+            if (list.length) excluded = [...(excluded ?? []), ...list];
             continue;
         }
     }

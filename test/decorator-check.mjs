@@ -160,6 +160,13 @@ eqDeep(keys('@@additional_keys "storm, heavy", rain\nx').keysecondary, ['"storm,
     'a "quoted" argument keeps its commas');
 eqDeep(keys('@@additional_keys ? a && "x, y"\nx').keysecondary, ['? a && "x, y"'],
     'a ? SmartKey argument survives whole, for keyNode to parse');
+
+// CCv3 allows both of these more than once on one entry, so their lists accumulate. This is not a
+// competing write to one field, so first-write-wins does not reach it.
+eqDeep(keys('@@additional_keys storm\n@@additional_keys rain\nx').keysecondary, ['storm', 'rain'],
+    'a repeated @@additional_keys accumulates');
+eqDeep(keys('@@exclude_keys dream\n@@exclude_keys fog\nx').keysecondary, ['dream', 'fog'],
+    '...and so does a repeated @@exclude_keys');
 console.log('ok   each key decorator alone maps to keysecondary');
 
 // --- together, ST cannot express both, so WA compiles one SmartKey
