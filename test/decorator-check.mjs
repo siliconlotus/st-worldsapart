@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -59,3 +59,74 @@ eqDeep(patch('@@position nowhere\nx'), {}, 'an unknown position value is ignored
 eqDeep(patch('@@scan_depth -1\nx'), {}, 'a negative scan depth is out of range');
 eqDeep(patch('x'), {}, 'no decorators is an empty patch, not a patch of defaults');
 console.log('ok   refusals: unparseable, out of range, and not implemented');
+
+// --- @@activate_only_after counts ASSISTANT messages. WA gates activation on it directly; it is not
+// mapped onto core's `delay`, which counts chat length.
+const winA = () => () => ['the villa burned'];
+const after = (n, assistantCount) => activationAdds(
+    [{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_after ${n}\nx` }],
+    winA(), { assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
+).length;
+
+eq(after(2, 1), 0, 'one assistant message of two required: not activated');
+eq(after(2, 2), 1, 'the count is reached: activated');
+eq(after(2, 9), 1, 'and stays activated after it');
+eq(after(0, 0), 1, 'zero is no gate at all');
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@activate_only_after abc\nx' }],
+    winA(), { assistantCount: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+    'an unparseable count is ignored, so the entry is ungated');
+eq(activationAdds([{ uid: 3, world: 'W', key: ['villa'], content: '@@activate_only_after 5\nx' }],
+    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+    'no assistantCount in opts at all leaves the gate off, as before');
+console.log('ok   @@activate_only_after gates activation on the assistant message count');
+
+// --- @@is_greeting gates on WHICH greeting is active: message 0's swipe_id, since getFirstMessage builds
+// swipes as [first_mes, ...alternate_greetings] (script.js:7723).
+const greet = (n, greetingIndex) => activationAdds(
+    [{ uid: 1, world: 'W', key: ['villa'], content: `@@is_greeting ${n}\nx` }],
+    winA(), { greetingIndex, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
+).length;
+
+eq(greet(0, 0), 1, 'greeting 0 is first_mes, and the entry asks for it');
+eq(greet(1, 0), 0, 'the entry asks for the first alternate, but first_mes is active');
+eq(greet(1, 1), 1, 'the first alternate is active');
+eq(greet(2, 1), 0, 'a different alternate is active');
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_greeting 1\nx' }],
+    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+    'no greetingIndex in opts at all leaves the gate off, as before');
+console.log('ok   @@is_greeting gates on the active greeting index');
+
+// --- @@activate_only_every: no remainder, and it reuses the count @@activate_only_after needs.
+const every = (n, assistantCount) => activationAdds(
+    [{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_every ${n}\nx` }],
+    winA(), { assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
+).length;
+
+eq(every(3, 3), 1, 'three of three: no remainder, activated');
+eq(every(3, 6), 1, 'six of three: likewise');
+eq(every(3, 4), 0, 'four of three leaves a remainder');
+eq(every(0, 4), 1, 'a zero divisor is refused, so the entry is ungated');
+console.log('ok   @@activate_only_every gates on the remainder');
+
+// --- @@is_user_icon compares the active persona name, ST's name1.
+const icon = (want, personaName) => activationAdds(
+    [{ uid: 1, world: 'W', key: ['villa'], content: `@@is_user_icon ${want}\nx` }],
+    winA(), { personaName, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
+).length;
+
+eq(icon('Mara', 'Mara'), 1, 'the active persona matches');
+eq(icon('Mara', 'Juno'), 0, 'a different persona does not');
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_user_icon Mara\nx' }],
+    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+    'no personaName in opts at all leaves the gate off, as before');
+console.log('ok   @@is_user_icon gates on the active persona name');
+
+// --- the shape activationAdds actually receives: core has stripped content, so the gates read the stash
+// the ST half writes at onEntriesLoaded. Without it @@is_greeting would silently never fire.
+const parsed = { uid: 1, world: 'W', key: ['villa'], decorators: [], content: 'The villa',
+    waDecorators: ['@@is_greeting 1'] };
+eq(activationAdds([parsed], winA(), { greetingIndex: 1, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+    'a parsed entry gates off waDecorators, its content having been stripped');
+eq(activationAdds([parsed], winA(), { greetingIndex: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 0,
+    '...and is gated out when the greeting does not match');
+console.log('ok   the gates read the stash on a parsed entry');

@@ -11,6 +11,7 @@ import {
     substituteParams,
     getExtensionPromptByName,
     extension_prompt_types,
+    name1,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
 import { t } from '../../../i18n.js';
@@ -825,6 +826,7 @@ function onEntriesLoaded(loaded) {
 
     // Read here and nowhere else: this hook is the last place the `@@` lines still exist. Ungated, a promotion being a property of the entry.
     for (const entry of entries) entry.waPromote = matcher.hasPromoteDecorator(entry);
+    for (const entry of entries) entry.waDecorators = matcher.resolveDecorators(entry?.content);
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
     if (settings().enabled && !runState.generationIsDryRun) {
@@ -979,6 +981,10 @@ const activationOpts = () => ({
     fallbackDepth: world_info_depth,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
+    assistantCount: (runState.scanChat ?? []).filter(m => m && !m.is_user && !m.is_system).length,
+    // Message 0's swipe_id IS the greeting index; a card with no alternates has no swipes array.
+    greetingIndex: getContext().chat?.[0]?.swipe_id ?? 0,
+    personaName: name1,
 });
 
 /** The chat WA reads with the `dropChatTags` elements gone — the one strip, at intake. Copies, never an edit of ST's

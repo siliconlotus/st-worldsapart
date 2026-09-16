@@ -929,6 +929,25 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
 export const scanDepthFor = (entry, messageDepth, fallbackDepth = 0, depthSkew = 0) =>
     Number(entry?.scanDepth ?? ((messageDepth || fallbackDepth) + (depthSkew || 0)));
 
+/** An entry's decorator lines: the stash the ST half writes before core strips them, else raw content. */
+const entryDecorators = entry =>
+    (Array.isArray(entry?.waDecorators) ? entry.waDecorators : resolveDecorators(entry?.content));
+
+/** The raw argument of the entry's first `name` decorator, or null when it carries none. */
+function decoratorFor(entry, name) {
+    for (const line of entryDecorators(entry)) {
+        const arg = decoratorArg(line, name);
+        if (arg !== null) return arg;
+    }
+    return null;
+}
+
+/** Same, as a whole number; null when absent or unparseable. */
+const decoratorCount = (entry, name) => {
+    const arg = decoratorFor(entry, name);
+    return arg === null ? null : wholeNumber(arg);
+};
+
 /** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled, `constant` and
  *  `@@dont_activate`; `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives. */
 export function activationAdds(entries, windowFor, opts = {}) {
@@ -938,6 +957,19 @@ export function activationAdds(entries, windowFor, opts = {}) {
         // `@@activate` is core's to honour, like `constant`: WA leaves those keys unblanked and core's ladder reaches it
         // at a step above `@@dont_activate`, so forcing it again here would be noise (CCv3 gives `@@activate` precedence).
         if (hasDecorator(entry, '@@dont_activate') || hasDecorator(entry, '@@activate')) continue;
+
+        const onlyAfter = decoratorCount(entry, '@@activate_only_after');
+        if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) continue;
+
+        const onlyGreeting = decoratorCount(entry, '@@is_greeting');
+        if (onlyGreeting !== null && opts.greetingIndex !== undefined && opts.greetingIndex !== onlyGreeting) continue;
+
+        const everyN = decoratorCount(entry, '@@activate_only_every');
+        if (everyN && Number(opts.assistantCount ?? 0) % everyN !== 0) continue;
+
+        const wantsPersona = decoratorFor(entry, '@@is_user_icon');
+        if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) continue;
+
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;
         const depth = scanDepthFor(entry, opts.messageDepth, opts.fallbackDepth, opts.depthSkew);
