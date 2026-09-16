@@ -77,17 +77,17 @@ itself — before anything in the numbered stages runs. It runs beside the `waPr
 point the lines still exist (core strips them at `parseDecorators`), and before the key stash, so
 `waKeys`/`waSecondary` capture the desugared `keysecondary`. **Gated on `settings().enabled`**: with WA
 off, nothing is written and the install behaves exactly as it would with WA not installed. ST's own dry
-runs are not excluded — the core-readable fields apply there too — only the compiled SmartKey below is
-further gated.
+runs are not excluded: every field the desugar writes is one core reads natively, so a dry run's token
+count reflects what the real generation will produce.
 
 `resolveDecorators` walks the leading run and keeps the names in `WA_DECORATORS` (core's two, `@@promote`,
-and the thirteen below), applying core's own `@@@` fallback chain: a `@@@name` line counts only when the
+and the fourteen it recognises), applying core's own `@@@` fallback chain: a `@@@name` line counts only when the
 line before it was unrecognised. `decoratorFor` reads the stash (`entry.waDecorators`) on a parsed entry,
 never core's own `decorators` field. `hasDecorator` reads `decorators` first and falls back to raw
 content; every live call passes one of core's own two names, for which `decorators` is authoritative.
 
 `decoratorFields(entry, ctx)` is pure and returns a field patch, `{}` when none apply; `ctx` is
-`{ chatLength, smartKeys }`. `onEntriesLoaded` applies it with `Object.assign`.
+`{ chatLength }`. `onEntriesLoaded` applies it with `Object.assign`.
 
 | decorator | patch |
 |---|---|
@@ -102,7 +102,7 @@ content; every live call passes one of core's own two names, for which `decorato
 | `@@is_user_icon NAME` | not a field: an `activationAdds` gate — see below |
 | `@@additional_keys a,b` | alone: `keysecondary`, `selectiveLogic: AND_ANY` |
 | `@@exclude_keys c,d` | alone: `keysecondary`, `selectiveLogic: NOT_ANY` |
-| both of the above | one compiled SmartKey in `key` — see below |
+| both of the above | `keysecondary` + `AND_ANY`, plus a WA-only `waExcludeKeys` — see below |
 | `@@dont_activate_after_match` | WA-owned latch — see below |
 | `@@keep_activate_after_match` | WA-owned latch — see below |
 
@@ -112,12 +112,13 @@ decorator is ignored rather than applying a clamped or default value.
 
 **The decorator wins over a field the entry also sets.** An importer or the Studio can leave `position`
 and `depth` at their defaults; the patch overwrites them, because the decorator is what the author wrote.
-`@@additional_keys`/`@@exclude_keys` alone does the same to a larger pair: the patch overwrites an
-authored `keysecondary` and `selectiveLogic` outright. The compiled branch (both present) does not —
-it writes no `keysecondary`, so an authored secondary gate still composes on top.
+`@@additional_keys`/`@@exclude_keys` does the same to a larger pair: the patch overwrites an authored
+`keysecondary` and `selectiveLogic` outright, whether one of them is present or both.
 
 **Conflicts.** Decorators run in document order and the first write to a field wins; a later decorator
-never overwrites an earlier one, including a repeat of the same decorator. This covers `@@depth` against
+never overwrites an earlier one. The exception is `@@additional_keys` and `@@exclude_keys`, which CCv3
+allows more than once: their lists accumulate, since two lines are not competing writes to one field.
+A `@@@` fallback is the usual way a repeat arises, an author guarding an app-specific decorator. This covers `@@depth` against
 `@@position` — both write `position`, and an entry cannot be in two places — and reads left-to-right like
 the `@@@` chain. Three cases sit outside it:
 
@@ -134,23 +135,32 @@ the `@@@` chain. Three cases sit outside it:
   - `@@role` with a non-at-depth `@@position`: the position wins and `role` is not written.
 
 **The key pair.** `selectiveLogic` holds one value, so core cannot express `@@additional_keys` and
-`@@exclude_keys` at once; WA's SmartKeys can (`OPS`, `smartkeys.mjs`). With both present, `key` is
-REASSIGNED to one compiled SmartKey:
+`@@exclude_keys` at once. `@@additional_keys` keeps the core-native mapping and the exclusions ride on a
+WA-only `waExcludeKeys`; `selectiveEval` ANDs one NOT per excluded key onto the tree `synthesizeSecondary`
+already builds, so the gate is composed where it is evaluated rather than serialised into a key.
 
-    ? (<original keys, OR-joined>) && (a || b) && -(c || d)
+The entry's own keys are never rewritten. `keyNode` turns each into a leaf whatever it holds — a `?` key
+splices in as a subtree, a `/re/` key becomes a REGEX node, anything else a literal — so a key containing
+a quote, an operator or a weight sigil needs no quoting and has no unrepresentable case. The cache id
+`selectiveEval` builds joins both lists and the length of the first, or two entries differing only in
+which list a key sits in would share a tree.
 
-Compiling the original keys into terms quotes a key containing spaces, passes a `/regex/` key through
-unchanged, and unwraps and parenthesises a key that is itself a SmartKey. With only one of the pair
-present, the `keysecondary` + `selectiveLogic` mapping is used instead — core-compatible, since the
-escalation is only for the case core cannot represent.
+Core needs no fallback branch: it reads the native `keysecondary` and `selectiveLogic` and honours
+`@@additional_keys` unaided, ignoring `waExcludeKeys` as an unknown field. So on ST's dry run, or with
+core matching for any other reason, the entry is gated by the additional keys alone rather than being
+unreachable.
 
-**This one write is gated; everything else in the desugar is not.** Core does not understand SmartKeys —
-a `?` key reaches `countKey` only when WA owns the scan — so the compiled key is written only when
-`ctx.smartKeys` (`!runState.generationIsDryRun`), not `waOwnsScan`: WA's own `getSortedEntries` calls
-also need the compiled key, and gating on `waOwnsScan` would hand that path the core-compatible fallback
-instead. On ST's dry run the fallback branch (`keysecondary` + `AND_ANY`) applies, moving the entry's
-match at most by the entries carrying both key decorators; core still reads `key` and `keysecondary`
-there, so the entry is never unreachable.
+**Both decorators are read as gates unconditionally.** CCv3 gives them a second reading under the
+entry's `use_regex` field, where `@@additional_keys` becomes an alternative trigger — appended to `keys`
+rather than required alongside them — and `@@exclude_keys` and `secondary_keys` are ignored outright. WA
+does not implement that reading, for three reasons. The spec couples the two concerns when they are
+orthogonal: how a key is matched says nothing about whether a decorator narrows or widens, and ST
+demonstrates this by gating `/re/` keys with `keysecondary` perfectly well. The gate reading is the one
+the decorators' own prohibition-shaped sentences describe, and the only one under which `@@exclude_keys`
+exists at all. And the flag that would select between them is unreliable here: ST drops `use_regex` on
+import (it survives only in the book's `originalData`) while writing `use_regex: true` on every export,
+on the grounds that "ST keys are always regex" — which they are not, being substrings unless written
+`/re/`.
 
 **The latch decorators** (`@@dont_activate_after_match`, `@@keep_activate_after_match`) need per-chat,
 per-entry state that survives WA being switched off, so they are not desugared to core's `sticky`/
@@ -192,17 +202,17 @@ re-fire.
 ### Rulings
 
 Each ruling below is a judgement where CCv3 is silent or core cannot comply — not something the spec
-mandates. Three discard something the author wrote.
+mandates. Four discard something the author wrote.
 
 | ruling | authority | what is lost |
 |---|---|---|
-| document order, first write to a field wins | WA — CCv3 silent | the later duplicate, or `@@position` after `@@depth` |
+| document order, first write to a field wins | WA — CCv3 silent | **the later duplicate, or `@@position` after `@@depth`** |
 | `@@role` implies at-depth when no position decorator appears | WA — CCv3 silent | nothing |
 | an explicit `@@position` beats `@@role`'s implied at-depth | WA — CCv3 silent | **the `@@role` line, dropped** |
-| both latch decorators present: latches ON | WA, modelled on CCv3's `@@activate` precedence | `@@dont_activate_after_match` |
+| both latch decorators present: latches ON | WA, modelled on CCv3's `@@activate` precedence | **`@@dont_activate_after_match`** |
 | `@@position personality\|scenario` -> after char defs | WA — no ST slot | exact placement |
-| key pair: SmartKey under WA, `keysecondary` otherwise | WA — ST cannot express both | **`@@exclude_keys`, in the fallback branch** |
-| `@@additional_keys`/`@@exclude_keys` alone | WA — CCv3 silent | **an authored `keysecondary` and `selectiveLogic`** |
+| `@@additional_keys`/`@@exclude_keys` | WA — CCv3 silent | **an authored `keysecondary` and `selectiveLogic`** |
+| both key decorators read as gates, never as extra triggers | WA — CCv3 is incoherent here | the `use_regex` reading; every authored line is still honoured |
 | `@@activate_only_after` counted over assistant messages | CCv3's own wording; ST's `delay` differs | nothing |
 | `@@ignore_on_max_context` not implemented | WA — already the default | nothing |
 | `@@activate` beats `@@dont_activate` | CCv3 | — |
