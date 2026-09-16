@@ -262,7 +262,7 @@ meant. The last row applies to a bare `/regex/` key as well.
 
 Whether a term ever occurs in your book is a different question, and the audit answers it. The Studio's
 Key Lab answers it against any text you paste or load. It reports keyword hits only — probability,
-delay, cooldown, inclusion groups, character and tag filters, `@@activate`/`@@dont_activate`, recursion
+delay, cooldown, inclusion groups, character and tag filters, decorators, recursion
 and vector retrieval are not applied — so a key that hits there has not necessarily activated its entry.
 
 ---

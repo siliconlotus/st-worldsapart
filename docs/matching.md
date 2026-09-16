@@ -82,8 +82,9 @@ further gated.
 
 `resolveDecorators` walks the leading run and keeps the names in `WA_DECORATORS` (core's two, `@@promote`,
 and the thirteen below), applying core's own `@@@` fallback chain: a `@@@name` line counts only when the
-line before it was unrecognised. `decoratorFor`/`hasDecorator` read the stash (`entry.waDecorators`) on
-a parsed entry, never core's own `decorators` field, which keeps only names prefix-matching core's two.
+line before it was unrecognised. `decoratorFor` reads the stash (`entry.waDecorators`) on a parsed entry,
+never core's own `decorators` field. `hasDecorator` reads `decorators` first and falls back to raw
+content; every live call passes one of core's own two names, for which `decorators` is authoritative.
 
 `decoratorFields(entry, ctx)` is pure and returns a field patch, `{}` when none apply; `ctx` is
 `{ chatLength, smartKeys }`. `onEntriesLoaded` applies it with `Object.assign`.
@@ -111,6 +112,9 @@ decorator is ignored rather than applying a clamped or default value.
 
 **The decorator wins over a field the entry also sets.** An importer or the Studio can leave `position`
 and `depth` at their defaults; the patch overwrites them, because the decorator is what the author wrote.
+`@@additional_keys`/`@@exclude_keys` alone does the same to a larger pair: the patch overwrites an
+authored `keysecondary` and `selectiveLogic` outright. The compiled branch (both present) does not —
+it writes no `keysecondary`, so an authored secondary gate still composes on top.
 
 **Conflicts.** Decorators run in document order and the first write to a field wins; a later decorator
 never overwrites an earlier one, including a repeat of the same decorator. This covers `@@depth` against
@@ -169,8 +173,10 @@ distinction core makes building `coreChat`) — never core's `delay`, which coun
 regardless of speaker, and no fixed number converts one into the other. **Ceiling:** the gate and the scan
 window are independent, so an entry can become eligible after its trigger has already scrolled out of the
 window — a property of the decorator itself, not of this mapping. `@@is_greeting` reads the active
-greeting off `chat[0].swipe_id` (`?? 0` when the card has no alternates). `@@activate_only_every 0` and
-any other out-of-range argument are refused, not treated as a gate of zero.
+greeting off `chat[0].swipe_id` (`?? 0` when the card has no alternates). A card whose `first_mes` is
+empty has `getFirstMessage` shift its swipe array, so `swipe_id` sits one below the CCv3 greeting index
+for that card. `@@activate_only_every 0` and any other out-of-range argument are refused, not treated as
+a gate of zero.
 
 **`@@activate` and `@@dont_activate`, core's own two, keep their existing precedence: `activationAdds`
 skips an entry carrying either** — `@@activate` is core's to honour like `constant`, and forcing it again
@@ -196,6 +202,7 @@ mandates. Three discard something the author wrote.
 | both latch decorators present: latches ON | WA, modelled on CCv3's `@@activate` precedence | `@@dont_activate_after_match` |
 | `@@position personality\|scenario` -> after char defs | WA — no ST slot | exact placement |
 | key pair: SmartKey under WA, `keysecondary` otherwise | WA — ST cannot express both | **`@@exclude_keys`, in the fallback branch** |
+| `@@additional_keys`/`@@exclude_keys` alone | WA — CCv3 silent | **an authored `keysecondary` and `selectiveLogic`** |
 | `@@activate_only_after` counted over assistant messages | CCv3's own wording; ST's `delay` differs | nothing |
 | `@@ignore_on_max_context` not implemented | WA — already the default | nothing |
 | `@@activate` beats `@@dont_activate` | CCv3 | — |
@@ -415,8 +422,11 @@ discard the entry anyway and an unchecked emit would only make WA's own captures
 shipped. With core's matcher blanked, an entry WA declines to emit has no other route in.
 
 **`keywordActivations`** fetches the candidates with live keys, registers every usable key and secondary
-once, and calls `activationAdds`: for each enabled, non-constant entry without `@@dont_activate`, the
-window at its depth, and the verdict is whether `keywordScore` reports any hit. The window
+once, and calls `activationAdds`: for each enabled, non-constant entry without `@@dont_activate`/`@@activate`
+that clears an unarrived `delay` and every conditional gate it carries (`@@activate_only_after`,
+`@@is_greeting`, `@@activate_only_every`, `@@is_user_icon`), the verdict is whether `keywordScore` reports
+any hit in the window at its depth — except a `@@keep_activate_after_match` entry that has already fired,
+which is admitted with no keyword hit at all. The window
 (`makeWindowFor`) is the chat minus `is_system` messages at depth, plus every `scan: true` extension
 prompt that is ambient (not `IN_CHAT`) or placed inside the depth, plus the sources the entry opted into
 (persona, character description, personality, depth prompt, scenario, creator notes), each its own

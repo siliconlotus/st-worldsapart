@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, latchKey, latchBook, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, latchKey, latchBook, hasLatch, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -21,6 +21,12 @@ eqDeep(patch('@@position after_desc\nx'), { position: WI_POSITION.after }, 'afte
 eqDeep(patch('@@position personality\nx'), { position: WI_POSITION.after }, 'personality has no ST slot: nearest anchor');
 eqDeep(patch('@@position scenario\nx'), { position: WI_POSITION.after }, 'scenario likewise');
 console.log('ok   the scalar mappings');
+
+// --- the shape decoratorFields actually receives on a parsed entry: core has stripped content, so it
+// must read the waDecorators stash, like activationAdds's gates below. Without it, this returns {} in silence.
+eqDeep(decoratorFields({ key: ['k'], content: 'The villa', decorators: [], waDecorators: ['@@depth 3'] }, { chatLength: 0 }),
+    { position: WI_POSITION.atDepth, depth: 3 }, 'a parsed entry patches off waDecorators, its content having been stripped');
+console.log('ok   decoratorFields reads the stash on a parsed entry');
 
 // --- the decorator beats a field the entry also sets
 eqDeep(patch('@@depth 0\nx', { position: 1, depth: 4 }), { position: WI_POSITION.atDepth, depth: 0 },
@@ -188,6 +194,11 @@ eq(keys('@@additional_keys Xor\n@@exclude_keys dream\nx').key?.[0],
 const compiledOnce = keys('@@additional_keys storm\n@@exclude_keys dream\nx').key[0];
 eqDeep(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: [compiledOnce] }), {},
     're-running over an already-compiled key does not nest it, nor fall back to keysecondary');
+
+eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['=weird'] }).key?.[0],
+    '? ("=weird") && (storm) && -(dream)', 'a key starting with = is quoted so smartkeys.mjs\'s flag prefix does not eat it');
+eq(keys('@@additional_keys storm\n@@exclude_keys dream\nx', { key: ['HP::100'] }).key?.[0],
+    '? ("HP::100") && (storm) && -(dream)', 'a key ending in ::N is quoted so smartkeys.mjs\'s weight suffix does not eat it');
 console.log('ok   review fixes: quote refusal, suffix-matched idempotence, filtered additional/exclude keys, reserved words');
 
 // --- the patch is applied to loadWorldInfo's cached objects, so it must be scalars or whole-array
@@ -242,6 +253,12 @@ eq(adds([ent(5, ['@@dont_activate_after_match', '@@keep_activate_after_match'])]
     'both decorators: latches ON, as @@activate beats @@dont_activate in CCv3');
 eq(adds([ent(6, ['@@dont_activate_after_match'])], undefined), '6',
     'no latch state at all behaves exactly as before');
+
+// The delay guard must run above the latch hoist: core drops a matched entry for an unarrived delay
+// before WA's own emit ever reaches it, so the hoist must not exempt a latched-on entry from it.
+const delayed = { ...ent(7, ['@@keep_activate_after_match']), delay: 50 };
+eq(activationAdds([delayed], win(), { ...opts(new Set([`W${US}7`])), chatLength: 10 }).length, 0,
+    'a latched-on entry whose delay has not arrived is not emitted');
 console.log('ok   the latch decorators, read from WA\'s own record');
 
 // --- latchBook: the deleted-book prune's pure half (st/studio.mjs deleteBooks reads the current
@@ -250,3 +267,12 @@ eq(latchBook(`W${US}3`), 'W', 'the book is the segment before the US');
 eq(latchBook(`My Book${US}12`), 'My Book', 'a book name may itself contain spaces');
 eq(latchBook(''), '', 'an empty key has no book');
 console.log('ok   latchBook recovers the book name from a latch key');
+
+// --- hasLatch: the one predicate for "carries a latch decorator", shared by the activationAdds gate and
+// worldsapart.js's recordLatches.
+eq(hasLatch(ent(8, ['@@dont_activate_after_match'])), true, 'dont_activate_after_match carries a latch');
+eq(hasLatch(ent(9, ['@@keep_activate_after_match'])), true, 'keep_activate_after_match carries a latch');
+eq(hasLatch(ent(10, ['@@dont_activate_after_match', '@@keep_activate_after_match'])), true, 'both still carries a latch');
+eq(hasLatch(ent(11, [])), false, 'no decorators carries no latch');
+eq(hasLatch(ent(12, ['@@activate'])), false, 'an unrelated decorator carries no latch');
+console.log('ok   hasLatch');

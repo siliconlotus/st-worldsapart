@@ -374,3 +374,9 @@ console.log('ok   the @@@ fallback chain follows core\'s grammar');
 eq(res('@@depth 0\n@@@activate\nx').includes('@@activate'), false,
     'WA recognised @@depth, so the @@@activate after it does NOT apply; core, not knowing @@depth, would apply it');
 console.log('ok   the divergence from core that follows from a larger recognised set');
+
+// @@ignore_on_max_context is a deliberate no-op, but it must still be RECOGNISED so it closes the chain
+// like any other WA decorator.
+eq(res('@@ignore_on_max_context\n@@@depth 0\nx').includes('@@depth 0'), false,
+    '@@ignore_on_max_context is recognised, so the @@@depth after it does NOT apply');
+console.log('ok   @@ignore_on_max_context closes the @@@ chain');

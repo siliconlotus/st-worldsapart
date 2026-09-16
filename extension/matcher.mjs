@@ -867,6 +867,7 @@ export const WA_DECORATORS = Object.freeze([
     '@@is_greeting', '@@activate_only_every', '@@is_user_icon',
     '@@additional_keys', '@@exclude_keys',
     '@@dont_activate_after_match', '@@keep_activate_after_match',
+    '@@ignore_on_max_context',
 ]);
 
 /** The leading decorator lines that apply, bare-spelled and in document order.
@@ -948,6 +949,11 @@ const decoratorCount = (entry, name) => {
     return arg === null ? null : wholeNumber(arg);
 };
 
+/** Whether the entry carries either latch decorator, regardless of which. */
+export const hasLatch = entry =>
+    decoratorFor(entry, '@@dont_activate_after_match') !== null
+    || decoratorFor(entry, '@@keep_activate_after_match') !== null;
+
 /** WA's chat_metadata key for the latch record. */
 export const WA_METADATA_KEY = 'worldsApart';
 
@@ -957,8 +963,11 @@ export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1
 /** The book a latch key belongs to — the segment before the US. */
 export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F))[0];
 
-/** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled, `constant` and
- *  `@@dont_activate`; `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives. */
+/** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled,
+ *  `constant`, `@@dont_activate`/`@@activate`, an unarrived `delay`, and any of the four conditional gates
+ *  (`@@activate_only_after`, `@@is_greeting`, `@@activate_only_every`, `@@is_user_icon`) an entry fails.
+ *  `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives — and a fired
+ *  `@@keep_activate_after_match` entry is admitted with no keyword hit at all, past the check below. */
 export function activationAdds(entries, windowFor, opts = {}) {
     const out = [];
     for (const entry of entries ?? []) {
@@ -966,6 +975,11 @@ export function activationAdds(entries, windowFor, opts = {}) {
         // `@@activate` is core's to honour, like `constant`: WA leaves those keys unblanked and core's ladder reaches it
         // at a step above `@@dont_activate`, so forcing it again here would be noise (CCv3 gives `@@activate` precedence).
         if (hasDecorator(entry, '@@dont_activate') || hasDecorator(entry, '@@activate')) continue;
+
+        // Above the latch hoist: core drops a matched entry for an unarrived delay before WA's own emit ever reaches
+        // it, so a latched-on entry must not be exempted from the same check. `&&`, not `!= null`: delay 0 means no
+        // delay, as core's `if (!entry.delay)` reads it.
+        if (entry.delay && Number(opts.chatLength ?? Infinity) < Number(entry.delay)) continue;
 
         if (opts.fired instanceof Set && opts.fired.has(latchKey(entry))) {
             // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and
@@ -987,9 +1001,6 @@ export function activationAdds(entries, windowFor, opts = {}) {
 
         const wantsPersona = decoratorFor(entry, '@@is_user_icon');
         if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) continue;   // `!== undefined`, not a truthy check: an empty persona name is still a value
-
-        // `&&`, not `!= null`: delay 0 means no delay, as core's `if (!entry.delay)` reads it.
-        if (entry.delay && Number(opts.chatLength ?? Infinity) < Number(entry.delay)) continue;
 
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;
@@ -1020,7 +1031,7 @@ const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg)
 /** A comma list as trimmed, non-empty strings. */
 const commaList = arg => String(arg ?? '').split(',').map(s => s.trim()).filter(Boolean);
 
-const NEEDS_QUOTING = /[\s()&|!+-]/;
+const NEEDS_QUOTING = /[\s()&|!+-]|^[=^]|(?:::|\^)\d/;
 const RESERVED_WORD = /^(?:AND|OR|NOT|XOR)$/i;
 
 /** One SmartKey term: a regex passes through, a nested SmartKey is unwrapped and grouped, anything holding an
@@ -1044,7 +1055,7 @@ const orGroup = keys => {
 /** The ST field patch an entry's decorators ask for; `{}` when none apply. Pure: mutates nothing.
  *  `ctx` is `{ chatLength, smartKeys }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
 export function decoratorFields(entry, ctx = {}) {
-    const lines = resolveDecorators(entry?.content);
+    const lines = entryDecorators(entry);
     if (!lines.length) return {};
 
     const patch = {};

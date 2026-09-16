@@ -993,7 +993,9 @@ const activationOpts = () => ({
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
     assistantCount: (runState.scanChat ?? []).filter(m => m && !m.is_user && !m.is_system).length,
-    // Message 0's swipe_id IS the greeting index; a card with no alternates has no swipes array.
+    // Raw context chat, NOT runState.scanChat like its neighbours: interceptors receive coreChat, already
+    // is_system-filtered and swipe-popped, so scanChat[0] is not reliably the greeting. Message 0's swipe_id
+    // IS the greeting index; a card with no alternates has no swipes array.
     greetingIndex: getContext().chat?.[0]?.swipe_id ?? 0,
     personaName: name1,
     chatLength: (runState.scanChat ?? []).length,
@@ -1015,10 +1017,7 @@ function recordLatches(entries) {
     const fired = new Set(meta[matcher.WA_METADATA_KEY]?.fired ?? []);
     const before = fired.size;
     for (const entry of entries) {
-        const lines = Array.isArray(entry?.waDecorators) ? entry.waDecorators : matcher.resolveDecorators(entry?.content);
-        if (lines.some(l => matcher.decoratorArg(l, '@@dont_activate_after_match') !== null || matcher.decoratorArg(l, '@@keep_activate_after_match') !== null)) {
-            fired.add(matcher.latchKey(entry));
-        }
+        if (matcher.hasLatch(entry)) fired.add(matcher.latchKey(entry));
     }
     if (fired.size === before) return;
     meta[matcher.WA_METADATA_KEY] = { ...(meta[matcher.WA_METADATA_KEY] ?? {}), fired: [...fired] };
