@@ -959,16 +959,17 @@ export function activationAdds(entries, windowFor, opts = {}) {
         if (hasDecorator(entry, '@@dont_activate') || hasDecorator(entry, '@@activate')) continue;
 
         const onlyAfter = decoratorCount(entry, '@@activate_only_after');
-        if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) continue;
+        if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) continue;   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0
 
         const onlyGreeting = decoratorCount(entry, '@@is_greeting');
+        // `!== undefined`, not a truthy check: greeting 0 (first_mes) is a real, common index
         if (onlyGreeting !== null && opts.greetingIndex !== undefined && opts.greetingIndex !== onlyGreeting) continue;
 
         const everyN = decoratorCount(entry, '@@activate_only_every');
-        if (everyN && Number(opts.assistantCount ?? 0) % everyN !== 0) continue;
+        if (everyN && Number(opts.assistantCount ?? 0) % everyN !== 0) continue;   // `&&`, not `!== null`: `% 0` is NaN, which would gate the entry out silently forever
 
         const wantsPersona = decoratorFor(entry, '@@is_user_icon');
-        if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) continue;
+        if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) continue;   // `!== undefined`, not a truthy check: an empty persona name is still a value
 
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;
