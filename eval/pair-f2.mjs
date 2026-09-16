@@ -2,10 +2,10 @@
 // Usage (any cwd):
 //   node eval/pair-f2.mjs <baseline.json> <arm.json> [--at-recall 0.75]
 import fs from 'node:fs';
-import { signTest } from './lib/metrics.mjs';
+import { signTest, arg as sharedArg } from './lib/metrics.mjs';
 
 const argv = process.argv.slice(2);
-const arg = k => { const i = argv.indexOf(k); return i >= 0 ? (argv[i + 1] ?? null) : null; };
+const arg = k => sharedArg(argv, k);
 // A flag's value is not a positional: without VALUED, --at-recall's number is read as a third file.
 const VALUED = new Set(['--at-recall']);
 const [a, b] = argv.filter((x, i) => !x.startsWith('--') && !VALUED.has(argv[i - 1]));

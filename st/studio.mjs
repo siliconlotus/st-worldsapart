@@ -18,7 +18,7 @@ import { validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
-import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
+import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
 const SEVERITY_COLOR = { severe: '#e06c6c', moderate: '#d9b74a', minor: '#7bbf6a' };
@@ -402,7 +402,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const sortKey = w.querySelector('.wa-bo-sort').value;
         if (SORT_FNS[sortKey]) ordered.sort(SORT_FNS[sortKey]);
         const n = ordered.length;
-        const targetOf = i => start + (desc ? n - 1 - i : i);   // block occupies [start, start+N-1]
+        const targetOf = blockTarget(start, n, desc);
 
         if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
 
@@ -1394,8 +1394,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             await deleteWorldInfo(n);
         }
         // The per-book settings go with the book; restoreBook puts them back when the delete is undone.
-        const forgotten = names.map(n => ({ name: n, sort: settings().studioSortByBook?.[n], ignore: settings().keywordIgnore?.[n] }));
         const s = settings();
+        const forgotten = names.map(n => ({ name: n, sort: s.studioSortByBook?.[n], ignore: s.keywordIgnore?.[n] }));
         for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
         saveSettingsDebounced();
         if (wasOpen) {

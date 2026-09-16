@@ -50,17 +50,6 @@ const INTERNAL_KEYS = [
     'chunkSize', 'chunkMode', 'minChunkSize',
 ];
 
-/** Settings that must be a number, and settings that must be a boolean. A corrupted or hand-edited store used to feed
- *  NaN into the caps and cutoffs, and NaN silently disables every stage that reads it (selection keeps non-finite
- *  scores); `Boolean('false')` is true, so a boolean is defaulted rather than coerced. `llmTemperature` is excluded —
- *  a string by design ('' sends none). */
-const NUMERIC_KEYS = [
-    'chunkSize', 'minChunkSize', 'relevanceCutoff', 'maxVectorEntries', 'properNounBoost', 'stopwordDocFreq',
-    'messageDepth', 'bm25K1', 'repeatR', 'bm25B', 'maxTokensPercent', 'maxTokens', 'budgetSlackPercent',
-    'maxDynamicEntries', 'maxTotalEntries',
-];
-const BOOLEAN_KEYS = ['enabled', 'meanCentered', 'entityFilter', 'dropUnavailable', 'presentationTiered', 'maxTokensIncludesExempt', 'debugLog'];
-
 /** ST's `extension_settings`, bound by ensureSettings; never import it here (CLAUDE.md, *Pure vs ST-coupled*). */
 let store = null;
 
@@ -77,9 +66,12 @@ export function ensureSettings(extensionSettings) {
     // defaultSettings holds, so the first write to one (worldPriorityByChar) edits this module's exported defaults.
     store[MODULE_NAME] = Object.assign(structuredClone(defaultSettings), store[MODULE_NAME]);
     for (const k of INTERNAL_KEYS) store[MODULE_NAME][k] = defaultSettings[k];
+    // A boolean is defaulted, never coerced: `Boolean('false')` is true.
     const s = store[MODULE_NAME];
-    for (const k of NUMERIC_KEYS) { const n = Number(s[k]); s[k] = Number.isFinite(n) ? n : defaultSettings[k]; }
-    for (const k of BOOLEAN_KEYS) if (typeof s[k] !== 'boolean') s[k] = defaultSettings[k];
+    for (const [k, d] of Object.entries(defaultSettings)) {
+        if (typeof d === 'number') { const n = Number(s[k]); s[k] = Number.isFinite(n) ? n : d; }
+        else if (typeof d === 'boolean' && typeof s[k] !== 'boolean') s[k] = d;
+    }
 }
 
 /** Cross-module mutable state. Stays a holder object: an imported `let` cannot be reassigned across modules. */

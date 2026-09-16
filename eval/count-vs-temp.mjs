@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
-import { mean } from './lib/metrics.mjs';
+import { mean, arg as sharedArg } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -13,10 +13,7 @@ const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const LADDER_CACHE = `${HERE}eval-data/temp-ladder-cache.json`;
 const CACHE_PATH = `${HERE}eval-data/count-vs-temp-cache.json`;
 
-const arg = (n, d = null) => {
-    const i = process.argv.indexOf(`--${n}`);
-    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d;
-};
+const arg = (n, d = null) => sharedArg(process.argv, `--${n}`, d);
 const MODEL = arg('model', 'gemma3:4b');
 const COUNT = arg('count', '15 to 25');   // substituted into COUNT_LINE's slot
 const REPEATS = Number(arg('repeats', '3'));

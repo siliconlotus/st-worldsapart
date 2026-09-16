@@ -5,14 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nextBuildVersion, isReleaseVersion, hasBuildCounter, isCounterless } from '../eval/lib/version.mjs';
+import { eq, throws } from '../eval/lib/metrics.mjs';
 
-let failed = 0;
-const eq = (got, want, msg) => {
-    if (got !== want) { failed++; process.exitCode = 1; console.log(`FAIL ${msg}: got ${got}, want ${want}`); }
-};
-const throws = (fn, msg) => {
-    try { fn(); failed++; process.exitCode = 1; console.log(`FAIL ${msg}: did not throw`); } catch { /* expected */ }
-};
 
 eq(nextBuildVersion('1.20.0+build.14'), '1.20.0+build.15', 'counter increments');
 eq(nextBuildVersion('1.20.0+build.9'), '1.20.0+build.10', 'no lexical rollover at 9');
@@ -60,4 +54,4 @@ eq(held.version, '1.20.0', 'the script holds a counterless version');
 eq(held.status, 0, 'holding is not a failure');
 eq(drive('garbage').status !== 0, true, 'the script refuses a version it cannot parse');
 
-if (!failed) console.log('version-check: ok');
+if (process.exitCode !== 1) console.log('version-check: ok');

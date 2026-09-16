@@ -21,7 +21,9 @@ export function inverse(A) {
     return M.map(row => row.slice(n));
 }
 
-export const sigmoid = z => 1 / (1 + Math.exp(-z));
+// Re-exported from the scorer that ships it; a second copy of the link function must never appear here.
+import { sigmoid } from '../../extension/relevance.mjs';
+export { sigmoid };
 
 /**
  * Fits P(y=1) = sigmoid(X·beta) by IRLS. Ridge is small by default (1e-6): it keeps a separated fit finite and visibly

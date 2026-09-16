@@ -106,13 +106,10 @@ function getIndexPath(directories, collectionId, source, model) {
 }
 
 /** The centroid over `uids` (absent or empty = all), memoised on the loaded object; an empty subset falls back to the
- *  full mean rather than NaN. The uid list is the client's, so it is bounded, and the memo is cleared at a cap —
- *  memoising every distinct subset for ever is how the map grew without bound. */
+ *  full mean rather than NaN. */
 const SUBSET_MEANS_MAX = 64;
-const CENTROID_UIDS_MAX = 10000;
 function centroidFor(loaded, uids) {
     if (!Array.isArray(uids) || !uids.length) return loaded.mean;
-    if (uids.length > CENTROID_UIDS_MAX) uids = uids.slice(0, CENTROID_UIDS_MAX);
     loaded.subsetMeans ??= new Map();
     if (loaded.subsetMeans.size >= SUBSET_MEANS_MAX) loaded.subsetMeans.clear();
     const key = uids.join(',');
@@ -291,7 +288,7 @@ export async function init(router) {
     }
 
     router.post('/scan-chats', (request, response) => {
-        scanChain = scanChain.then(() => scanChats(request, response), () => scanChats(request, response));
+        scanChain = scanChain.then(() => scanChats(request, response));
     });
 
     /** `[{ dir, file, world_info, size }]` for EVERY chat, `world_info` null when line 0 names no book; line 0 is all

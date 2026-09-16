@@ -3,17 +3,14 @@
 // Appends one JSONL line per response as it lands and resumes from what is on disk; the queue is entry-outermost, so a partial run covers every arm.
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { mean, fmt3 as fmt } from './lib/metrics.mjs';
+import { mean, fmt3 as fmt, arg as sharedArg } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const BASE = process.env.NANO_BASE_URL ?? 'https://nano-gpt.com/api/v1';
 
-const arg = (n, d = null) => {
-    const i = process.argv.indexOf(`--${n}`);
-    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d;
-};
+const arg = (n, d = null) => sharedArg(process.argv, `--${n}`, d);
 const has = n => process.argv.includes(`--${n}`);
 const MODEL = arg('model');
 const CONC = Number(arg('concurrency', '8'));

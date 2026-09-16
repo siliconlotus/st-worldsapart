@@ -55,6 +55,9 @@ export function wholeWordAdvice(keys, wholeWords, t = plainTag) {
 
 /** A /pattern/flags regex key, as countKey routes them. `[\s\S]`, not `.`: a body may hold a newline, as core's `[\w\W]` admits. */
 export const REGEX_KEY_RE = /^\/([\s\S]+)\/([gimsuy]*)$/;
+/** A key matched by its own text: not a SmartKey, not a regex. */
+export const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
+
 export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
 
 /** Splits a key list on commas and newlines. A `/regex/` and a "quoted" term keep their commas; a `/` that is not the first
@@ -372,7 +375,6 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     // names and count units; `unit` says which.
     messages = chatUnits(messages, { matchWindow, depth, includeNames });
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
-    const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
     // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
     const folded = [...new Set(literals.flatMap(k => keyVariants(k).map(fold)))];

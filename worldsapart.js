@@ -711,16 +711,16 @@ async function keywordActivations(chat) {
 const reportedFailures = new Set();
 
 /**
- * Toasts a generation-time failure with the top stack frame — once per distinct message per session, or on every
- * occurrence when `dedupe` is false, and stuck until dismissed when `sticky` is.
+ * Toasts a generation-time failure with the top stack frame — once per distinct message per session, or, when `loud`,
+ * on every occurrence and stuck until dismissed.
  * @param {string} consequence What the user will observe this turn
  * @param {'error'|'warning'} [severity]
  */
-function reportFailure(stage, consequence, error, severity = 'error', { dedupe = true, sticky = false } = {}) {
+function reportFailure(stage, consequence, error, severity = 'error', loud = false) {
     console.error(`Worlds Apart: ${stage} — ${consequence}`, error);
     const cause = String(error?.message ?? error);
     const key = `${stage}␟${cause}`;
-    if (dedupe && reportedFailures.has(key)) return;
+    if (!loud && reportedFailures.has(key)) return;
     reportedFailures.add(key);
     const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
     // ST sets toastr.options.escapeHtml = true globally, which collapses `\n`; opt out per toast and escape by hand.
@@ -729,7 +729,7 @@ function reportFailure(stage, consequence, error, severity = 'error', { dedupe =
             escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
             t`See the browser console for the full trace.`].join('<br><br>'),
         `Worlds Apart: ${stage}`,
-        { timeOut: sticky ? 0 : 20000, extendedTimeOut: sticky ? 0 : 15000, escapeHtml: false, closeButton: true, tapToDismiss: !sticky },
+        { timeOut: loud ? 0 : 20000, extendedTimeOut: loud ? 0 : 15000, escapeHtml: false, closeButton: true, tapToDismiss: !loud },
     );
 }
 
@@ -1200,7 +1200,7 @@ async function onScanDone(args) {
         delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
         reportFailure(t`activation error`,
             t`Only constant and sticky entries were included. Try again.`,
-            error, 'error', { dedupe: false, sticky: true });
+            error, 'error', true);
     }
 }
 

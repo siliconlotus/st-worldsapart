@@ -2,7 +2,7 @@
 // (buildKeyPruneScan) and the predicates its flags rest on. ST-free; keyword-tools.mjs injects the match flags.
 import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
-import { countKey, countRegexKey, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
+import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
@@ -189,7 +189,6 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const titled = tokens.map((w, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(w.toLowerCase()) ? cap(w) : w)).join(' ');
         return titled === k ? null : titled;
     };
-    const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
     const literalKeys = allKeys.filter(isLiteral);
     const otherKeys = allKeys.filter(k => !isLiteral(k));
     const wantsTitled = new Map(literalKeys.filter(looksLikeFragment).map(k => [k, titledOf(k)]).filter(([, t]) => t));

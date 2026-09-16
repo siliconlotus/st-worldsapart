@@ -1,12 +1,7 @@
 // Guards stage 3's product, the layout order (extension/layout.mjs), on literal rows with no ST and no corpus.
 import { layoutOrder, layoutScore } from '../extension/layout.mjs';
+import { eqDeep as eq } from '../eval/lib/metrics.mjs';
 
-let fails = 0;
-const eq = (got, want, what) => {
-    const ok = JSON.stringify(got) === JSON.stringify(want);
-    if (!ok) fails++;
-    console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}${ok ? `: ${JSON.stringify(got)}` : `: ${JSON.stringify(got)} (want ${JSON.stringify(want)})`}`);
-};
 
 const row = (uid, over = {}) => ({
     eCredit: over.eCredit,
@@ -109,5 +104,4 @@ eq(layoutScore({ eCredit: 0 }), 0, '...and a genuine 0 is not treated as unscore
     eq(uids(none.results), [1, 11, 2, 10], '...and every non-durable row stays dynamic, in score order');
 }
 
-console.log(fails ? `\n${fails} FAILED` : '\nlayout-check: ok');
-process.exit(fails ? 1 : 0);
+if (process.exitCode !== 1) console.log('\nlayout-check: ok');

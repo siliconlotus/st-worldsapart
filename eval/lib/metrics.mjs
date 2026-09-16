@@ -11,8 +11,26 @@ export const eq = (got, want, label) => report(got === want, got, want, label);
 
 export const eqNear = (got, want, label, tol = 1e-9) => report(Math.abs(got - want) < tol, got, want, label);
 
-/** The value after `k` in `argv`, or `d`; a flag with no value is also the default. `argv` is passed in: callers disagree about whether it is sliced. */
-export const arg = (argv, k, d = null) => { const i = argv.indexOf(k); return i >= 0 ? (argv[i + 1] ?? d) : d; };
+/** `eq` for values `===` cannot reach: rows, records, rosters. */
+export const eqDeep = (got, want, label) =>
+    report(JSON.stringify(got) === JSON.stringify(want), JSON.stringify(got), JSON.stringify(want), label);
+
+/** Asserts `fn` throws, and that `match`, when given, is in the message. */
+export const throws = (fn, label, match = '') => {
+    try { fn(); } catch (e) {
+        const msg = String(e?.message ?? e);
+        return report(msg.includes(match), msg, match || 'a throw', label);
+    }
+    report(false, 'no throw', match || 'a throw', label);
+};
+
+/** The value after `k` in `argv`, or `d`. A flag with no value, or followed by another `--flag`, is also the default.
+ *  `argv` is passed in: callers disagree about whether it is sliced. */
+export const arg = (argv, k, d = null) => {
+    const i = argv.indexOf(k);
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v === undefined || v.startsWith('--') ? d : v;
+};
 
 export const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 

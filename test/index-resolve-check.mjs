@@ -2,13 +2,8 @@
 import { chdir, cwd } from 'node:process';
 import { indexPath, loadScene, sceneParams, stInstall } from '../eval/lib/scene.mjs';
 import { dirname, isAbsolute } from 'node:path';
+import { eq, throws } from '../eval/lib/metrics.mjs';
 
-let bad = 0;
-const eq = (got, want, msg) => { if (got !== want) { console.log(`FAIL ${msg}\n  got  ${got}\n  want ${want}`); bad++; } else console.log(`ok   ${msg}`); };
-const throws = (fn, match, msg) => {
-    try { fn(); console.log(`FAIL ${msg} — did not throw`); bad++; }
-    catch (e) { if (e.message.includes(match)) console.log(`ok   ${msg}`); else { console.log(`FAIL ${msg}\n  message lacks "${match}": ${e.message}`); bad++; } }
-};
 
 /** Smallest sample loadScene will accept. `vectorized` is the only field these cases turn on. */
 const sample = (vectorized, extra = {}) => ({
@@ -45,8 +40,8 @@ eq(fromRoot.includes('/eval-data/indexes/'), true,
     'with no local collection, resolution names the rebuildable path rather than an author-machine one');
 
 // --- what a missing collection means ----------------------------------------------------------------
-throws(() => load(sample(true)), 'reindex.mjs',
-    'a book with vectorized entries and no collection fails, and says how to build one');
+throws(() => load(sample(true)),
+    'a book with vectorized entries and no collection fails, and says how to build one', 'reindex.mjs');
 
 eq(load(sample(false)).items.length, 0,
     'a book with nothing to index scores without a collection — no vectors is a configuration, not a fault');
@@ -57,7 +52,7 @@ eq(load(sample(true, { books: { 'Check Book': { 1: { uid: 1, comment: 'One', con
     'an empty vectorized entry does not demand a collection');
 
 // --- the bundle disagreeing with itself ---------------------------------------------------------------
-throws(() => load(sample(false, { primaryBook: 'Renamed Away' })), 'not among its embedded books',
-    'a primaryBook naming no embedded book says so, rather than dying inside Object.values');
+throws(() => load(sample(false, { primaryBook: 'Renamed Away' })),
+    'a primaryBook naming no embedded book says so, rather than dying inside Object.values', 'not among its embedded books');
 
-process.exit(bad ? 1 : 0);
+if (process.exitCode !== 1) console.log('index-resolve-check: ok');

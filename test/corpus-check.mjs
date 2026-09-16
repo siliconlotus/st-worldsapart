@@ -1,18 +1,12 @@
 // corpus-check.mjs — the book roster: the slug a filename derives, and that a missing roster refuses rather than guesses.
 import { evalBooks, toBooks, slugOf, ROSTER as DEFAULT_ROSTER, WORLDS } from '../eval/lib/corpus.mjs';
+import { eqDeep as eq, throws } from '../eval/lib/metrics.mjs';
 import { resolve } from 'node:path';
 import { stInstall } from '../eval/lib/st-install.mjs';
 import { writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-let failed = 0;
-const eq = (got, want, msg) => {
-    if (JSON.stringify(got) !== JSON.stringify(want)) { failed++; process.exitCode = 1; console.log(`FAIL ${msg}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); }
-};
-const throws = (fn, msg) => {
-    try { fn(); failed++; process.exitCode = 1; console.log(`FAIL ${msg}: did not throw`); } catch { /* expected */ }
-};
 
 eq(slugOf('Foxbridge.json'), 'foxbridge', 'the extension goes and the case folds');
 eq(slugOf('My_Book__v2.json'), 'my_book__v2', 'punctuation and digits are kept: the filename is already unique');
@@ -53,4 +47,4 @@ const ST = stInstall();
 eq(WORLDS, ST.resolve('data/default-user/worlds'), "WORLDS is ST's lorebook directory as the install reports it");
 eq(WORLDS.startsWith(ST.dataRoot), true, 'and it sits under dataRoot, so a relocated data directory moves it');
 
-if (!failed) console.log('corpus-check: ok');
+if (process.exitCode !== 1) console.log('corpus-check: ok');

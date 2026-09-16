@@ -29,13 +29,13 @@ import { norm } from '../plugin/vector.mjs';
 import * as queryBuild from '../extension/query.mjs';
 import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
-import { gradeValue } from './lib/metrics.mjs';
+import { gradeValue, arg as sharedArg } from './lib/metrics.mjs';
 // One copy of the gazetteer and scorers: scene.mjs.
 import { entryKey } from '../extension/content-lexical.mjs';
 import { resolveModel } from './lib/reindex.mjs';
 import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './lib/scene.mjs';
 
-const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
+const arg = k => sharedArg(process.argv, k);
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
 const S = openSample(arg('--sample'), arg('--arm'));
 // '' is a failed capture, not a frozen query.

@@ -15,6 +15,7 @@ usePack(PACK);
 const COMMON_WORDS = table().common;
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './lib/logistic.mjs';
 import * as entity from '../extension/entity.mjs';
+import { mean, sd } from '../extension/relevance.mjs';
 import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-suggest.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
@@ -231,8 +232,7 @@ const bookTf = new Map();
 // Entry contents per book, for the --lobo lineage guard.
 const bookContents = new Map();
 
-const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
-const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
+
 const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/a');
 
 // Query embedding per (scene, arm).

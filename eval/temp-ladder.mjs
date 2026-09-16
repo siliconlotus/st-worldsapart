@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
-import { mean, fmt3 as fmt } from './lib/metrics.mjs';
+import { mean, fmt3 as fmt, arg as sharedArg, signTest } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
@@ -19,10 +19,7 @@ const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 // Only hand-written or curated books can stand as a reference (eval-data/README.md); order fixed so the sample is reproducible.
 const BOOKS = Object.entries(booksOrExit()).map(([slug, b]) => [slug, b.file, b.provenance]);
 
-const arg = (name, dflt = null) => {
-    const i = process.argv.indexOf(`--${name}`);
-    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : dflt;
-};
+const arg = (name, dflt = null) => sharedArg(process.argv, `--${name}`, dflt);
 const has = name => process.argv.includes(`--${name}`);
 
 const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
@@ -76,7 +73,7 @@ async function askOllama(model, prompt, temperature) {
     return text;
 }
 
-/** Jaccard over canonicalised sets; 1 for two empty sets (identical, if vacuously). */
+/** Jaccard over canonicalised sets; 1 for two empty sets — two empty repeats are stable. NOT metrics.mjs `jaccard`, which answers 0 there. */
 const jaccard = (a, b) => {
     if (!a.size && !b.size) return 1;
     let inter = 0;
@@ -281,13 +278,6 @@ if (has('paired')) {
                 : c.size));
         return mean(per.filter(Number.isFinite));
     };
-    const binomP = (k, n) => {
-        if (!n) return NaN;
-        const c = (a, b) => { let r = 1; for (let i = 0; i < b; i++) r = r * (a - i) / (i + 1); return r; };
-        let p = 0;
-        for (let i = 0; i <= n; i++) { const pr = c(n, i) / 2 ** n; if (pr <= c(n, k) / 2 ** n + 1e-12) p += pr; }
-        return Math.min(1, p);
-    };
 
     console.log('\npaired vs each model\'s own lowest rung — per ENTRY, sign test (repeats collapsed first)');
     console.log(`${pad('arm', 20)}${pad('metric', 12)}${lpad('n', 4)}${lpad('better', 8)}${lpad('worse', 7)}${lpad('mean d', 9)}${lpad('p(2-sided)', 12)}`);
@@ -307,8 +297,8 @@ if (has('paired')) {
                     if (Number.isFinite(a) && Number.isFinite(z)) deltas.push(z - a);
                 }
                 if (!deltas.length) continue;
-                const better = deltas.filter(d => d > 0).length, worse = deltas.filter(d => d < 0).length;
-                console.log(`${pad(arm, 20)}${pad(key, 12)}${lpad(deltas.length, 4)}${lpad(better, 8)}${lpad(worse, 7)}${lpad(mean(deltas).toFixed(4), 9)}${lpad(fmt(binomP(Math.min(better, worse), better + worse)), 12)}`);
+                const s = signTest(deltas);
+                console.log(`${pad(arm, 20)}${pad(key, 12)}${lpad(s.n + s.ties, 4)}${lpad(s.plus, 8)}${lpad(s.minus, 7)}${lpad(s.mean.toFixed(4), 9)}${lpad(fmt(s.p), 12)}`);
             }
         }
     }

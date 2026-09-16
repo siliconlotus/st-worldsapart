@@ -14,8 +14,8 @@ export function joinQueryMessages(messages) {
 
 /** The messages buildQuery joins: substituted, attachments stripped, empties dropped, newest `depth`, chronological. `i` is the index in the array handed in, not in any canonical chat. */
 export function queryMessages(chat, { depth, substituteParams = s => s }) {
-    // A missing depth reads as unbounded, like every other depth consumer — slice(0, NaN) would return nothing.
-    const take = Number.isFinite(Number(depth)) && Number(depth) > 0 ? Number(depth) : Infinity;
+    // slice(0, NaN) returns nothing.
+    const take = Number(depth) > 0 ? Number(depth) : Infinity;
     return chat
         .map((x, i) => ({
             name: String(x?.name ?? '').trim(),

@@ -29,7 +29,6 @@ for (const [from, to] of PLUGIN_FILES) {
     // Copy-then-swap: a failure mid-copy leaves the previously deployed copy intact, not half a plugin.
     const tmp = `${dst}.deploying`;
     fs.copyFileSync(src, tmp);
-    fs.rmSync(dst, { force: true });
     fs.renameSync(tmp, dst);
     console.log(`copied  ${path.relative(SRC, src)}  ->  plugins/worlds-apart/${to}`);
 }
@@ -62,13 +61,11 @@ const configPath = path.join(ST.root, 'config.yaml');
 try {
     const cfg = fs.readFileSync(configPath, 'utf8');
     if (/^enableServerPlugins:\s*false\b/m.test(cfg)) {
-        // One backup, the first time a deploy touches the file; and write-then-rename, because a crash mid-write
-        // must never take config.yaml — the whole install's — down with it.
+        // Re-taking it would back up the patched file.
         const backup = `${configPath}.wa-backup`;
         if (!fs.existsSync(backup)) fs.copyFileSync(configPath, backup);
         const tmp = `${configPath}.deploying`;
         fs.writeFileSync(tmp, cfg.replace(/^(enableServerPlugins:\s*)false\b/m, '$1true'));
-        fs.rmSync(configPath, { force: true });
         fs.renameSync(tmp, configPath);
         console.log('enabled  enableServerPlugins: true in config.yaml (was false; the original is at config.yaml.wa-backup)');
     } else if (/^enableServerPlugins:\s*true\b/m.test(cfg)) {

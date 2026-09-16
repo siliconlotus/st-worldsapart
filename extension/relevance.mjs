@@ -92,9 +92,10 @@ export function properDensity(content) {
     return (properNounsOf(normalizeOrthography(text)).size / Math.max(1, toks.length)) * 100;
 }
 
-const sigmoid = x => 1 / (1 + Math.exp(-x));
-const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
-const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
+export const sigmoid = x => 1 / (1 + Math.exp(-x));
+// `|| 1`, so an empty column standardises to 0 rather than NaN. metrics.mjs `mean` answers NaN there; they are not interchangeable.
+export const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+export const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
 
 /** `E[credit]` per row of ONE scene, standardised over `population` — `rows` for a `scene` fit, every candidate of the scene for a `pooled` one (`model.standardise`). P(>=3) is clamped to P(>=2).
  *  @returns {number[]} in the order given, NaN when the model cannot score */
