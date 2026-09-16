@@ -53,8 +53,9 @@ export function wholeWordAdvice(keys, wholeWords, t = plainTag) {
     return out;
 }
 
-/** A /pattern/flags regex key, as countKey routes them. `[\s\S]`, not `.`: a body may hold a newline, as core's `[\w\W]` admits. */
-export const REGEX_KEY_RE = /^\/([\s\S]+)\/([gimsuy]*)$/;
+/** A /pattern/flags regex key, as countKey routes them. `[\s\S]`, not `.`: a body may hold a newline, as core's `[\w\W]` admits.
+ *  Every flag JS has, which is more than CORE_REGEX_KEY_RE's: `d` and `v` postdate core's list, so a key using one is WA-only. */
+export const REGEX_KEY_RE = /^\/([\s\S]+)\/([dgimsuvy]*)$/;
 /** A key matched by its own text: not a SmartKey, not a regex. */
 export const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
 
@@ -324,7 +325,7 @@ export function withExtraTexts(windowFor, texts, matchWindow) {
 }
 
 /** Tags and HTML comments replaced by spaces, one per character, so a literal key cannot match inside one. Every offset is
- *  preserved. Regex keys bypass this and match the raw text (docs/matching.md, *Divergences from ST core*). */
+ *  preserved. Regex keys bypass this and match the raw text (docs/matching-architecture.md, *Divergences from ST core*). */
 export const maskMarkup = text => String(text).replace(/<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g, m => ' '.repeat(m.length));
 
 let maskMemoIn = null, maskMemoOut = null;
@@ -1028,9 +1029,6 @@ const ROLE_WORDS = { system: WI_ROLE.SYSTEM, user: WI_ROLE.USER, assistant: WI_R
 /** A non-negative integer, or null. */
 const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg) : null);
 
-/** A comma list as trimmed, non-empty strings. */
-const commaList = arg => String(arg ?? '').split(',').map(s => s.trim()).filter(Boolean);
-
 const NEEDS_QUOTING = /[\s()&|!+-]|^[=^]|(?:::|\^)\d/;
 const RESERVED_WORD = /^(?:AND|OR|NOT|XOR)$/i;
 
@@ -1110,13 +1108,15 @@ export function decoratorFields(entry, ctx = {}) {
         }
 
         if ((arg = decoratorArg(line, '@@additional_keys')) !== null) {
-            const list = commaList(arg);
+            // splitKeys, not split(","): a /regex/ or a "quoted" argument keeps its commas, as every key list does.
+            const list = splitKeys(arg);
             if (list.length && !additional) additional = list;
             continue;
         }
 
         if ((arg = decoratorArg(line, '@@exclude_keys')) !== null) {
-            const list = commaList(arg);
+            // splitKeys, not split(","): a /regex/ or a "quoted" argument keeps its commas, as every key list does.
+            const list = splitKeys(arg);
             if (list.length && !excluded) excluded = list;
             continue;
         }

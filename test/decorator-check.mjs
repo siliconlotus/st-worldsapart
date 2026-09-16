@@ -87,7 +87,7 @@ eq(activationAdds([{ uid: 3, world: 'W', key: ['villa'], content: '@@activate_on
 console.log('ok   @@activate_only_after gates activation on the assistant message count');
 
 // --- @@is_greeting gates on WHICH greeting is active: message 0's swipe_id, since getFirstMessage builds
-// swipes as [first_mes, ...alternate_greetings] (script.js:7723).
+// swipes as [first_mes, ...alternate_greetings] (script.js `getFirstMessage`).
 const greet = (n, greetingIndex) => activationAdds(
     [{ uid: 1, world: 'W', key: ['villa'], content: `@@is_greeting ${n}\nx` }],
     winA(), { greetingIndex, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
@@ -151,6 +151,15 @@ eqDeep(keys('@@exclude_keys dream\nx'),
     '@@exclude_keys: none of them may be present');
 eqDeep(keys('@@additional_keys  storm , rain \nx').keysecondary, ['storm', 'rain'], 'the comma list is trimmed');
 eqDeep(keys('@@additional_keys\nx'), {}, 'an empty list is ignored');
+
+// A decorator's argument is a key list, so it splits like every other key list: splitKeys, not `split(',')`.
+// Shredding a regex here writes its fragments into keysecondary, which CORE then matches literally.
+eqDeep(keys('@@exclude_keys /re,gex/, night\nx').keysecondary, ['/re,gex/', 'night'],
+    'a /regex/ argument keeps its commas');
+eqDeep(keys('@@additional_keys "storm, heavy", rain\nx').keysecondary, ['"storm, heavy"', 'rain'],
+    'a "quoted" argument keeps its commas');
+eqDeep(keys('@@additional_keys ? a && "x, y"\nx').keysecondary, ['? a && "x, y"'],
+    'a ? SmartKey argument survives whole, for keyNode to parse');
 console.log('ok   each key decorator alone maps to keysecondary');
 
 // --- together, ST cannot express both, so WA compiles one SmartKey
