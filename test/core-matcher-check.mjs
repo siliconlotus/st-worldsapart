@@ -1,6 +1,6 @@
 // How WA relates to ST core on an unmodified lorebook: parity with matchKeys/matchSecondaryKeys, and the named divergences.
 // An assertion citing core as the authority goes here; one about what a matched expression is WORTH goes in matcher-check.mjs.
-import { countKey, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
 import { synthesizeSecondary } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -338,3 +338,21 @@ console.log('ok   withPromote: add/remove round-trips through the reader and lea
 // --- splitKeys: a NAMED divergence, so the claim about core lives here
 eq(splitKeys('/a/,/b/').join(' | '), '/a/ | /b/', 'a regex straight after a comma is seen (upstream-st.md #17: core\'s customTokenizer misses it)');
 console.log('ok   splitKeys: the key-field tokenizer diverges from core where core skips the character after a comma');
+
+// --- decorator names match EXACTLY: core's gates are `.includes('@@activate')` (world-info.js:4875), so a
+// longer name that merely starts with one of core's two must not read as it.
+const dec = (decorators, name) => hasDecorator({ uid: 1, key: ['x'], decorators, content: 'y' }, name);
+
+eq(dec(['@@activate'], '@@activate'), true, 'the bare name matches');
+eq(dec(['@@activate_only_after 3'], '@@activate'), false, 'a longer name starting with it is a DIFFERENT decorator');
+eq(dec(['@@dont_activate_after_match'], '@@dont_activate'), false, '...and so is this one');
+eq(dec(['@@dont_activate'], '@@dont_activate'), true, 'the bare name still matches');
+eq(dec(['@@activate 2'], '@@activate'), true, 'an argument after the name is the same decorator');
+
+eq(decoratorArg('@@depth 0', '@@depth'), '0', 'the argument comes back');
+eq(decoratorArg('@@depth   7  ', '@@depth'), '7', '...trimmed, whatever the spacing');
+eq(decoratorArg('@@promote', '@@promote'), '', 'a bare match is the empty string, not null');
+eq(decoratorArg('@@depth', '@@role'), null, 'a different name is null');
+eq(decoratorArg('@@depthly 3', '@@depth'), null, 'a longer name is null, not an argument of "ly 3"');
+eq(decoratorArg('@@@depth 0', '@@depth'), '0', 'the @@@ fallback spelling is the same decorator');
+console.log('ok   decorator names match exactly, with the argument and the @@@ spelling');

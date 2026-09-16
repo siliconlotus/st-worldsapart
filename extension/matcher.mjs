@@ -861,29 +861,35 @@ function leadingDecorators(content) {
     return lines.slice(0, end);
 }
 
-/** A `@@@name` line is the fallback form of `@@name`; core's own test is a bare startsWith on the name. */
-const bareDecorator = line => (line.startsWith('@@@') ? line.slice(1) : line);
+/** A `@@@name` line is the fallback form of `@@name`. */
+const bareDecorator = line => (String(line ?? '').startsWith('@@@') ? String(line).slice(1) : String(line ?? ''));
+
+/** The decorator's argument, `''` when it has none, or null when `line` is a different decorator.
+ *  Exact on the name: the namespace is open, so a prefix test would claim every future `@@name_*`. */
+export function decoratorArg(line, name) {
+    const bare = bareDecorator(line);
+    if (!bare.startsWith(name)) return null;
+    const rest = bare.slice(name.length);
+    if (rest === '') return '';
+    if (!/^\s/.test(rest)) return null;
+    return rest.trim();
+}
 
 /** Whether the entry carries a decorator. A parsed entry (getSortedEntries shape) has them in `decorators` with content stripped, so the array is authoritative. */
 export function hasDecorator(entry, name) {
-    if (Array.isArray(entry?.decorators)) {
-        return entry.decorators.some(d => String(d).startsWith(name));
-    }
-    return leadingDecorators(entry?.content).some(l => bareDecorator(l).startsWith(name));
+    const lines = Array.isArray(entry?.decorators) ? entry.decorators : leadingDecorators(entry?.content);
+    return lines.some(l => decoratorArg(l, name) !== null);
 }
-
-/** `@@promote`, exact: the namespace is open, so a prefix test would claim every future `@@promote_*`. A trailing argument is allowed. */
-const isPromoteDecorator = line => /^@@promote(\s|$)/.test(String(line ?? ''));
 
 /** Whether the author promoted this entry, off RAW content; false for a parsed entry, whose content core stripped — the runtime reads the stash. */
 export function hasPromoteDecorator(entry) {
-    return leadingDecorators(entry?.content).some(l => isPromoteDecorator(bareDecorator(l)));
+    return leadingDecorators(entry?.content).some(l => decoratorArg(l, '@@promote') !== null);
 }
 
 /** Content with `@@promote` added or removed — what a Studio toggle writes. Removal touches the leading run only; adding prepends. */
 export function withPromote(content, on) {
     const run = leadingDecorators(content);
-    const head = run.filter(l => !isPromoteDecorator(bareDecorator(l)));
+    const head = run.filter(l => decoratorArg(l, '@@promote') === null);
     if (on) head.unshift('@@promote');
     return [...head, ...String(content ?? '').split('\n').slice(run.length)].join('\n');
 }
