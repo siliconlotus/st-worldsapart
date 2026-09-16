@@ -850,8 +850,7 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     return { score, hits };
 }
 
-/** The leading `@@` lines of raw content, by core's parseDecorators, returned raw: withPromote must preserve their spelling.
- *  ponytail: the `@@@` fallback-chain rule (only after an unknown decorator) is not mirrored; over-detecting errs safe here. */
+/** The leading `@@` lines of raw content, by core's parseDecorators, returned raw: withPromote must preserve their spelling. */
 function leadingDecorators(content) {
     const text = String(content ?? '');
     if (!text.startsWith('@@')) return [];
@@ -859,6 +858,33 @@ function leadingDecorators(content) {
     let end = 0;
     while (end < lines.length && lines[end].startsWith('@@')) end += 1;
     return lines.slice(0, end);
+}
+
+/** Every decorator name WA acts on: core's two, WA's own, and the CCv3 set the desugar implements. */
+export const WA_DECORATORS = Object.freeze([
+    '@@activate', '@@dont_activate', '@@promote',
+    '@@depth', '@@reverse_depth', '@@role', '@@scan_depth', '@@position', '@@activate_only_after',
+    '@@is_greeting', '@@activate_only_every', '@@is_user_icon',
+    '@@additional_keys', '@@exclude_keys',
+    '@@dont_activate_after_match', '@@keep_activate_after_match',
+]);
+
+/** The leading decorator lines that apply, bare-spelled and in document order.
+ *  `fallbacked` mirrors core's parseDecorators: a `@@@` line counts only after an UNRECOGNISED one. */
+export function resolveDecorators(content) {
+    const out = [];
+    let fallbacked = false;
+    for (const line of leadingDecorators(content)) {
+        if (line.startsWith('@@@') && !fallbacked) continue;
+        const bare = bareDecorator(line);
+        if (WA_DECORATORS.some(name => decoratorArg(bare, name) !== null)) {
+            out.push(bare);
+            fallbacked = false;
+        } else {
+            fallbacked = true;
+        }
+    }
+    return out;
 }
 
 /** A `@@@name` line is the fallback form of `@@name`. */

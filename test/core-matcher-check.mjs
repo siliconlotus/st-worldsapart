@@ -1,6 +1,6 @@
 // How WA relates to ST core on an unmodified lorebook: parity with matchKeys/matchSecondaryKeys, and the named divergences.
 // An assertion citing core as the authority goes here; one about what a matched expression is WORTH goes in matcher-check.mjs.
-import { countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
+import { countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, resolveDecorators, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
 import { synthesizeSecondary } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -356,3 +356,21 @@ eq(decoratorArg('@@depth', '@@role'), null, 'a different name is null');
 eq(decoratorArg('@@depthly 3', '@@depth'), null, 'a longer name is null, not an argument of "ly 3"');
 eq(decoratorArg('@@@depth 0', '@@depth'), '0', 'the @@@ fallback spelling is the same decorator');
 console.log('ok   decorator names match exactly, with the argument and the @@@ spelling');
+
+// --- the `@@@` fallback chain, by core's parseDecorators grammar (world-info.js:4676-4692): a `@@@name`
+// line counts only when the decorator BEFORE it was unrecognised.
+const res = content => resolveDecorators(content).join(',');
+
+eq(res('@@depth 0\nx'), '@@depth 0', 'a recognised leading line is returned bare');
+eq(res('@@risu_thing\n@@@depth 0\nx'), '@@depth 0', 'a @@@ line after an UNKNOWN decorator applies');
+eq(res('@@depth 0\n@@@depth 5\nx'), '@@depth 0', '...and after a RECOGNISED one it does not');
+eq(res('@@@depth 0\nx'), '', 'a @@@ line with nothing before it does not apply');
+eq(res('x\n@@depth 0'), '', 'a decorator after content is not a decorator');
+eq(res('@@risu_a\n@@risu_b\n@@@depth 0\nx'), '@@depth 0', 'the chain survives two unknowns');
+eq(res('@@depth 0\n@@role user\nx'), '@@depth 0,@@role user', 'several recognised lines all return, in order');
+console.log('ok   the @@@ fallback chain follows core\'s grammar');
+
+// WA recognises more names than core, so the two resolve a chain differently. WA is the spec-correct side.
+eq(res('@@depth 0\n@@@activate\nx').includes('@@activate'), false,
+    'WA recognised @@depth, so the @@@activate after it does NOT apply; core, not knowing @@depth, would apply it');
+console.log('ok   the divergence from core that follows from a larger recognised set');
