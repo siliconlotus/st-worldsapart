@@ -997,7 +997,35 @@ const activationOpts = () => ({
     greetingIndex: getContext().chat?.[0]?.swipe_id ?? 0,
     personaName: name1,
     chatLength: (runState.scanChat ?? []).length,
+    fired: firedLatches(),
 });
+
+const WA_METADATA_KEY = 'worldsApart';
+
+/** Entries that have fired a latch decorator in this chat. */
+function firedLatches() {
+    const fired = getContext().chatMetadata?.[WA_METADATA_KEY]?.fired;
+    return new Set(Array.isArray(fired) ? fired : []);
+}
+
+/** Records the activated entries carrying a latch decorator. */
+function recordLatches(entries) {
+    if (runState.generationIsDryRun || runState.dryRunInProgress) return;
+    const ctx = getContext();
+    const meta = ctx.chatMetadata;
+    if (!meta) return;
+    const fired = new Set(meta[WA_METADATA_KEY]?.fired ?? []);
+    const before = fired.size;
+    for (const entry of entries) {
+        const lines = Array.isArray(entry?.waDecorators) ? entry.waDecorators : matcher.resolveDecorators(entry?.content);
+        if (lines.some(l => matcher.decoratorArg(l, '@@dont_activate_after_match') !== null || matcher.decoratorArg(l, '@@keep_activate_after_match') !== null)) {
+            fired.add(matcher.latchKey(entry));
+        }
+    }
+    if (fired.size === before) return;
+    meta[WA_METADATA_KEY] = { ...(meta[WA_METADATA_KEY] ?? {}), fired: [...fired] };
+    ctx.saveMetadata?.();
+}
 
 /** The chat WA reads with the `dropChatTags` elements gone — the one strip, at intake. Copies, never an edit of ST's
  *  live chat, and the file prefix is left alone so `extra.fileLength` still counts to the same place. */
@@ -1447,8 +1475,11 @@ async function rankOwnedScan(activated, args, skip) {
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
-    // Only the last loop (no further state) is the real prompt.
-    if (!args?.state?.next) renderDeliveryPanel(runState.lastPromptOrder);
+    // Only the last loop (no further state) is the real prompt — recording earlier would latch entries a later loop still cuts.
+    if (!args?.state?.next) {
+        recordLatches(promptOrder.map(item => item.entry));
+        renderDeliveryPanel(runState.lastPromptOrder);
+    }
 
     if (runState.verboseRun) {
         // The pre-cut, pre-budget population, `cut`/`cutBy` recording which side each row fell on. candidates=N caps

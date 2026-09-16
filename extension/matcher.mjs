@@ -948,6 +948,9 @@ const decoratorCount = (entry, name) => {
     return arg === null ? null : wholeNumber(arg);
 };
 
+/** An entry's key in WA's latch record. US, not NUL: NUL makes git treat the file as binary. */
+export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1F)}${entry?.uid ?? ''}`;
+
 /** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled, `constant` and
  *  `@@dont_activate`; `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives. */
 export function activationAdds(entries, windowFor, opts = {}) {
@@ -957,6 +960,14 @@ export function activationAdds(entries, windowFor, opts = {}) {
         // `@@activate` is core's to honour, like `constant`: WA leaves those keys unblanked and core's ladder reaches it
         // at a step above `@@dont_activate`, so forcing it again here would be noise (CCv3 gives `@@activate` precedence).
         if (hasDecorator(entry, '@@dont_activate') || hasDecorator(entry, '@@activate')) continue;
+
+        if (opts.fired instanceof Set && opts.fired.has(latchKey(entry))) {
+            // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and
+            // keeps only names prefix-matching its own two, so @@keep_activate_after_match is lost there.
+            // Both present latches ON, as CCv3 gives @@activate precedence over @@dont_activate.
+            if (decoratorFor(entry, '@@keep_activate_after_match') !== null) { out.push(entry); continue; }
+            if (decoratorFor(entry, '@@dont_activate_after_match') !== null) continue;
+        }
 
         const onlyAfter = decoratorCount(entry, '@@activate_only_after');
         if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) continue;   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0

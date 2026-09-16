@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, latchKey, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -215,3 +215,31 @@ eq(twice('@@depth 0\nx'), true, 'a scalar patch is idempotent');
 eq(twice('@@additional_keys storm\n@@exclude_keys dream\nx'), true,
     'the compiled key is idempotent: recompiling must not nest the SmartKey again');
 console.log('ok   the patch is scalar-or-reassign, and idempotent across a re-fire');
+
+// --- @@dont_activate_after_match and @@keep_activate_after_match: WA's own per-chat latch record,
+// read from opts.fired rather than core's timedWorldInfo (see task-8-brief.md for why).
+const US = String.fromCharCode(0x1F);
+const win = () => () => ['the villa burned'];
+const opts = fired => ({ fired, chatLength: 99, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false });
+const adds = (entries, fired) => activationAdds(entries, win(), opts(fired)).map(e => e.uid).join(',');
+// waDecorators, not decorators: decoratorFor reads the stash, never core's own `decorators` field.
+const ent = (uid, waDecorators) => ({ uid, world: 'W', key: ['villa'], waDecorators, content: 'x' });
+
+eq(latchKey({ world: 'W', uid: 3 }), `W${US}3`, 'the latch key is US-separated, per CLAUDE.md');
+eq(adds([ent(1, [])], new Set()), '1', 'an ordinary entry activates on its keyword');
+eq(adds([ent(2, ['@@dont_activate_after_match'])], new Set()), '2',
+    'a one-shot entry activates the FIRST time: it has not fired yet');
+eq(adds([ent(2, ['@@dont_activate_after_match'])], new Set([`W${US}2`])), '',
+    '...and never again once recorded');
+eq(adds([ent(3, ['@@keep_activate_after_match'])], new Set([`W${US}3`])), '3',
+    'a latched-on entry activates');
+
+// It must activate with no keyword hit at all — that is the whole point.
+const noMatch = activationAdds([ent(4, ['@@keep_activate_after_match'])], () => ['nothing here'], opts(new Set([`W${US}4`])));
+eq(noMatch.length, 1, 'a latched-on entry activates with no keyword hit');
+
+eq(adds([ent(5, ['@@dont_activate_after_match', '@@keep_activate_after_match'])], new Set([`W${US}5`])), '5',
+    'both decorators: latches ON, as @@activate beats @@dont_activate in CCv3');
+eq(adds([ent(6, ['@@dont_activate_after_match'])], undefined), '6',
+    'no latch state at all behaves exactly as before');
+console.log('ok   the latch decorators, read from WA\'s own record');
