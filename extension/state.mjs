@@ -88,6 +88,7 @@ export const runState = {
     lastCandidates: [],           // selection-candidate rows from the last debug-class run
     lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index
     lastSkipped: [],              // per-entry budget rejections + the cap that caused each
+    lastBudget: null,             // last scan's token totals + per-item counts; null when no token budget was in force
     attachedWorlds: new Set(),    // books ST currently has active for this chat
     waOwnsScan: false,            // WA intercepted the scan in flight; gates the ENTRIES_LOADED key blanking and the per-loop SCAN_DONE feed
     waMatched: new Set(),         // `${world}.${uid}` WA has emitted or seen activated this scan — never rescanned

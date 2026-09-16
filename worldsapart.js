@@ -1414,7 +1414,7 @@ async function rankOwnedScan(activated, args, skip) {
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
         const promotedSet = new Set(promoted);
-        const { survivors, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
+        const { survivors, tokens, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
             isDynamic: item => dynamicSet.has(item),
             // Capacity's population is dynamic plus promoted: promotion exempts from relevance, not from the caps.
@@ -1450,9 +1450,12 @@ async function rankOwnedScan(activated, args, skip) {
         }
 
         runState.lastSkipped = skipped;
+        // Null unless a token budget was in force: tokensOf short-circuits to 0 when maxTokens is 0, so the counts would all read 0.
+        runState.lastBudget = maxTokens > 0 ? { tokens, budgeted, inPrompt, maxTokens } : null;
         walk = walk.filter(x => survivors.has(x));
     } else {
         runState.lastSkipped = [];
+        runState.lastBudget = null;
     }
 
     // Prompt order, not layout order: one flat sort over every survivor.
@@ -1568,6 +1571,7 @@ async function dryRun(verbose = false) {
     // Cleared so a scan that activates nothing reports nothing rather than last run's; the /wa-grade capture too.
     runState.lastPromptOrder = [];
     runState.lastSkipped = [];
+    runState.lastBudget = null;
     runState.lastCandidates = [];
     runState.lastCandidateEntries = [];
     runState.lastQuery = '';
@@ -2087,6 +2091,8 @@ function ensureDeliveryPanel() {
 .wa-delivery-entry:hover { background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-delivery-glyph { flex: 0 0 auto; }
 .wa-delivery-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-delivery-tokens { flex: 0 0 auto; margin-left: auto; opacity: 0.55; font-variant-numeric: tabular-nums; }
+.wa-delivery-budget { padding: 4px 5px; opacity: 0.7; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-delivery-empty { opacity: 0.6; padding: 4px; }`;
     document.head.append(style);
 
@@ -2102,6 +2108,7 @@ function ensureDeliveryPanel() {
 
 function renderDeliveryPanel(layout) {
     ensureDeliveryPanel();
+    const budget = runState.lastBudget;
     deliveryTrigger.dataset.count = String(layout.length);
     deliveryPanel.innerHTML = '';
     // Appended last: the panel opens upward, so the bottom row is nearest the icon.
@@ -2130,12 +2137,30 @@ function renderDeliveryPanel(layout) {
         ttl.className = 'wa-delivery-title';
         ttl.textContent = wiTitleOf(e);
         el.append(g, ttl);
+        const cost = budget?.tokens.get(row.item);
+        if (cost !== undefined) {
+            const tok = document.createElement('span');
+            tok.className = 'wa-delivery-tokens';
+            tok.textContent = String(cost);
+            tok.title = t`Tokens this entry costs`;
+            el.append(tok);
+        }
         // Click opens the entry in the Explorer; shift-click shows its text alone.
         el.addEventListener('click', ev => {
             if (ev.shiftKey) { showEntryText(e); return; }
             lorebookStudio(e.world ?? chatBook(), { entry: { world: e.world, uid: e.uid } });
         });
         deliveryPanel.append(el);
+    }
+    if (budget) {
+        const n = runState.lastSkipped.length;
+        const missed = runState.lastSkipped.reduce((a, x) => a + (x.tokens ?? 0), 0);
+        const foot = document.createElement('div');
+        foot.className = 'wa-delivery-budget';
+        // `budgeted`, not `inPrompt`: headroom is what the cap still has, and an exempt entry may not charge it.
+        foot.textContent = t`Token budget: ${budget.inPrompt} delivered, ${Math.max(0, budget.maxTokens - budget.budgeted)} left of ${budget.maxTokens}.`;
+        if (n) foot.textContent += ' ' + (n === 1 ? t`${n} entry skipped, ${missed} tokens not delivered.` : t`${n} entries skipped, ${missed} tokens not delivered.`);
+        deliveryPanel.append(foot);
     }
     deliveryPanel.append(lab);
 }
