@@ -5,7 +5,7 @@ import { getContext, extension_settings } from '../../../../extensions.js';
 import { loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_max_recursion_steps, world_info_recursive } from '../../../../world-info.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
-import { getRequestHeaders, saveSettingsDebounced } from '../../../../../script.js';
+import { getRequestHeaders, name1, saveSettingsDebounced } from '../../../../../script.js';
 import { getTokenCountAsync } from '../../../../tokenizers.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
@@ -169,6 +169,23 @@ async function sceneCommon(rows, books) {
         embedModel: host.vectorRequestBody().model || '',
         books,
         priority: (host.scopedPriority() ?? []).map(x => x.cfg),
+        ...sceneGateInputs(),
+    };
+}
+
+/** What the activation gates read but a scene cannot re-derive: the chat's shape at the frozen turn.
+ *  `assistantCount` is over the whole chat, not the scan window, since `@@activate_only_after` counts from
+ *  its start. The greeting index is message 0's swipe_id, `getFirstMessage` building swipes as
+ *  [first_mes, ...alternate_greetings]. `firedLatches` is the record as of this turn, so a bundle sliced to
+ *  an earlier end re-filters it (eval/bundle-schema.md). */
+function sceneGateInputs() {
+    const ctx = getContext();
+    const chat = ctx.chat ?? [];
+    return {
+        assistantCount: chat.filter(m => m && !m.is_user && !m.is_system).length,
+        greetingIndex: chat[0]?.swipe_id ?? 0,
+        personaName: name1 ?? '',
+        firedLatches: matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, chat.length),
     };
 }
 

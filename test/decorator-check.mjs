@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedAt, hasLatch, SCENE_UNMODELLED_GATES, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedAt, firedUpTo, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -266,6 +266,11 @@ eqDeep([...firedAt(REC, 10)], [`W${US}1`], 'the firing turn itself counts');
 eqDeep([...firedAt(REC, 9)], [], 'rewound past every firing point: nothing is latched');
 eqDeep([...firedAt(null, 100)], [], 'an absent record is not a crash');
 
+// The capture writes the MAP, so a bundle sliced to an earlier end can re-filter it; the gate wants the Set.
+eqDeep(firedUpTo(REC, 25), { [`W${US}1`]: 10, [`X${US}3`]: 25 }, 'the record as it stood at a given turn');
+eqDeep(firedUpTo(REC, 9), {}, 'nothing had fired yet');
+eqDeep(firedUpTo(null, 100), {}, 'an absent record is not a crash');
+
 // Deleting a book prunes its latch keys from the open chat's record; the undo puts them back, so the
 // prune has to hand back what it removed rather than only what it kept.
 eqDeep(partitionLatches(REC, ['W']),
@@ -281,12 +286,17 @@ eqDeep(partitionLatches(null, ['W']), { kept: {}, dropped: {} }, 'an absent reco
 // message 0's swipe_id, the persona, the latch record — because a capture stores the chat as one joined
 // string. It reports what it cannot model rather than over-admitting in silence.
 const gateEntry = (uid, content) => ({ uid, world: 'W', key: ['villa'], content });
-eqDeep(unmodelledGates([gateEntry(1, '@@is_greeting 2\nx')]), ['@@is_greeting'], 'a gate it cannot model is named');
+eqDeep(unmodelledGates([gateEntry(1, '@@is_greeting 2\nx')]), ['@@is_greeting'], 'a gate with no input is named');
+eqDeep(unmodelledGates([gateEntry(1, '@@is_greeting 2\nx')], { greetingIndex: 0 }), [],
+    '...and is not, once the bundle carries its input');
+eqDeep(unmodelledGates([gateEntry(1, '@@is_greeting 2\nx')], { greetingIndex: undefined }), ['@@is_greeting'],
+    'an explicitly undefined input is still absent');
 eqDeep(unmodelledGates([gateEntry(1, '@@depth 0\nx')]), [], 'a decorator that is a plain field patch is not a gate');
 eqDeep(unmodelledGates([gateEntry(1, 'The villa')]), [], 'an entry with no decorators names nothing');
 eqDeep(unmodelledGates([gateEntry(1, '@@is_greeting 2\nx'), gateEntry(2, '@@is_user_icon Mara\nx'), gateEntry(3, '@@is_greeting 0\nx')]),
-    ['@@is_greeting', '@@is_user_icon'], 'names are reported once each, in SCENE_UNMODELLED_GATES order');
-eq(SCENE_UNMODELLED_GATES.includes('@@keep_activate_after_match'), true, 'the latch pair is unmodellable too: a capture holds no latch record');
+    ['@@is_greeting', '@@is_user_icon'], 'names are reported once each, in GATE_INPUTS order');
+eq(GATE_INPUTS['@@keep_activate_after_match'], 'fired', 'the latch pair reads the fired record');
+eq(GATE_INPUTS['@@activate_only_every'], 'assistantCount', 'both counting gates read the same input');
 eqDeep(unmodelledGates([]), [], 'no entries, nothing to report');
 console.log('ok   latchBook recovers the book name from a latch key');
 

@@ -969,17 +969,51 @@ const decoratorCount = (entry, name) => {
 };
 
 /** Whether the entry carries either latch decorator, regardless of which. */
-/** Gates whose verdict rests on the chat's SHAPE — an assistant/user split, message 0's swipe_id, the
- *  persona, the latch record — none of which a graded scene capture stores; it holds the chat as one joined
- *  string. `eval/lib/scene.mjs` reports these rather than over-admitting in silence. */
-export const SCENE_UNMODELLED_GATES = Object.freeze([
-    '@@activate_only_after', '@@activate_only_every', '@@is_greeting', '@@is_user_icon',
-    '@@dont_activate_after_match', '@@keep_activate_after_match',
-]);
+/** Each CCv3 activation gate against the `opts` field its verdict needs. All four quantities describe the
+ *  chat's SHAPE, which a graded scene cannot re-derive from its own window, so a capture records them
+ *  (eval/bundle-schema.md) and a bundle without them leaves those gates off. */
+export const GATE_INPUTS = Object.freeze({
+    '@@activate_only_after': 'assistantCount',
+    '@@activate_only_every': 'assistantCount',
+    '@@is_greeting': 'greetingIndex',
+    '@@is_user_icon': 'personaName',
+    '@@dont_activate_after_match': 'fired',
+    '@@keep_activate_after_match': 'fired',
+});
 
-/** Which of SCENE_UNMODELLED_GATES appear across `entries`, once each, in that array's order. */
-export const unmodelledGates = entries =>
-    SCENE_UNMODELLED_GATES.filter(name => (entries ?? []).some(e => decoratorFor(e, name) !== null));
+/** Which gates `entries` carry that `opts` has no input for, once each, in GATE_INPUTS order. */
+export const unmodelledGates = (entries, opts = {}) => Object.keys(GATE_INPUTS).filter(name =>
+    opts[GATE_INPUTS[name]] === undefined && (entries ?? []).some(e => decoratorFor(e, name) !== null));
+
+/** How the activation gates rule on one entry: 'admit' forces it in with no keyword hit, 'skip' rules it
+ *  out, null leaves the caller its own test. A gate whose input `opts` lacks does not rule. */
+export function gateVerdict(entry, opts = {}) {
+    // Above the latch hoist: core drops a matched entry for an unarrived delay before WA's emit reaches it, so a
+    // latched-on entry is not exempt. `&&`, not `!= null`: delay 0 means no delay, as core's `if (!entry.delay)` reads it.
+    if (entry?.delay && Number(opts.chatLength ?? Infinity) < Number(entry.delay)) return 'skip';
+
+    if (opts.fired instanceof Set && opts.fired.has(latchKey(entry))) {
+        // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and keeps only
+        // names prefix-matching its own two. Both present latches ON, as @@activate beats @@dont_activate.
+        if (decoratorFor(entry, '@@keep_activate_after_match') !== null) return 'admit';
+        if (decoratorFor(entry, '@@dont_activate_after_match') !== null) return 'skip';
+    }
+
+    const onlyAfter = decoratorCount(entry, '@@activate_only_after');
+    if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) return 'skip';   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0
+
+    const onlyGreeting = decoratorCount(entry, '@@is_greeting');
+    // `!== undefined`, not a truthy check: greeting 0 (first_mes) is a real, common index
+    if (onlyGreeting !== null && opts.greetingIndex !== undefined && opts.greetingIndex !== onlyGreeting) return 'skip';
+
+    const everyN = decoratorCount(entry, '@@activate_only_every');
+    if (everyN && Number(opts.assistantCount ?? 0) % everyN !== 0) return 'skip';   // `&&`, not `!== null`: `% 0` is NaN, which would gate the entry out silently forever
+
+    const wantsPersona = decoratorFor(entry, '@@is_user_icon');
+    if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) return 'skip';   // `!== undefined`, not a truthy check: an empty persona name is still a value
+
+    return null;
+}
 
 export const hasLatch = entry =>
     decoratorFor(entry, '@@dont_activate_after_match') !== null
@@ -994,10 +1028,14 @@ export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1
 /** The book a latch key belongs to — the segment before the US. */
 export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F))[0];
 
-/** The latch keys that had fired by `chatLength`. The record maps a key to the chat length when it fired,
- *  so a rewind past that point drops it, as core drops a timed effect on a chat that has not advanced. */
-export const firedAt = (record, chatLength) => new Set(
-    Object.entries(record ?? {}).filter(([, at]) => Number(at) <= Number(chatLength)).map(([k]) => k));
+/** The latch record as it stood at `chatLength`: key -> the chat length when it fired, dropping anything
+ *  that fired later. A rewind past a firing point therefore un-latches, as core drops a timed effect on a
+ *  chat that has not advanced, and a frozen scene reads the record as of its own turn. */
+export const firedUpTo = (record, chatLength) => Object.fromEntries(
+    Object.entries(record ?? {}).filter(([, at]) => Number(at) <= Number(chatLength)));
+
+/** The same, as the key Set the activation gate reads. */
+export const firedAt = (record, chatLength) => new Set(Object.keys(firedUpTo(record, chatLength)));
 
 /** A latch record split by book: `kept` for the record to write back, `dropped` for the delete's undo to
  *  restore. Both halves, because a prune that returns only what it keeps cannot be undone. */
@@ -1021,31 +1059,9 @@ export function activationAdds(entries, windowFor, opts = {}) {
         // at a step above `@@dont_activate`, so forcing it again here would be noise (CCv3 gives `@@activate` precedence).
         if (hasDecorator(entry, '@@dont_activate') || hasDecorator(entry, '@@activate')) continue;
 
-        // Above the latch hoist: core drops a matched entry for an unarrived delay before WA's own emit ever reaches
-        // it, so a latched-on entry must not be exempted from the same check. `&&`, not `!= null`: delay 0 means no
-        // delay, as core's `if (!entry.delay)` reads it.
-        if (entry.delay && Number(opts.chatLength ?? Infinity) < Number(entry.delay)) continue;
-
-        if (opts.fired instanceof Set && opts.fired.has(latchKey(entry))) {
-            // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and
-            // keeps only names prefix-matching its own two, so @@keep_activate_after_match is lost there.
-            // Both present latches ON, as CCv3 gives @@activate precedence over @@dont_activate.
-            if (decoratorFor(entry, '@@keep_activate_after_match') !== null) { out.push(entry); continue; }
-            if (decoratorFor(entry, '@@dont_activate_after_match') !== null) continue;
-        }
-
-        const onlyAfter = decoratorCount(entry, '@@activate_only_after');
-        if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) continue;   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0
-
-        const onlyGreeting = decoratorCount(entry, '@@is_greeting');
-        // `!== undefined`, not a truthy check: greeting 0 (first_mes) is a real, common index
-        if (onlyGreeting !== null && opts.greetingIndex !== undefined && opts.greetingIndex !== onlyGreeting) continue;
-
-        const everyN = decoratorCount(entry, '@@activate_only_every');
-        if (everyN && Number(opts.assistantCount ?? 0) % everyN !== 0) continue;   // `&&`, not `!== null`: `% 0` is NaN, which would gate the entry out silently forever
-
-        const wantsPersona = decoratorFor(entry, '@@is_user_icon');
-        if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) continue;   // `!== undefined`, not a truthy check: an empty persona name is still a value
+        const verdict = gateVerdict(entry, opts);
+        if (verdict === 'admit') { out.push(entry); continue; }
+        if (verdict === 'skip') continue;
 
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;

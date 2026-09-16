@@ -398,7 +398,11 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         .filter(g => Number.isFinite(Number(g.uid)) && !outOfScope(g))
         .map(g => entryKey({ world: g.book ?? primary, uid: g.uid })));
 
-    return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, embedModel: embedModelOf(S), modelLabel, chunkCfg: chunkConfig(S) };
+    // The gate inputs ride the scene so every makeCandidateSet caller gets them from its `{...scene}` spread.
+    // Read off the sample's scene entry when it has one (schemaVersion 3.1), else off the sample itself.
+    const sc = (S.scenes ?? [])[0] ?? S;
+    const gates = { assistantCount: sc.assistantCount, greetingIndex: sc.greetingIndex, personaName: sc.personaName, firedLatches: sc.firedLatches };
+    return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, embedModel: embedModelOf(S), modelLabel, chunkCfg: chunkConfig(S), gates };
 }
 
 /** Grade lookup by (book, uid), title as the fallback; a bare string resolves by title. Null for "nobody judged this", never 0. */
@@ -475,7 +479,7 @@ export const makeKeywordScore = P => (e, text, k1) => {
  * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores. `topK` is stage 1's own bound and counts ENTRIES.
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, haystackFor: (entry: object) => string[]) => object[]}
  */
-export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, topK = admitCeiling(true) }) {
+export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, topK = admitCeiling(true), gates = {} }) {
     const keywordScore = makeKeywordScore(P);
     // The stage-3 text index, one per book as bookIndexes keys it: pooling the books would pool their IDF.
     const { chunkMode, chunkSize, minChunkSize } = defaultSettings;
@@ -513,10 +517,17 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // --- STAGE 2: activation, keyword route, run to a fixpoint. May admit only what core could activate, so never a
         // disabled entry (F49), and on the initial pass never a delayUntilRecursion one. Its LEVEL is not modelled:
         // core walks distinct levels (world-info.js currentRecursionDelayLevel), this admits at the first pass.
-        // Reported, not applied: these gates read the chat's shape, which a capture holds only as a joined string.
-        const ungated = matcher.unmodelledGates(entries);
-        if (ungated.length) {
-            console.error(`  ${ungated.join(', ')}: gate(s) this re-derivation cannot model, so rows they would have gated OUT are admitted here`);
+        // The capture's gate inputs (eval/bundle-schema.md, 3.1). A field the bundle does not carry leaves its
+        // gate OFF, and every gate left off is reported: absent is not the same as "nothing was latched".
+        const gateOpts = {
+            assistantCount: gates.assistantCount,
+            greetingIndex: gates.greetingIndex,
+            personaName: gates.personaName,
+            fired: gates.firedLatches === undefined ? undefined : new Set(Object.keys(gates.firedLatches ?? {})),
+        };
+        const missing = matcher.unmodelledGates(entries, gateOpts);
+        if (missing.length) {
+            console.error(`  ${missing.join(', ')}: gate(s) this bundle carries no input for, so rows they would have gated OUT are admitted here`);
         }
         const admitted = new Set(rows.map(r => entryKey(r.entry)));
         // The retrieval winners feed recursion too: WA force-activates them, so core counts them in new.successful.
@@ -542,6 +553,9 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                 // latter "SHOULD be ignored" when the former is present), and core's ladder tests them in that order.
                 // A constant is NOT skipped here — it reaches the pool through stage 1 and scoreScene's `rankable` strips it.
                 if (matcher.hasDecorator(e, '@@dont_activate') && !matcher.hasDecorator(e, '@@activate')) continue;
+                const verdict = matcher.gateVerdict(e, gateOpts);
+                if (verdict === 'skip') continue;
+                if (verdict === 'admit') { found.push(e); continue; }
                 if (depth === 0 ? e.delayUntilRecursion : e.excludeRecursion) continue;
                 if (keywordScore(e, hay(e), k1) > 0) found.push(e);
             }

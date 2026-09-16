@@ -1,10 +1,11 @@
-# Graded bundle schema, v3
+# Graded bundle schema, v3.1
 
 A bundle holds one or more graded scenes: for each, a span of chat, the entries that were candidates
 for it, and every verdict anyone has passed on those entries — plus the chat text and the books, shared
 across the whole document. A reader needs nothing else on disk to interpret it. One scene is a
-one-element `scenes` list; there is no single-scene shape. `schemaVersion: 3`, and nothing on disk
-predates it.
+one-element `scenes` list; there is no single-scene shape. `schemaVersion: 3.1`, and nothing on disk
+predates 3. The minor adds a scene's *gate inputs*, which a reader treats as absent rather than empty when
+a bundle predates them — every other field is unchanged, so a 3 reader reads a 3.1 bundle.
 
 ## The bundle presents the record. It does not resolve it.
 
@@ -37,7 +38,7 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
 
 ```jsonc
 {
-  "schemaVersion": 3,
+  "schemaVersion": 3.1,
   // WHAT IDENTIFIES THIS CAPTURE, surviving a rename. Nothing content-derived can: `name` and a scene id
   // both collide across two captures of one turn under different books.
   "captureId": "4f1c2e90-7a63-4d1e-9c02-8b5a1d3e7f44",
@@ -51,6 +52,19 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
       "id": "Apollo-Splashdown-Test-msg-1044",
       "sceneChat": "…/Apollo - Splashdown Test.jsonl",
       "sceneEnd": 1044,
+
+      // THE GATE INPUTS: what the CCv3 activation gates read and a scene cannot re-derive from its own
+      // window. Absent on a pre-3.1 bundle, which is not the same as zero — a reader that cannot find
+      // them must report the gates it is therefore ignoring rather than admit rows in silence
+      // (`eval/lib/scene.mjs`). Counted over the WHOLE chat to `sceneEnd`, not over the window:
+      // `@@activate_only_after` counts from the chat's start.
+      "assistantCount": 412,        // non-user, non-system messages; @@activate_only_after, @@activate_only_every
+      "greetingIndex": 0,           // message 0's swipe_id, swipes being [first_mes, ...alternate_greetings]; @@is_greeting
+      "personaName": "Valentina",   // the active persona; @@is_user_icon
+      // Each latch key mapped to the chat length WHEN it fired, already filtered to `sceneEnd`. An index
+      // rather than a flag so a bundle sliced to an earlier end re-filters it, and so a rewound chat
+      // un-latches. Keys join book and uid with US in memory only; here they are the stored record's own.
+      "firedLatches": { "Apollo_Crew__v22\u001f7": 998 },
 
       // ONE ROW PER CANDIDATE ENTRY, carrying only what is true of the entry and the verdicts on it.
       // Scores are NOT here — they are properties of a configuration, not of the entry (see `arms`).

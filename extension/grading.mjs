@@ -208,6 +208,8 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 /** Fields identical across every arm, stored once at document level. Not query, candidates, params, cutoff or primaryBook: those are per-arm. */
 const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
 
+const GATE_INPUT_FIELDS = ['assistantCount', 'greetingIndex', 'personaName', 'firedLatches'];
+
 const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's names for sceneChat / sceneChats / sceneInjects / sceneSources
 
 /** Numeric signal values, which live under `scores` and a fitted model indexes by name; ranks and the fused score stay flat, being arm-relative. */
@@ -356,7 +358,10 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
     const indexed = indexVerdicts(gradeEntries(first.grades, { user: scene.user, now: first.createdAt }));
 
     // A scene is the graded moment, not a span: `sceneStart` and `depth` belong to the arm's cell.
-    doc.scenes = [{ id, sceneChat: first.chat ?? '', sceneEnd: scene.end, entries: indexed.entries }];
+    // The gate inputs a scene cannot re-derive from its own window (eval/bundle-schema.md); omitted, not
+    // nulled, when the capture predates them, so a reader can tell "not recorded" from "none".
+    const gateInputs = Object.fromEntries(GATE_INPUT_FIELDS.filter(f => first[f] !== undefined).map(f => [f, first[f]]));
+    doc.scenes = [{ id, sceneChat: first.chat ?? '', sceneEnd: scene.end, ...gateInputs, entries: indexed.entries }];
 
     const whyBlock = {};
     doc.arms = arms.map(({ arm, sample }) => {
