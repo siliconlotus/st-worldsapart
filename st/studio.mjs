@@ -1455,8 +1455,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const back = Object.assign({}, ...(p.forgotten ?? []).filter(f => !skipped.includes(f.name)).map(f => f.fired ?? {}));
             if (Object.keys(back).length) {
                 const meta = getContext().chatMetadata;
-                const prior = meta?.[WA_METADATA_KEY]?.fired;
-                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: { ...(Array.isArray(prior) ? {} : prior), ...back } };
+                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: { ...(meta?.[WA_METADATA_KEY]?.fired ?? {}), ...back } };
                 getContext().saveMetadata?.();
             }
         }
