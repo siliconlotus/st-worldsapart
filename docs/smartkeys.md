@@ -6,17 +6,18 @@ For how a key matches in general— substring, word boundaries, orthography, reg
 
 ## Quick reference
 
-```
-? moon mission -apollo            implicit AND; a leading - negates
-? "moon mission" OR cosmonaut     quoted phrase; AND / OR / NOT / XOR
-? =cat                            = whole word
-? ^NASA                           ^ case-sensitive
-? ^=NASA                          flags combine, in either order
-? fire::2.5                       ::N weights the term
-? (rain OR snow) -indoors         parentheses group
-? /co(l|s)monaut/i landed         /pattern/flags is a term
-? (moon mission)~3                ~N: up to 3 words between moon and mission
-```
+> [!TIP]
+> ```
+> ? moon mission -apollo            implicit AND; a leading - negates
+> ? "moon mission" OR cosmonaut     quoted phrase; AND / OR / NOT / XOR
+> ? =cat                            = whole word
+> ? ^NASA                           ^ case-sensitive
+> ? ^=NASA                          flags combine, in either order
+> ? fire::2.5                       ::N weights the term
+> ? (rain OR snow) -indoors         parentheses group
+> ? /co(l|s)monaut/i landed         /pattern/flags is a term
+> ? (moon mission)~3                ~N: up to 3 words between moon and mission
+> ```
 
 ---
 
@@ -34,7 +35,8 @@ The `^` flag makes a term case-sensitive in the same way.
 
 You can combine them to get very specific: you probably actually want `? =^NASA` for the space agency. (You can write the flags in any order; `? ^=NASA` and `? =^NASA` are equivalent in every way.)
 
-**Note:** SmartKeys flags (or lack thereof) override the entry's own settings. `? NASA` is always case-insensitive and substring-matched even if the entry has case sensitivity and whole-word matching on. This is what allows you to be more granular with your keys, mixing `? =^NASA` and `? astronaut` to get you "NASA space program" and "Apollo 11 astronauts Neil Armstrong and Buzz Aldrin" (note the plural!) but not "nasal decongestant".
+> [!NOTE]
+> SmartKeys flags (or lack thereof) take precedence over the entry's own settings. `? NASA` is always case-insensitive and substring-matched even if the entry has case sensitivity and whole-word matching on. This is what allows you to be more granular with your keys, mixing `? =^NASA` and `? astronaut` to get you "NASA space program" and "Apollo 11 astronauts Neil Armstrong and Buzz Aldrin" (note the plural!) but not "nasal decongestant".
 
 ## Operators
 
@@ -47,8 +49,7 @@ Sometimes you might want a word only when it appears with other words, or only w
 ? apollo XOR soyuz              one of them, not both (i.e., "exclusive OR")
 ```
 
-Each of those individual parts is what we call a term, so `? moon AND mission` is a key with two terms (we count the operator as a separate thing).
-
+Each of those individual parts is a **term**. `? moon AND mission` is one key with two terms; the operator doesn't count as one.
 
 You can combine as many terms as you want:
 
@@ -58,9 +59,10 @@ You can combine as many terms as you want:
 ? moon AND sun OR star AND jupiter OR saturn
 ```
 
-As you can see, when you begin to combine them, things get a bit hard to work out— is that `moon AND sun` OR `star AND jupiter`, or `moon` AND  `sun OR star`? For these cases, you'll want to use groups to make your intent clear: `? moon AND (sun OR star) AND (jupiter OR saturn)`[^2]. These groups can nest: `? ((orion AND pegasus) OR (saturn AND jupiter)) AND telescope`— you need either stars or planets plus telescope. You can nest groups up to 100 deep; if you need more than that, email the maintainer and beg absolution for your sins. 
+As you can see, when you begin to combine them, things get a bit hard to work out— is that `moon AND sun` OR `star AND jupiter`, or `moon` AND  `sun OR star`? For these cases, you'll want to use groups to make your intent clear: `? moon AND (sun OR star) AND (jupiter OR saturn)`[^2]. These groups can nest: `? ((orion AND pegasus) OR (saturn AND jupiter)) AND telescope`— you need either stars or planets plus telescope. You can nest groups up to 100 deep; if you need more than that, email the maintainer and beg absolution for your sins.
 
-**Note:** A key built only on negation (e.g., `? NOT water`) is refused in nearly every case, as it would match basically every message. It is only usable as a secondary key, where AND_ALL reads it as written and the NOT operators invert it (i.e., `NOT(NOT water)`, which is the same as requiring `water`). AND_ANY drops it entirely because it negates the entire gate.
+> [!NOTE]
+> A key built only on negation (e.g., `? NOT water`) is refused in nearly every case, as it would match basically every message. It is only usable as a secondary key, where AND_ALL reads it as written and the NOT operators invert it (i.e., `NOT(NOT water)`, which is the same as requiring `water`). AND_ANY drops it entirely because it negates the entire gate.
 
 ## Operator Spelling
 
@@ -71,19 +73,19 @@ There are a few different ways you write the operators.
 `NOT` = `not` = `-` (hyphen/minus) = `!`
 `XOR` = `xor` (it has no symbol representation)
 
-Single and double ampersand and pipe are the same operator, so write `&` or `&&`, `|` or `||`, whichever you prefer, since you probably have muscle memory from programming. 
-
 This means that `? moon AND (sun OR star) AND (jupiter OR saturn)` and `? moon and (sun | star) & (jupiter || saturn)` are perfectly equivalent, if somewhat difficult to read; pick one and stick with it (symbolic is most concise: `? moon & (sun | star) & (jupiter | saturn)`)
 
-You might sometimes want to use a term that contains one of these symbols; `? "AT&T"` gets you the company, where `? AT&T` is a two term expression equivalent to `? at AND t`. This works for just about any symbol in the grammar; `? "()"` gets you a Sigur Rós album, where `? ()` evaluates to nothing and matches nothing; `? "/hello/"` includes literal forward slashes and is not a regex. It's worth noting, however, the exception: quotation marks do *not* escape hyphen expansion. `? "sci-fi convention"` will match `we went to the sci fi convention` so you don't have to think about it; if you want the literal span including hyphen, just use a plain regex `/sci-fi convention/`.  
+You might sometimes want to use a term that contains one of these symbols; `? "AT&T"` gets you the company, where `? AT&T` is a two term expression equivalent to `? at AND t`. This works for just about any symbol in the grammar; `? "()"` gets you a Sigur Rós album, where `? ()` evaluates to nothing and matches nothing; `? "/hello/"` includes literal forward slashes and is not a regex. It's worth noting, however, the exception: quotation marks do *not* escape hyphen expansion. `? "sci-fi convention"` will match `we went to the sci fi convention` so you don't have to think about it; if you want the literal span including hyphen, just use a plain regex `/sci-fi convention/`.
+
+> [!TIP]
+> Single and double ampersand and pipe are the same operator, so write `&` or `&&`, `|` or `||`, whichever you prefer.
 
 ## Implicit AND and Quote Escaping
 
-Since AND is the most common operator, we assume it whenever an operator is not provided; `? moon mission` is equivalent to `? moon AND mission`. In many cases, this helps expressions read more easily, like `? apollo OR (moon mission)`. This, however, means that multi-word SmartKeys do not behave the same as multi-word plain keywords; `? apollo astronauts` gets you `the astronauts of the Apollo mission` where plain `apollo astronauts` does not. Sometimes this is desirable and sometimes this is not; `? Neil Armstrong` gets you `Neil's Stretch Armstrong toy`. In those cases, you can use quotes for a literal match: `? "Neil Armstrong"`. In the simple case, this is directly equivalent to plain keyword `Neil Armstrong`, so you might consider using that instead. Where it begins to matter is in more complex expressions: `? "Neil Armstrong" astronaut`. 
+Since AND is the most common operator, we assume it whenever an operator is not provided; `? moon mission` is equivalent to `? moon AND mission`. In many cases, this helps expressions read more easily, like `? apollo OR (moon mission)`. This, however, means that multi-word SmartKeys do not behave the same as multi-word plain keywords; `? apollo astronauts` gets you `the astronauts of the Apollo mission` where plain `apollo astronauts` does not. Sometimes this is desirable and sometimes this is not; `? Neil Armstrong` gets you `Neil's Stretch Armstrong toy`. In those cases, you can use quotes for a literal match: `? "Neil Armstrong"`. In the simple case, this is directly equivalent to plain keyword `Neil Armstrong`, so you might consider using that instead. Where it begins to matter is in more complex expressions: `? "Neil Armstrong" astronaut`.
 
 Quoted phrases can use the whole-word match and case-sensitive flags like any other term:
-`? ^"Navy SEAL"` does not match `navy seal`; `? ="cat scan"` matches `get a CAT scan` but not `a new CAT scanner`. 
-
+`? ^"Navy SEAL"` does not match `navy seal`; `? ="cat scan"` matches `get a CAT scan` but not `a new CAT scanner`.
 
 | expression | equivalent to |
 |---|---|
@@ -99,7 +101,7 @@ A plain term scores one: `? moon` or its equivalent `moon` are about one thing.
 
 An AND turns two terms into one thing: `? moon mission` is only valid if both of those terms are present. `? moon mission` is more specific than `moon` alone, so we judge it to be more relevant, and assign it a score of two (1 + 1). Likewise, `? apollo astronaut neil armstrong` is four-things-as-one, so when it matches, it gets a score of four.
 
-An OR, on the other hand, is about options. A chat might call them glasses or spectacles, and both are equally good; `? glasses OR spectacles` is therefore only as good as each term separately, and each match is assigned a score of one. 
+An OR, on the other hand, is about options. A chat might call them glasses or spectacles, and both are equally good; `? glasses OR spectacles` is therefore only as good as each term separately, and each match is assigned a score of one.
 
 Sometimes, however, different terms are differently specific or relevant. If a lorebook entry is about the pair of Ray-Bans that a beloved relative bought your character, you might decide that `sunglass` is an okay term, but `Ray-Bans` is much better. In that case, you can weight the score with the double-colon modifier: `? Ray-Ban::5`[^3], saying "Ray-Ban is a much more important term than any other". A term anywhere in an expression can be weighted: `? (sunglass OR Ray-Ban::5)` means that if it matches on `sunglass` or `sunglasses`, it gets a score of one, but if it matches `Ray-Ban`, it gets five. Groups themselves can also be weighted: `? (sunglass OR ray-ban)::5`
 
@@ -115,11 +117,11 @@ Sometimes, however, different terms are differently specific or relevant. If a l
 | `? (sunglass OR ray-ban::5)::5` | `I got new Ray-Bans`| Yes | 25 |
 | `? sunglass AND ray-ban` | `I got new Ray-Bans`| No | 0 |
 
-(XOR behaves identically to OR in these examples)
+<sub>(XOR behaves identically to OR in these examples)</sub>
 
 It is possible to assign a score of `::0`; in this case, the term is not scored, but only used as a gate. This can be useful for keys that otherwise might overlap: `? saturn OR venus OR (mercury AND planet::0)`, which allows you to specify the planet instead of the singer or the car without it scoring higher than the other planets.
 
-What about multiple matches?
+### What about multiple matches?
 While you might expect two hits to be worth twice one hit, to prevent keys that have common terms from vastly outweighing keys with less-common terms, we use a saturation curve. On a single unweighted term, one match is worth one. Ten matches is worth about three. OR groups are saturated against all of their terms in any combination; `? sunglass OR ray-ban` may have 2 sunglass hits and 3 Ray-Ban, or five sunglass and no Ray-Ban, but it's still five hits. This can intersect unexpectedly with weights.
 
 Against *"I got new Ray-Ban sunglasses"*:
@@ -129,13 +131,13 @@ Against *"I got new Ray-Ban sunglasses"*:
 | `? sunglass OR ray-ban` | 2 | 1.6061 |
 | `? sunglass OR ray-ban::5` | 2 | 4.8184 |
 | `? (sunglass OR ray-ban)::5` | 2 | 8.0307 |
+| `? sunglass XOR ray-ban` | 0 | 0 |
 | `? sunglass AND ray-ban` | 2 | 2 |
 | `? sunglass::0 AND Ray-Ban` | 1 | 1 |
-| `? sunglass XOR ray-ban` | 0 | 0 |
 
-The math is not super important; just know that the scores you're expecting may not line up with the scores actually assigned. 
+The math is not super important; just know that the scores you're expecting may not line up exactly with the scores actually assigned.
 
-## A regex can be a term
+## Regex Terms
 
 A regular expression inside a SmartKey is a term like any other: it can take an operator, be negated, and carry a weight.
 
@@ -148,20 +150,20 @@ A regular expression inside a SmartKey is a term like any other: it can take an 
 
 There are a few things to watch out for:
 - A term is read as a regex only when it begins and ends with a forward slash; `? /24-7/` is a regex, `? 24/7` is four literal characters, `? /home/user/file` is also literal.
-- Regexes can be escaped with quotes; `? "/re/"` is literal four-character `/re/`. 
-- Two (or more) regexes expect a space between them; `? /apples?/bananas?/` is one regex that contains apple with optional s, a literal forward slash, and banana with optional s. 
+- Regexes can be escaped with quotes; `? "/re/"` is literal four-character `/re/`.
+- Two (or more) regexes expect a space between them; `? /apples?/bananas?/` is one regex that contains apple with optional s, a literal forward slash, and banana with optional s.
 
-How a pattern itself matches — flags, folding, `\b`, anchors — is on the [matching page](matching.md#regex-keys).
+For more on how a pattern itself matches — flags, folding, `\b`, anchors — see the [matching documentation](matching.md#regex-keys).
 
 ## Proximity
 
 Sometimes a group of words is only useful when they're close to each other. Consider `? copper pipe`. This gets you `a copper pipe` and `a pipe made of copper`, but it also gets you `Pipes are made of PVC, and come in several stylish colors including white, black, silver, copper, and gold.`. In these cases, you might consider a proximity match. (This section gets complicated, so it might take a couple of reads— highly recommend trying things in the Lab to see how they work.)
 
-You need two things for a proximity match: a group of things delimited by parenths, and a slack value, delimited by a tilde (`~`) character.
-`? (mission mars)~2` means "both of these words, with at most 2 words in between them", or "mars within 2 words of mission".
-`a mars mission`: Match
-`the mission to Mars`: Match (1 word in between; order doesn't matter)
-`Missions have slowed in recent years, and Mars seems unlikely` No match (6 words in between)
+You need two things for a proximity match: a group of things delimited by parenths, and a slack value, delimited by a tilde (`~`) character. `? (mission mars)~2` means "both of these words, with at most 2 words in between them", or "mars within 2 words of mission".
+
+> `a mars mission`: Match
+> `the mission to Mars`: Match (1 word in between; order doesn't matter)
+> `Missions have slowed in recent years, and Mars seems unlikely`: No match (6 words in between)
 
 `~0` is a useful case because it means "the words can be in either order as long as they're next to each other": `? (Akira Kurosawa)~0` gets you both Western style `Akira Kurosawa`, family name last, and Eastern style `Kurosawa Akira`, family name first. Note that this only applies to *words*, not punctuation: `Born in Kurosawa, Akira had two brothers` matches. For strict phrasal order invariance, use an OR group: `? ("Akira Kurosawa" OR "Kurosawa Akira")`.
 
@@ -178,12 +180,13 @@ SillyTavern's only way of writing a boolean condition is the *Secondary Keywords
 Say you have an entry about Ash Ketchum's relationship with his Pokémon. In ST, you might write that as ["Ash", "Ketchum"] AND_ANY ["Pikachu", "Bulbasaur", "Charmander"].
 
 That can be written boolean-style as `(Ash OR Ketchum) AND (Pikachu OR Bulbasaur OR Charmander)`. The problem is that ST case-sensitivity and whole-word matching is equally applied to all keys in an entry; if you turn whole-word on so `Ash` doesn't match `Rapidash`, then `Pikachu` no longer matches `Pikachus` and you have to spell it out. Likewise, if you turn on case-sensitivity so that `Ash` doesn't match `the campfire burned to ash`, you miss out on `PIKACHU! I CHOOSE YOU!`. WA, by contrast, allows you to have it all quite simply:
-`? (=^Ash OR =^Ash's OR Ketchum OR Satoshi) AND (pikachu OR bulbasaur OR charmander)` gets you everything at the cost of having to spell out `Ash's`. 
+`? (=^Ash OR =^Ash's OR Ketchum OR Satoshi) AND (pikachu OR bulbasaur OR charmander)` gets you everything at the cost of having to spell out `Ash's`.
 
 It also allows you to easily express things that ST simply does not allow:
 `? (=^Ash AND pikachu -=^Oak) OR (=^Misty AND squirtle -cerulean)`
 
-**WARNING:** WorldsApart supports secondary keys because one of our goals is that a book performs essentially identically under WA as under ST core. That means that if you have pre-existing secondary keys, they will be applied. So if you have an entry with keys ["Ash", "Ketchum"] AND_ANY ["Pikachu", "Bulbasaur"], if you then add key `? =^Ash AND ^Misty`, the text must contain Ash, Misty, *and* Pikachu or Bulbasaur. You can't exempt keys from this; it's all or nothing. Either you leave the secondary keys and accept that, or you rewrite the conditions as a SmartKey: `? (=^Ash OR ^Ketchum) AND (pikachu OR bulbasaur)`. It's not necessary to delete the secondary keys if you rewrite them— you can simply set them to OFF in case you ever need to port to a non-WA system where the SmartKeys won't work.
+> [!WARNING]
+> **Secondary keys always apply.** WorldsApart supports secondary keys because one of our goals is that a book performs essentially identically under WA as under ST core. That means that if you have pre-existing secondary keys, they will be applied. So if you have an entry with keys ["Ash", "Ketchum"] AND_ANY ["Pikachu", "Bulbasaur"], if you then add key `? =^Ash AND ^Misty`, the text must contain Ash, Misty, *and* Pikachu or Bulbasaur. You can't exempt keys from this; it's all or nothing. Either you leave the secondary keys and accept that, or you rewrite the conditions as a SmartKey: `? (=^Ash OR ^Ketchum) AND (pikachu OR bulbasaur)`. It's not necessary to delete the secondary keys if you rewrite them— you can simply set them to OFF in case you ever need to port to a non-WA system where the SmartKeys won't work.
 
 ---
 

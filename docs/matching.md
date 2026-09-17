@@ -8,6 +8,8 @@ A World Info key in WA can be one of three things:
 | regex | `/co(l\|s)monaut/i` | a regular expression, as core already supports |
 | **SmartKey** | `? moon mission -apollo` | a boolean expression — a leading `?` opts in |
 
+One key is one item in the Keywords box (comma-separated in ST, chips in Studio), whichever of those three forms it takes. *Keyword* means the plain form specifically, the one that gets matched as text; ST keys come in two forms: keywords and regexes. SmartKeys divide into *terms*, their operational parts: `? moon AND mission` is one key holding two terms.
+
 This page is about how any key matches. The `?` syntax has its own page: [SmartKeys](smartkeys.md).
 
 ---
@@ -24,7 +26,7 @@ In SillyTavern, a keyword is an exact substring match, so the term `moon` matche
 
 ### Orthographic Normalization
 
-WA generally tries to model an author's intent when matching. A user who writes the key `Cap'n Crunch` probably wants it whether the apostrophe is the straight form from their keyboard or the fancy curly form that displays sometimes, and LLMs frequently emit both on an inconsistent basis. Consequently, WA normalizes a few classes of characters to ensure consistent matching regardless of variant forms being used.
+WA generally tries to match an author's likely intent when matching: "**what you meant, not what you wrote**". A user who writes the key `Cap'n Crunch` probably wants it whether the apostrophe is the straight form from their keyboard or the fancy curly form that displays sometimes, and LLMs frequently emit both on an inconsistent basis. Consequently, WA normalizes a few classes of characters to ensure consistent matching regardless of variant forms being used and to allow easy creation of keys without worrying too much about representation.
 
 | class | written | matches |
 |---|---|---|
@@ -36,11 +38,15 @@ WA generally tries to model an author's intent when matching. A user who writes 
 | Spaces | non-breaking space | ordinary space |
 | Accents and combining marks | decomposed `José` (`e` + a combining acute) | composed `José` (NFC, the single letter `é`) |
 
-What this means is that you don't need to care about any of this — you can write whatever way is comfortable to you without needing to provide variant keys for whatever the model may be spitting out. If any of your keys use any of these marks, it's very likely that SillyTavern wasn't matching them in some cases where you would have expected it to.
+What this means is that **you don't need to care about any of this** — you can write whatever way is comfortable to you without needing to think about variant keys for whatever the model may be spitting out. If any of your keys use any of these marks, it's very likely that SillyTavern wasn't matching them in some cases where you would have expected it to.
 
-This principle extends to hyphens; WA expands word-internal hyphens to spaces so that `sci-fi` also matches `sci fi`, because often the hyphen is a matter of taste or convention. If you specifically want the hyphen, write the key as a regex: `/sci-fi/`. (The reverse is not true — key `sci fi` will not match `sci-fi` in the chat, because it would require turning every space in the chat into a hyphen). Leading and trailing hyphens are exempted from the expansion (e.g., `-gate` will only match `bridge-gate`, not `the bridge gate is broken`.)
+The "what you meant, not what you wrote" principle extends to hyphens; WA expands word-internal hyphens to spaces so that `mother-in-law` also matches `mother in law`, because often the hyphen is a matter of taste or convention. If you specifically want the hyphen, write the key as a regex: `/mother-in-law/`. (The reverse is not true — key `mother in law` will not match `mother-in-law` in the chat, because it would require turning every space in the chat into a hyphen). Leading and trailing hyphens are exempted from the expansion (e.g., `-gate` will only match `bridge-gate`, not `the bridge gate is broken`.)
 
-**Note:** WA does *not* remove accents like some systems do; `cafe` does not match `café`, because those are only considered the same thing in English, and WA supports many languages (French `a` and `à` are completely separate words.) Use an OR group to capture accent variants if they might arise (models are usually pretty good about using them consistently). 
+> [!TIP]
+> **Hyphens are a one-way journey**. If you think the hyphenated form might appear in the text, it's best to draft the key with them; if the text doesn't use them, it will still match, but if you write a non-hyphenated key and the model uses hyphens, it won't.
+
+> [!NOTE]
+> WA does *not* strip accents like some systems do; `cafe` does not match `café`. Use an OR group to capture accent variants if they might arise: `? =cafe OR café`
 
 ---
 
@@ -92,7 +98,8 @@ Note that JS regex `\w`, `\b` and `\d` are ASCII-only, which can cause unexpecte
 
 This is true even if you force unicode awareness with flags /u and /v. The unicode-aware version of \b is a combined lookahead and lookbehind[^3] `(?<![\p{L}\p{N}\p{M}])` + `(?![\p{L}\p{N}\p{M}])` with the unicode flag /u (e.g., `/(?<![\p{L}\p{N}\p{M}])André(?![\p{L}\p{N}\p{M}])/u`). For this reason, it is recommended to use plain terms if you want to use accented characters and boundary markers, as WA handles this under the hood. Under permissive mode, `? =André` behaves sensibly, matching `my friend André`, `André's new`, and `André-shaped` but not `Andréas`; under strict mode, you must spell out variants like `? (=^André | =^André's | ^André-)`. This also gets you the curly-quotes normalization and normalization to composed form, so typing e + combining acute `André` will match even though the text is always in composed form.
 
-> **Note:** Regex anchors `^` and `$` are applied against the Match window, not the whole scan. At the default, Paragraph, they anchor once per paragraph (`^` matches at the start of each one); under Message, once per message; under Whole scan window, a bare `^` matches at a single position — the start of the window, however many messages and paragraphs are inside it. Consider `/m`, which anchors at every line break.
+> [!NOTE]
+> Regex anchors `^` and `$` are applied against the Match window, not the whole scan. At the default, Paragraph, they anchor once per paragraph (`^` matches at the start of each one); under Message, once per message; under Whole scan window, a bare `^` matches at a single position — the start of the window, however many messages and paragraphs are inside it. Consider `/m`, which anchors at every line break.
 
 Against `/^Dream/`:
 
@@ -145,11 +152,6 @@ If you write a regex containing unescaped slashes and plan to port it to a non-W
 Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The Studio warns on the first row's shape, for a bare `/regex/` key and a `? /re/` term alike.
 
 [^1]: `REGEX_KEY_RE` in `extension/matcher.mjs` is the authority for which flags a key may carry.
-      Core's own list is the narrower `CORE_REGEX_KEY_RE` beside it, which is why `/d` and `/v` are
-      WA-only.
-[^2]: The full fold class WA uses is ``['‘’‚‛ʼʹ´`′‹›]``. If you need to check it, the
-      authority is `ORTHO_FAMILIES` in `extension/automaton.mjs` — the fold is built from that table, so a
-      character listed here and not there (or the reverse) is this footnote being out of date.
-[^3]: `BOUNDARY_CLASSES` in `extension/matcher.mjs` is the authority for both classes: permissive is
-      `[\p{L}\p{N}\p{M}]` and strict adds `-`, `'` and `’`. Neither contains `_`, which is why
-      whole-word `Joe` matches `_Joe_`.
+      Core's own list is the narrower `CORE_REGEX_KEY_RE` beside it, which is why `/d` and `/v` are WA-only.
+[^2]: The full fold class WA uses is ``['‘’‚‛ʼʹ´`′‹›]``. If you need to check it, the authority is `ORTHO_FAMILIES` in `extension/automaton.mjs` — the fold is built from that table, so a character listed here and not there (or the reverse) is this footnote being out of date.
+[^3]: `BOUNDARY_CLASSES` in `extension/matcher.mjs` is the authority for both classes: permissive is `[\p{L}\p{N}\p{M}]` and strict adds `-`, `'` and `’`. Neither contains `_`, which is why whole-word `Joe` matches `_Joe_`.

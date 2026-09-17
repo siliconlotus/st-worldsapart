@@ -79,7 +79,7 @@ does not carry "rare in one corpus" as a reason.
  every arm returns a byte-identical candidate set (10,103 vector rows, 353 keyword rows, 670 of 672
  retrievable relevant), differing only in query terms (none 2911 / keys 4042 / shipped 6130 / bodies
  36,789 — bodies ≈ 5–10x the vocabulary; the keys-live arm read 9839). The `denseColumn` reweighting arms moved +0.0056 and
- +0.0005 nDCG@10 over the same 70 scenes — a question the vector weight asks directly. 
+ +0.0005 nDCG@10 over the same 70 scenes — a question the vector weight asks directly.
  — `extension/entity.mjs buildTermWeights, buildGazetteer`; `eval/param-screen.mjs`.
 
 - **R21** — Entity-tuning trap run results (recorded so the metric choice survives): relevant-per-scene

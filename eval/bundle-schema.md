@@ -117,7 +117,7 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
           // the depth this capture graded at; `gradedCandidates` is how many rows actually reached a
           // grader, so rows past it are UNGRADED rather than irrelevant, and a deep-cutoff arm scored
           // past it is reporting a lower bound. NOTHING declares a grade out of scope: the harness ranks
-          // every book in `books`, so scope is membership there (eval/scene.mjs `outOfScope`). Bundles
+          // every book in `books`, so scope is membership there (eval/lib/scene.mjs `outOfScope`). Bundles
           // written before 2026-08-25 carry an `excludeTitles` list here; it is not read.
           "cutoff": { "live": { "maxVectorEntries": 20 } }, "gradedCandidates": 20,
           // IN LAYOUT ORDER — see below. `index` and `tokens` are the fields a reader can count on;
@@ -236,7 +236,7 @@ drops promoted rows out of the pool. A row with `sticky` configured that activat
 carrying the author's OS username. `grading.mjs` `stRelative` cuts at the first of ST's top-level
 directories, first because a chat folder may itself be named `data`; a path naming none is stored
 unchanged. `stInstall().resolve` maps a `data/` prefix through `config.yaml` `dataRoot` and anything
-else through the root; `eval/scene.mjs` skips a stored `index` that does not exist locally and derives
+else through the root; `eval/lib/scene.mjs` skips a stored `index` that does not exist locally and derives
 its own.
 
 ## WA's version is declared, ST's is resolved
@@ -246,10 +246,10 @@ Both sit on the arm, because arms of one scene are captured at different times.
 `waVersion` is `manifest.json`'s version, read by the extension from its own manifest — a release
 identity, and what a bug report can quote. It can afford to be coarse: a bundle carries WA's whole
 input — `books`, `query`, `scanChat`, `injects`, `paramSnapshot`, `embedModel` — so a reader re-derives
-stages 1 and 3 through `eval/scene.mjs` rather than trusting what any version computed.
+stages 1 and 3 through `eval/lib/scene.mjs` rather than trusting what any version computed.
 
 `stVersion` is `<branch>@<commit>`, from ST's `/version` at runtime and `git describe` offline
-(`eval/gitversion.mjs`). Resolved rather than declared because ST's code is the one thing a bundle does
+(`eval/lib/gitversion.mjs`). Resolved rather than declared because ST's code is the one thing a bundle does
 *not* carry, and because ST's declared version only advances on pushes to `main`: a staging
 `package.json` names a release its tree is not (G8).
 
@@ -386,6 +386,6 @@ the id, not the index, is the identity.
 - Agreement, drift, and per-rater statistics.
 - Availability — whether an entry could have existed at `sceneEnd`.
 
-The rule WA states is `extension/grading.mjs` `gradeValue`, re-exported by `eval/metrics.mjs` so every
+The rule WA states is `extension/grading.mjs` `gradeValue`, re-exported by `eval/lib/metrics.mjs` so every
 reader shares one copy: the latest human verdict if any, else the judges' median once three exist, else
 the latest judge. A later judge pass is not a better one (G7).
