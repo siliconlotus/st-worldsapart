@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-label="WorldsApart — the lorebooks you deserve">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#090d1b"/><stop offset="0.6" stop-color="#0f1633"/><stop offset="1" stop-color="#1a1130"/>
+    </linearGradient>
+    <radialGradient id="sunCore" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fffdf2"/><stop offset="0.45" stop-color="#ffe9a8"/>
+      <stop offset="0.78" stop-color="#ffbe52"/><stop offset="1" stop-color="#ef8a2a"/>
+    </radialGradient>
+    <radialGradient id="corona" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.24" stop-color="#ffcf72" stop-opacity="0.4"/>
+      <stop offset="0.58" stop-color="#ff9e45" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#ff9e45" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="saturnBody" cx="0.34" cy="0.26" r="0.84">
+      <stop offset="0" stop-color="#f3e6ff"/><stop offset="0.45" stop-color="#c9a3f0"/>
+      <stop offset="0.82" stop-color="#8a5bc4"/><stop offset="1" stop-color="#3a2263"/>
+    </radialGradient>
+    <radialGradient id="uranusBody" cx="0.34" cy="0.26" r="0.84">
+      <stop offset="0" stop-color="#d8f4f2"/><stop offset="0.5" stop-color="#9fdcdc"/>
+      <stop offset="0.85" stop-color="#5fa8ae"/><stop offset="1" stop-color="#244a52"/>
+    </radialGradient>
+    <radialGradient id="neptuneBody" cx="0.34" cy="0.26" r="0.84">
+      <stop offset="0" stop-color="#bcd6ff"/><stop offset="0.45" stop-color="#5a86e0"/>
+      <stop offset="0.85" stop-color="#2f52ad"/><stop offset="1" stop-color="#15224f"/>
+    </radialGradient>
+    <filter id="clouds" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.085" numOctaves="4" seed="7" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.9 0.5 0 0 -0.18" result="a"/>
+      <feComposite in="a" in2="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="clouds2" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.11" numOctaves="3" seed="23" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0.8 0.4 0 0 -0.26" result="a"/>
+      <feComposite in="a" in2="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="2" seed="4" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.5 0.3 0 0 -0.22" result="a"/>
+      <feComposite in="a" in2="SourceGraphic" operator="in"/>
+    </filter>
+    <radialGradient id="limb" cx="0.36" cy="0.28" r="0.78">
+      <stop offset="0.45" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="0.82" stop-color="#050a18" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#03060f" stop-opacity="0.72"/>
+    </radialGradient>
+    <radialGradient id="spec" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="panel"><rect width="1280" height="420" rx="14"/></clipPath>
+    <clipPath id="satClip"><circle cx="950" cy="176" r="44"/></clipPath>
+    <clipPath id="uraClip"><circle cx="889" cy="281" r="24"/></clipPath>
+    <clipPath id="nepClip"><circle cx="834" cy="376" r="22"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#panel)">
+    <rect width="1280" height="420" fill="url(#sky)"/>
+
+    <g fill="#ffffff">
+      <circle cx="104" cy="52" r="1.5" opacity="0.6"/><circle cx="232" cy="118" r="1.1" opacity="0.38"/>
+      <circle cx="318" cy="40" r="1.3" opacity="0.48"/><circle cx="70" cy="204" r="1" opacity="0.32"/>
+      <circle cx="188" cy="300" r="1.4" opacity="0.42"/><circle cx="392" cy="232" r="1" opacity="0.28"/>
+      <circle cx="524" cy="62" r="1.5" opacity="0.5"/><circle cx="640" cy="372" r="1.1" opacity="0.35"/><circle cx="470" cy="392" r="1.2" opacity="0.3"/>
+      <circle cx="742" cy="86" r="1.2" opacity="0.32"/><circle cx="1248" cy="212" r="1.3" opacity="0.42"/>
+      <circle cx="1196" cy="392" r="1.1" opacity="0.32"/><circle cx="1082" cy="356" r="1.2" opacity="0.3"/>
+      <circle cx="1214" cy="62" r="1.2" opacity="0.36"/><circle cx="906" cy="120" r="1" opacity="0.26"/>
+    </g>
+
+    <g transform="rotate(-8 1048 6)" fill="none" stroke="#7fa8e8">
+      <ellipse cx="1048" cy="6" rx="275" ry="172" stroke-opacity="0.3" stroke-width="1.6"/>
+      <ellipse cx="1048" cy="6" rx="434" ry="280" stroke-opacity="0.22" stroke-width="1.6"/>
+      <ellipse cx="1048" cy="6" rx="570" ry="380" stroke-opacity="0.15" stroke-width="1.6"/>
+    </g>
+
+    <circle cx="1048" cy="6" r="196" fill="url(#corona)"/>
+    <circle cx="1048" cy="6" r="58" fill="url(#sunCore)"/>
+
+    <g transform="rotate(-17 950 176)">
+      <ellipse cx="950" cy="176" rx="90" ry="23.5" fill="none" stroke="#b99ae0" stroke-opacity="0.3" stroke-width="3"/>
+      <ellipse cx="950" cy="176" rx="85" ry="22.2" fill="none" stroke="#eadcff" stroke-opacity="0.42" stroke-width="2.4"/>
+      <ellipse cx="950" cy="176" rx="80" ry="20.9" fill="none" stroke="#c9b0ea" stroke-opacity="0.34" stroke-width="3.2"/>
+      <ellipse cx="950" cy="176" rx="75" ry="19.6" fill="none" stroke="#0f1633" stroke-opacity="0.55" stroke-width="2"/>
+      <ellipse cx="950" cy="176" rx="71" ry="18.5" fill="none" stroke="#f3e8ff" stroke-opacity="0.4" stroke-width="3.4"/>
+      <ellipse cx="950" cy="176" rx="66" ry="17.2" fill="none" stroke="#9d7fc9" stroke-opacity="0.26" stroke-width="2.2"/>
+    </g>
+    <circle cx="950" cy="176" r="44" fill="url(#saturnBody)"/>
+    <g clip-path="url(#satClip)" opacity="0.26">
+      <ellipse cx="950" cy="159" rx="50" ry="5" fill="#4a2a7a" transform="rotate(-17 950 176)"/>
+      <ellipse cx="950" cy="173" rx="52" ry="4" fill="#4a2a7a" transform="rotate(-17 950 176)"/>
+      <ellipse cx="950" cy="187" rx="48" ry="6" fill="#4a2a7a" transform="rotate(-17 950 176)"/>
+      <ellipse cx="950" cy="200" rx="40" ry="4" fill="#4a2a7a" transform="rotate(-17 950 176)"/>
+    </g>    <g clip-path="url(#satClip)">
+      <g transform="rotate(-17 950 176)">
+        <rect x="900" y="126" width="100" height="100" filter="url(#clouds)" opacity="0.55"/>
+        <rect x="900" y="126" width="100" height="100" filter="url(#clouds2)" opacity="0.4"/>
+      </g>
+      <circle cx="950" cy="176" r="44" fill="url(#limb)"/>
+      <ellipse cx="935.04" cy="159.28" rx="18.48" ry="13.2" fill="url(#spec)" transform="rotate(-24 950 176)"/>
+    </g>
+    <g clip-path="url(#satClip)" opacity="0.3">
+      <ellipse cx="950" cy="186" rx="50" ry="5" fill="#231043" transform="rotate(-17 950 176)"/>
+    </g>
+    <circle cx="950" cy="176" r="44" fill="none" stroke="#e9d8ff" stroke-opacity="0.26"/>
+    <g transform="rotate(-17 950 176)">
+      <path d="M 860 176 A 90 23.5 0 0 0 1040 176" fill="none" stroke="#b99ae0" stroke-opacity="0.4" stroke-width="3"/>
+      <path d="M 865 176 A 85 22.2 0 0 0 1035 176" fill="none" stroke="#f3e8ff" stroke-opacity="0.62" stroke-width="2.4"/>
+      <path d="M 870 176 A 80 20.9 0 0 0 1030 176" fill="none" stroke="#c9b0ea" stroke-opacity="0.5" stroke-width="3.2"/>
+      <path d="M 875 176 A 75 19.6 0 0 0 1025 176" fill="none" stroke="#0f1633" stroke-opacity="0.5" stroke-width="2"/>
+      <path d="M 879 176 A 71 18.5 0 0 0 1021 176" fill="none" stroke="#fdf4ff" stroke-opacity="0.55" stroke-width="3.4"/>
+      <path d="M 884 176 A 66 17.2 0 0 0 1016 176" fill="none" stroke="#9d7fc9" stroke-opacity="0.34" stroke-width="2.2"/>
+    </g>
+
+    <g transform="rotate(8 889 281)">
+      <ellipse cx="889" cy="281" rx="7" ry="42" fill="none" stroke="#bfeaea" stroke-opacity="0.36" stroke-width="1.8"/>
+      <ellipse cx="889" cy="281" rx="12" ry="48" fill="none" stroke="#bfeaea" stroke-opacity="0.16" stroke-width="1.3"/>
+    </g>
+    <circle cx="889" cy="281" r="24" fill="url(#uranusBody)"/>
+    <g clip-path="url(#uraClip)" opacity="0.26">
+      <ellipse cx="889" cy="276" rx="28" ry="5" fill="#2d6a70" transform="rotate(80 889 281)"/>
+      <ellipse cx="889" cy="288" rx="26" ry="3.5" fill="#2d6a70" transform="rotate(80 889 281)"/>
+    </g>    <g clip-path="url(#uraClip)">
+      <g transform="rotate(80 889 281)">
+        <rect x="859" y="251" width="60" height="60" filter="url(#clouds)" opacity="0.55"/>
+        <rect x="859" y="251" width="60" height="60" filter="url(#clouds2)" opacity="0.4"/>
+      </g>
+      <circle cx="889" cy="281" r="24" fill="url(#limb)"/>
+      <ellipse cx="880.84" cy="271.88" rx="10.08" ry="7.199999999999999" fill="url(#spec)" transform="rotate(-24 889 281)"/>
+    </g>
+    <circle cx="889" cy="281" r="24" fill="none" stroke="#cdf0f0" stroke-opacity="0.24"/>
+    <path d="M 889 239 A 7 42 0 0 0 889 323" fill="none" stroke="#d8f4f2" stroke-opacity="0.32" stroke-width="1.8" transform="rotate(8 889 281)"/>
+
+    <circle cx="834" cy="376" r="22" fill="url(#neptuneBody)"/>
+    <g clip-path="url(#nepClip)" opacity="0.26">
+      <ellipse cx="834" cy="367" rx="26" ry="3.5" fill="#16306e" transform="rotate(-26 834 376)"/>
+      <ellipse cx="834" cy="384" rx="24" ry="4" fill="#16306e" transform="rotate(-26 834 376)"/>
+    </g>    <g clip-path="url(#nepClip)">
+      <g transform="rotate(-26 834 376)">
+        <rect x="806" y="348" width="56" height="56" filter="url(#clouds)" opacity="0.55"/>
+        <rect x="806" y="348" width="56" height="56" filter="url(#clouds2)" opacity="0.4"/>
+        <rect x="806" y="348" width="56" height="56" filter="url(#grain)" opacity="0.5"/>
+      </g>
+      <circle cx="834" cy="376" r="22" fill="url(#limb)"/>
+      <ellipse cx="826.52" cy="367.64" rx="9.24" ry="6.6" fill="url(#spec)" transform="rotate(-24 834 376)"/>
+    </g>
+    <ellipse cx="840" cy="378" rx="7" ry="4" fill="#0e2050" opacity="0.5" transform="rotate(-26 834 376)"/>
+    <circle cx="834" cy="376" r="22" fill="none" stroke="#9fc0ff" stroke-opacity="0.2"/>
+
+    <g font-family="Optima, Palatino, Georgia, 'Iowan Old Style', serif">
+      <text x="88" y="196" font-size="88" letter-spacing="4">
+        <tspan fill="#f4f7ff">Worlds</tspan><tspan fill="#8cc2ff" font-style="italic">Apart</tspan>
+      </text>
+      <text x="100" y="246" fill="#9fb3d9" font-size="27" letter-spacing="3.5" font-style="italic">the lorebooks you deserve</text>
+    </g>
+    <rect x="100" y="276" width="132" height="2" fill="#6fb6ff" opacity="0.7"/>
+    <text x="99" y="316" fill="#7f90b5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" letter-spacing="1.5">relevance · matching · studio</text>
+  </g>
+</svg>
