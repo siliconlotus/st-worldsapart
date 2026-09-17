@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isRegexKey } from '../extension/matcher.mjs';
 // The threshold has an authoritative home; a restated 0.50 here is how this and the in-app audit drift.
-import { stInstall } from './scene.mjs';
+import { stInstall } from './lib/scene.mjs';
 
 // The install is located, never named: an absolute path here is one machine's (scene.mjs stInstall).
 const ST = stInstall();

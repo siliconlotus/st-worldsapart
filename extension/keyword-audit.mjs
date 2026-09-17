@@ -2,7 +2,7 @@
 // (buildKeyPruneScan) and the predicates its flags rest on. ST-free; keyword-tools.mjs injects the match flags.
 import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
-import { countKey, countRegexKey, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
+import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 
@@ -12,10 +12,10 @@ export const KEY_MIN_SHARED_ENTRIES = 10;
 export const KEY_MIN_LENGTH = 4;
 
 /** Share of the book LISTING a key at which the flag turns severe: how many entries one match activates. */
-export const KEY_BOOK_SHARED = 0.75;
+const KEY_BOOK_SHARED = 0.75;
 
 /** The flag itself fires at this fraction of `KEY_BOOK_SHARED`, so `book shared` has a moderate band below its severe one. */
-export const KEY_BOOK_SHARED_FLAG = 0.75;
+const KEY_BOOK_SHARED_FLAG = 0.75;
 
 /** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours (K14). */
 export const KEY_DUPE_MIN = 0.35;
@@ -33,7 +33,7 @@ export function looksLikeFragment(key) {
 
 /** A capitalised frame with a name-particle interior; a single capitalised word qualifies, and a titular leading `the`
  *  does not break the frame (`the Spire` is a name). `\p{Lu}`, not `[A-Z]`. */
-export function looksProper(key) {
+function looksProper(key) {
     const raw = String(key ?? '').trim();
     const tokens = raw.replace(/^the\s+/i, '').split(/\s+/).filter(Boolean);
     if (!tokens.length) return false;
@@ -83,10 +83,10 @@ const isCommonWord = (list) => (v) => !/\s/.test(v) && list.has(v.toLowerCase())
 /** Share of messages a key must match to be `chat common`, and to turn `common word` red. */
 export const KEY_CHAT_COMMON = 0.20;
 /** Share of messages at which `chat common` is severe rather than moderate: more messages than not. An assertion. */
-export const KEY_CHAT_SEVERE = 0.50;
+const KEY_CHAT_SEVERE = 0.50;
 /** Share of the book's entries whose content a key must appear in to be `book common` — the no-chat fallback for
  *  `chat common`. An assertion; 0.45 rather than a half so a book of few entries does not sit on the line. */
-export const KEY_BOOK_COMMON = 0.45;
+const KEY_BOOK_COMMON = 0.45;
 
 /**
  * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
@@ -189,7 +189,6 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const titled = tokens.map((w, i) => (i === 0 || i === tokens.length - 1 || !NAME_PARTICLES.has(w.toLowerCase()) ? cap(w) : w)).join(' ');
         return titled === k ? null : titled;
     };
-    const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
     const literalKeys = allKeys.filter(isLiteral);
     const otherKeys = allKeys.filter(k => !isLiteral(k));
     const wantsTitled = new Map(literalKeys.filter(looksLikeFragment).map(k => [k, titledOf(k)]).filter(([, t]) => t));
@@ -493,3 +492,25 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
 
 /** Every entry, every mode. */
 export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, pruneFragment: true, ignoreProper: false, minLength: KEY_MIN_LENGTH, bookShared: KEY_BOOK_SHARED, chatCommon: KEY_CHAT_COMMON, bookCommon: KEY_BOOK_COMMON };
+
+/**
+ * The Cleanup tab's rows for one entry: every flagged key, then — with `showAll` — the keys classifyEntry did not
+ * return, so flagged rows stay on top. Carries no colour: the caller maps `sev`.
+ * @param scan buildKeyPruneScan's
+ * @param {Set<string>} opt.ignored The book's whitelist; an ignored key says so where a clean one says nothing
+ */
+export function cleanupRows(entry, scan, { showAll = false, ignored = new Set() } = {}) {
+    const rows = scan.classifyEntry(entry).map(p => {
+        const rc = scan.reasonOf(p);
+        return { term: p.key, why: rc.text, sev: rc.severity, p };
+    });
+    if (!showAll) return rows;
+    const shown = new Set(rows.map(r => r.term));
+    for (const key of (Array.isArray(entry.key) ? entry.key : [])) {
+        if (shown.has(key)) continue;
+        shown.add(key);
+        // A clean key says nothing, in the Explorer's green, as its chip does there; an ignored one says so.
+        rows.push({ term: key, why: ignored.has(key) ? 'ignored' : '', clean: !ignored.has(key) });
+    }
+    return rows;
+}

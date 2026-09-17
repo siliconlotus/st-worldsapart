@@ -6,10 +6,12 @@ import {
     event_types,
     getRequestHeaders,
     getMaxPromptTokens,
+    is_send_press,
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
     extension_prompt_types,
+    name1,
 } from '../../../../script.js';
 import { extension_settings, getContext } from '../../../extensions.js';
 import { t } from '../../../i18n.js';
@@ -34,13 +36,13 @@ import { textgen_types, textgenerationwebui_settings } from '../../../textgen-se
 import { oai_settings } from '../../../openai.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './extension/ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './st/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
-import { lorebookStudio } from './extension/studio.mjs';
-import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './extension/capture-ui.mjs';
+import { lorebookStudio } from './st/studio.mjs';
+import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './st/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
 import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
-import { packStore, fetchIndex, fetchPack } from './extension/lang-store.mjs';
+import { packStore, fetchIndex, fetchPack } from './st/lang-store.mjs';
 
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
@@ -111,11 +113,19 @@ function updateEmbedInfo() {
     $('#wa_embed_info').text(t`Embed: ${endpoint} · ${model}`);
 }
 
-async function vectorPost(route, args) {
+// Time bounds for the generation path's fetches. A query is one embedding round-trip — legitimate answers arrive in
+// well under ten seconds, so past that the endpoint is wedged and the stock fallback or the cosine-free fit is the
+// better turn. The bulk embed is the exception: its bound is a hang-detector, not a patience bound, because the
+// server finishes and persists the embed regardless of the client, and the next turn's `list` picks the chunks up.
+const QUERY_TIMEOUT_MS = 10_000;
+const SYNC_TIMEOUT_MS = 300_000;
+
+async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
     const response = await fetch(`/api/vector/${route}`, {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify(vectorRequestBody(args)),
+        signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
@@ -137,7 +147,7 @@ async function hasPlugin() {
     try {
         // The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not.
         const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
-        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }) });
+        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
         runState.pluginAvailable = response.ok;
         if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
     } catch {
@@ -155,7 +165,7 @@ async function computeSourceFingerprint() {
         const texts = await Promise.all(
             // `r.ok` checked, or a 404 hashes the error page: a fetch only rejects at the network layer, so a
             // PLUGIN_FILES entry naming a missing file would fingerprint as drift for ever.
-            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url))
+            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
                 .then(r => { if (!r.ok) throw new Error(`${src}: ${r.status}`); return r.text(); })),
         );
         runState.sourceFP = pluginFingerprint(...texts);
@@ -234,6 +244,7 @@ async function queryCollections(args) {
                     // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
                     sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
                 }),
+                signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
             });
 
             if (response.ok) {
@@ -292,7 +303,7 @@ async function syncWorld(world, entries) {
         }, 3000);
         const started = Date.now();
         try {
-            await vectorPost('insert', { collectionId, items: newItems });
+            await vectorPost('insert', { collectionId, items: newItems }, SYNC_TIMEOUT_MS);
         } finally {
             clearTimeout(slow);
         }
@@ -387,7 +398,7 @@ function loadRelevanceModel() {
     }
     // One fit per tier, never shared: the coefficients differ in sign across tiers (F19).
     relevanceModel.promise ??= Promise.all(['memory', 'reference'].map(tier =>
-        fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url))
+        fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
             .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((file) => {
                 // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, retrieval outage).
@@ -534,7 +545,8 @@ async function queryTermWeights(searchText, { log = true, entries = null } = {})
 let retrievalQueue = Promise.resolve();
 
 /** Scores every entry with content against arbitrary query text; shared by retrieval and /wa-query.
- *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>} */
+ *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>, retrieved: Set<string>}>}
+ *           `retrieved` is stage 2's admission set, `scores` the stage-3 cosine column; the no-plugin path fills only the first. */
 function scoreEntries(searchText) {
     const run = () => scoreEntriesUnsafe(searchText);
     const result = retrievalQueue.then(run, run);
@@ -549,9 +561,11 @@ async function scoreEntriesUnsafe(searchText) {
     const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
+    /** @type {Set<string>} Every owner the query returned, scored or not — the same `${world}.${uid}` keys `scores` uses. */
+    const retrieved = new Set();
 
     if (!targets.length || !searchText) {
-        return { targets, scores };
+        return { targets, scores, retrieved };
     }
 
     const byWorld = Map.groupBy(targets, e => e.world);
@@ -590,7 +604,11 @@ async function scoreEntriesUnsafe(searchText) {
                 return;
             }
 
-            // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit (H12).
+            // Admission is retrieval identity, not magnitude: the no-plugin path returns the same chunks, so the same
+            // entries are stage-2 candidates whichever path answered. The Set is the pooling — K counts chunks there.
+            for (const owner of chunkOwners) retrieved.add(owner);
+
+            // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit.
             const score = typeof item?.score === 'number' ? item.score : null;
             if (score === null) { rankOnly++; return; }
 
@@ -606,10 +624,11 @@ async function scoreEntriesUnsafe(searchText) {
 
     if (rankOnly) {
         console.warn(`Worlds Apart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
-            + 'The relevance model is running on text, proper nouns and density alone. Check that the server plugin is loaded and that its query is not failing.');
+            + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
+            + 'Check that the server plugin is loaded and that its query is not failing.');
     }
 
-    return { targets, scores };
+    return { targets, scores, retrieved };
 }
 
 /** Prints /wa-query's table: every scored entry by cosine, with the gap between neighbours. */
@@ -656,20 +675,20 @@ async function retrieve(chat) {
     runState.lastQueryChat = queryChat;
 
     // No entity filter here: stage 1 has no BM25 to spend its terms on (plugin/scoring.mjs).
-    const { targets, scores } = await scoreEntries(searchText);
+    const { targets, scores, retrieved } = await scoreEntries(searchText);
 
     if (!targets.length) {
         console.log('Worlds Apart: no entries with content in the active books, so retrieval has nothing to score');
         return [];
     }
-    if (!scores.size) {
-        console.log('Worlds Apart: the query scored no chunk in any collection');
+    if (!retrieved.size) {
+        console.log('Worlds Apart: the query matched no chunk in any collection');
         return [];
     }
 
     // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for stage 3.
     const vectorizedKeys = new Set(targets.filter(x => x.vectorized).map(x => `${x.world}.${x.uid}`));
-    const winnerKeys = new Set([...scores.keys()].filter(k => vectorizedKeys.has(k)));
+    const winnerKeys = new Set([...retrieved].filter(k => vectorizedKeys.has(k)));
 
     // Every scored entry, not the winners: stage 3 looks its cosine up here.
     for (const [key, value] of scores) {
@@ -701,15 +720,16 @@ async function keywordActivations(chat) {
 const reportedFailures = new Set();
 
 /**
- * Toasts a generation-time failure once per distinct message per session, with the top stack frame.
+ * Toasts a generation-time failure with the top stack frame — once per distinct message per session, or, when `loud`,
+ * on every occurrence and stuck until dismissed.
  * @param {string} consequence What the user will observe this turn
  * @param {'error'|'warning'} [severity]
  */
-function reportFailure(stage, consequence, error, severity = 'error') {
+function reportFailure(stage, consequence, error, severity = 'error', loud = false) {
     console.error(`Worlds Apart: ${stage} — ${consequence}`, error);
     const cause = String(error?.message ?? error);
-    const key = `${stage}${cause}`;
-    if (reportedFailures.has(key)) return;
+    const key = `${stage}␟${cause}`;
+    if (!loud && reportedFailures.has(key)) return;
     reportedFailures.add(key);
     const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
     // ST sets toastr.options.escapeHtml = true globally, which collapses `\n`; opt out per toast and escape by hand.
@@ -718,12 +738,16 @@ function reportFailure(stage, consequence, error, severity = 'error') {
             escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
             t`See the browser console for the full trace.`].join('<br><br>'),
         `Worlds Apart: ${stage}`,
-        { timeOut: 20000, extendedTimeOut: 15000, escapeHtml: false, closeButton: true },
+        { timeOut: loud ? 0 : 20000, extendedTimeOut: loud ? 0 : 15000, escapeHtml: false, closeButton: true, tapToDismiss: !loud },
     );
 }
 
-/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently. */
-async function selectAndActivate(chat) {
+/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
+ *  `token` and `abort` are the generation's identity: after every await a superseded or aborted generation bails
+ *  rather than write scan state or emit activations into whoever's prompt is now current. */
+async function selectAndActivate(chat, token, abort) {
+    const superseded = () => token !== runState.scanToken || Boolean(abort?.());
+
     chat = dropChatTags(chat);
 
     // /wa-dry reaches here without the interceptor, so the replayed scan judges the chat it was handed.
@@ -746,6 +770,7 @@ async function selectAndActivate(chat) {
             error);
         runState.lastScores.clear();
     }
+    if (superseded()) return;
 
     let adds = [];
     try {
@@ -756,6 +781,7 @@ async function selectAndActivate(chat) {
             t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
             error);
     }
+    if (superseded()) return;
 
     const winnerKeys = new Set(winners.map(e => `${e.world}.${e.uid}`));
     const union = adds.filter(e => !winnerKeys.has(`${e.world}.${e.uid}`));
@@ -765,17 +791,27 @@ async function selectAndActivate(chat) {
         console.log(`Worlds Apart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
+    if (superseded()) return;
 
     // TRUE last, after WA's own fetches: the next WORLDINFO_ENTRIES_LOADED is core's scan. Cleared on the final SCAN_DONE loop and at generation end.
     for (const e of activated) runState.waMatched.add(`${e.world}.${e.uid}`);
+    runState.armedToken = token;
     runState.waOwnsScan = true;
 }
 
 // Hooks
 
-/** Generation interceptor. Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
-async function intercept(chat, _maxContext, _type) {
+/** Generation interceptor. ST calls it (chat, contextSize, abort, type): abort() reads the generation's AbortSignal.
+ *  Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
+async function intercept(chat, _maxContext, abort, type) {
+    // A quiet generation never displaces one the user has in flight: it stands down and runs core-native.
+    // is_send_press is the send lock the UI paths hold; Generate('quiet') sets it only later, at the prompt build.
+    if (type === 'quiet' && is_send_press) {
+        return;
+    }
+
     // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
+    const token = ++runState.scanToken;
     runState.scanChat = chat.slice();
     // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
     runState.waOwnsScan = false;
@@ -784,7 +820,7 @@ async function intercept(chat, _maxContext, _type) {
         return;
     }
 
-    await selectAndActivate(chat);
+    await selectAndActivate(chat, token, abort);
 }
 
 
@@ -798,6 +834,16 @@ function onEntriesLoaded(loaded) {
 
     // Read here and nowhere else: this hook is the last place the `@@` lines still exist. Ungated, a promotion being a property of the entry.
     for (const entry of entries) entry.waPromote = matcher.hasPromoteDecorator(entry);
+    for (const entry of entries) entry.waDecorators = matcher.resolveDecorators(entry?.content);
+
+    // Gated: with WA off the install behaves as it would with WA not installed.
+    if (settings().enabled) {
+        const chatLength = (runState.scanChat ?? getContext().chat ?? []).length;
+        // Before the stash below, so waSecondary captures the desugared keysecondary.
+        for (const entry of entries) {
+            if (entry) Object.assign(entry, matcher.decoratorFields(entry, { chatLength }));
+        }
+    }
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
     if (settings().enabled && !runState.generationIsDryRun) {
@@ -952,7 +998,40 @@ const activationOpts = () => ({
     fallbackDepth: world_info_depth,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
+    assistantCount: (runState.scanChat ?? []).filter(m => m && !m.is_user && !m.is_system).length,
+    // Raw context chat, NOT runState.scanChat like its neighbours: interceptors receive coreChat, already
+    // is_system-filtered and swipe-popped, so scanChat[0] is not reliably the greeting. Message 0's swipe_id
+    // IS the greeting index; a card with no alternates has no swipes array.
+    greetingIndex: getContext().chat?.[0]?.swipe_id ?? 0,
+    personaName: name1,
+    chatLength: (runState.scanChat ?? []).length,
+    fired: firedLatches(),
 });
+
+/** Entries that have fired a latch decorator in this chat. */
+function firedLatches() {
+    const ctx = getContext();
+    return matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, ctx.chat?.length ?? 0);
+}
+
+/** Records the activated entries carrying a latch decorator. */
+function recordLatches(entries) {
+    if (runState.generationIsDryRun || runState.dryRunInProgress) return;
+    const ctx = getContext();
+    const meta = ctx.chatMetadata;
+    if (!meta) return;
+    const fired = { ...(meta[matcher.WA_METADATA_KEY]?.fired ?? {}) };
+    const before = Object.keys(fired).length;
+    // The chat length WHEN it fired, so any later moment is a filter and a rewind past it un-latches.
+    const at = ctx.chat?.length ?? 0;
+    for (const entry of entries) {
+        const key = matcher.latchKey(entry);
+        if (matcher.hasLatch(entry) && !(key in fired)) fired[key] = at;
+    }
+    if (Object.keys(fired).length === before) return;
+    meta[matcher.WA_METADATA_KEY] = { ...(meta[matcher.WA_METADATA_KEY] ?? {}), fired };
+    ctx.saveMetadata?.();
+}
 
 /** The chat WA reads with the `dropChatTags` elements gone — the one strip, at intake. Copies, never an edit of ST's
  *  live chat, and the file prefix is left alone so `extra.fileLength` still counts to the same place. */
@@ -1157,6 +1236,28 @@ async function onScanDone(args) {
         return;
     }
 
+    // A scan ranks only when its generation is the armed one. A superseded generation's late scan — its interceptor
+    // bailed, so core matched natively — must not rank with the current generation's scores.
+    if (runState.armedToken !== runState.scanToken) {
+        skip('the scan is not the armed generation\'s');
+        recordCoreSet(activated, args, 'superseded or unarmed generation — core in full');
+        return;
+    }
+
+    // Past the gates the scan is WA's — the takeover has stashed core's keys and stood core's budget down — so a throw
+    // must not pass silently: nothing undecided ships, and the failure is loud on every turn it happens.
+    try {
+        await rankOwnedScan(activated, args, skip);
+    } catch (error) {
+        delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
+        reportFailure(t`activation error`,
+            t`Only constant and sticky entries were included. Try again.`,
+            error, 'error', true);
+    }
+}
+
+/** The owned half of a scan: the recursion feed, then scoring (stage 3), the relevance cut (4) and the budget (5). Throws are the caller's. */
+async function rankOwnedScan(activated, args, skip) {
     // Before the size-0 return: a pass that activated nothing can still be followed by a min-activations widening.
     if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
         await feedScanLoop(args);
@@ -1224,7 +1325,7 @@ async function onScanDone(args) {
                 : windowFor(depth, entry);
         };
 
-        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (matcher-design.md, *Stage 3 — Scoring*).
+        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (docs/matching-architecture.md, *Stage 3 — Scoring*).
         const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
         // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
         const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
@@ -1243,7 +1344,7 @@ async function onScanDone(args) {
             const scanText = keywordWindowFor(depth, item.entry);
             const scoreKeys = scoreKeysOf(item.entry);
             const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
-            // An entry reached at recursion pass d did not have the conversation name it (matcher-design.md, *Stage 3 — Scoring*).
+            // An entry reached at recursion pass d did not have the conversation name it (docs/matching-architecture.md, *Stage 3 — Scoring*).
             item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
             // Verbose runs only: where each key matched, for /wa-grade's why column. Flags mirror the keywordScore call above exactly.
@@ -1276,7 +1377,10 @@ async function onScanDone(args) {
     const priorityList = charPriority() ?? [];
     const priorityMode = settings().worldPriorityMode;
     const { sticky, constant, promoted, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
-        isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)),
+        // A latched @@keep_activate_after_match is sticky by another name, so it is durable too: hoisted past
+        // the relevance cut rather than scored and cut like an ordinary activation.
+        isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry))
+            || matcher.latchActive(entry, firedLatches(), getContext().chat?.length ?? 0),
         isPromoted: entry => Boolean(entry?.waPromote),
         priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
         priorityMode,
@@ -1318,7 +1422,7 @@ async function onScanDone(args) {
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const dynamicSet = new Set(results);
         const promotedSet = new Set(promoted);
-        const { survivors, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
+        const { survivors, tokens, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
             isDynamic: item => dynamicSet.has(item),
             // Capacity's population is dynamic plus promoted: promotion exempts from relevance, not from the caps.
@@ -1354,9 +1458,12 @@ async function onScanDone(args) {
         }
 
         runState.lastSkipped = skipped;
+        // Null unless a token budget was in force: tokensOf short-circuits to 0 when maxTokens is 0, so the counts would all read 0.
+        runState.lastBudget = maxTokens > 0 ? { tokens, budgeted, inPrompt, maxTokens } : null;
         walk = walk.filter(x => survivors.has(x));
     } else {
         runState.lastSkipped = [];
+        runState.lastBudget = null;
     }
 
     // Prompt order, not layout order: one flat sort over every survivor.
@@ -1380,8 +1487,11 @@ async function onScanDone(args) {
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
-    // Only the last loop (no further state) is the real prompt.
-    if (!args?.state?.next) renderDeliveryPanel(runState.lastPromptOrder);
+    // Only the last loop (no further state) is the real prompt — recording earlier would latch entries a later loop still cuts.
+    if (!args?.state?.next) {
+        recordLatches(promptOrder.map(item => item.entry));
+        renderDeliveryPanel(runState.lastPromptOrder);
+    }
 
     if (runState.verboseRun) {
         // The pre-cut, pre-budget population, `cut`/`cutBy` recording which side each row fell on. candidates=N caps
@@ -1411,7 +1521,7 @@ async function onScanDone(args) {
             dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
             // Gated as cosine is: an entry with no chunks in the collection has no text score, and the scorer's 0 is a default.
             text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
-            // Gated on eligibility, not the value: 0 is both a miss and no scorable keys (H12).
+            // Gated on eligibility, not the value: 0 is both a miss and no scorable keys.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
             tokens: tokens[i],
             cut: !kept.has(x),
@@ -1469,6 +1579,7 @@ async function dryRun(verbose = false) {
     // Cleared so a scan that activates nothing reports nothing rather than last run's; the /wa-grade capture too.
     runState.lastPromptOrder = [];
     runState.lastSkipped = [];
+    runState.lastBudget = null;
     runState.lastCandidates = [];
     runState.lastCandidateEntries = [];
     runState.lastQuery = '';
@@ -1478,7 +1589,9 @@ async function dryRun(verbose = false) {
 
     // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
-        await selectAndActivate(chat);
+        // The dry run takes the next token: an in-flight generation's continuations stand down rather than interleave.
+        const token = ++runState.scanToken;
+        await selectAndActivate(chat, token);
 
         await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
@@ -1695,10 +1808,12 @@ async function probeQuery(_named, text) {
         return '';
     }
 
-    const { targets, scores } = await scoreEntries(searchText);
+    const { targets, scores, retrieved } = await scoreEntries(searchText);
 
     if (!scores.size) {
-        console.log(`Worlds Apart: the query scored no chunk for "${searchText.slice(0, 60)}…"`);
+        console.log(retrieved.size
+            ? `Worlds Apart: ${retrieved.size} entr(ies) came back with no cosine for "${searchText.slice(0, 60)}…" — the no-plugin path answered, so there is no table to print`
+            : `Worlds Apart: the query matched no chunk for "${searchText.slice(0, 60)}…"`);
         return '';
     }
 
@@ -1986,6 +2101,8 @@ function ensureDeliveryPanel() {
 .wa-delivery-entry:hover { background: var(--white20a, rgba(255,255,255,0.1)); }
 .wa-delivery-glyph { flex: 0 0 auto; }
 .wa-delivery-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-delivery-tokens { flex: 0 0 auto; margin-left: auto; opacity: 0.55; font-variant-numeric: tabular-nums; }
+.wa-delivery-budget { padding: 4px 5px; opacity: 0.7; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-delivery-empty { opacity: 0.6; padding: 4px; }`;
     document.head.append(style);
 
@@ -2001,6 +2118,7 @@ function ensureDeliveryPanel() {
 
 function renderDeliveryPanel(layout) {
     ensureDeliveryPanel();
+    const budget = runState.lastBudget;
     deliveryTrigger.dataset.count = String(layout.length);
     deliveryPanel.innerHTML = '';
     // Appended last: the panel opens upward, so the bottom row is nearest the icon.
@@ -2029,6 +2147,14 @@ function renderDeliveryPanel(layout) {
         ttl.className = 'wa-delivery-title';
         ttl.textContent = wiTitleOf(e);
         el.append(g, ttl);
+        const cost = budget?.tokens.get(row.item);
+        if (cost !== undefined) {
+            const tok = document.createElement('span');
+            tok.className = 'wa-delivery-tokens';
+            tok.textContent = String(cost);
+            tok.title = t`Tokens this entry costs`;
+            el.append(tok);
+        }
         // Click opens the entry in the Explorer; shift-click shows its text alone.
         el.addEventListener('click', ev => {
             if (ev.shiftKey) { showEntryText(e); return; }
@@ -2036,19 +2162,40 @@ function renderDeliveryPanel(layout) {
         });
         deliveryPanel.append(el);
     }
+    if (budget) {
+        const n = runState.lastSkipped.length;
+        const missed = runState.lastSkipped.reduce((a, x) => a + (x.tokens ?? 0), 0);
+        const foot = document.createElement('div');
+        foot.className = 'wa-delivery-budget';
+        // `budgeted`, not `inPrompt`: headroom is what the cap still has, and an exempt entry may not charge it.
+        foot.textContent = t`Token budget: ${budget.inPrompt} delivered, ${Math.max(0, budget.maxTokens - budget.budgeted)} left of ${budget.maxTokens}.`;
+        if (n) foot.textContent += ' ' + (n === 1 ? t`${n} entry skipped, ${missed} tokens not delivered.` : t`${n} entries skipped, ${missed} tokens not delivered.`);
+        deliveryPanel.append(foot);
+    }
     deliveryPanel.append(lab);
 }
 
 let initialized = false;
 
 export async function init() {
-    // Handed the pipeline's entry points once, here, so the dependency runs one way.
-    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, scopedPriority, vectorRequestBody });
     // Both `hooks.activate` and the jQuery bootstrap below can reach here.
     if (initialized) {
         return;
     }
     initialized = true;
+    // A failed init stays half-registered for the rest of the session — surfaced here, never retried: a retry would
+    // double-register everything that succeeded before the throw.
+    try {
+        await initBody();
+    } catch (error) {
+        console.error('Worlds Apart: init failed — the extension is partially active', error);
+        toastr.error(t`Worlds Apart failed to initialize — see the browser console.`, 'Worlds Apart');
+    }
+}
+
+async function initBody() {
+    // Handed the pipeline's entry points once, here, so the dependency runs one way.
+    setCaptureHost({ chatBook, coreSelection, dryRun, effectiveTokenBudget, paramSnapshot, scopedPriority, vectorRequestBody });
 
     ensureSettings(extension_settings);
     // Migrations of stored values from earlier settings shapes.

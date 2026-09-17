@@ -1,8 +1,20 @@
 // delivery.mjs — stage 5: what fits, and in what order the budget walks. Pure; every setting is injected.
+import { hasDecorator } from './matcher.mjs';
 
 /** The budget's walk order: constants, armed stickies, promoted, then the dynamic block — durable first is what makes every cap in applyBudget a prefix cut. */
 export function walkOrder({ sticky = [], constant = [], promoted = [], results = [] }) {
     return [...constant, ...sticky, ...promoted, ...results];
+}
+
+/** What ships when WA owns activation and the ranking failed: constants, `@@activate` and armed stickies — the rows that never
+ *  needed a decision. Deletes every other entry from `activated` and returns how many survive; an entry it cannot read is undecided. */
+export function dropUndecided(activated, isStickyArmed = () => false) {
+    let kept = 0;
+    for (const [key, entry] of [...activated]) {
+        if (entry && (entry.constant || hasDecorator(entry, '@@activate') || isStickyArmed(entry))) kept++;
+        else activated.delete(key);
+    }
+    return kept;
 }
 
 /** The `ignoreBudget` the author set. `??`, not `||`: a stashed `false` must beat the `true` onEntriesLoaded hands core. */
@@ -11,10 +23,12 @@ export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entr
 /**
  * Applies the entry caps and the token budget to `walk`, which must lead with the durable blocks. The populations
  * nest (vector ⊆ capped ⊆ all, plus per-book); any cap at 0 is off; ignoreBudget entries are neither capped nor counted.
- * @returns {Promise<{survivors: Set, counted: number, dynamic: number, vector: number, skipped: object[], dropped: number, budgeted: number, inPrompt: number}>}
+ * @returns {Promise<{survivors: Set, tokens: Map, counted: number, dynamic: number, vector: number, skipped: object[], dropped: number, budgeted: number, inPrompt: number}>}
  */
 export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTokens, maxTotal, maxDynamic, maxVectorEntries = 0, isVector = () => false, tokensOf, capOf = () => 0, exemptIsBudgeted = false, slack = 0, slackOnce = true }) {
     const survivors = new Set();
+    // Survivors only; a skipped row carries its own count in `skipped`.
+    const tokens = new Map();
     let counted = 0;
     let dynamic = 0;
     let vector = 0;
@@ -97,6 +111,7 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
         }
 
         survivors.add(item);
+        tokens.set(item, itemTokens);
         lastAdmitted = index;
     }
 
@@ -105,5 +120,5 @@ export async function applyBudget({ walk, isDynamic, isCapped = isDynamic, maxTo
         skip.tail = skip.index > lastAdmitted;
     }
 
-    return { survivors, counted, dynamic, vector, skipped, dropped: walk.length - survivors.size, budgeted, inPrompt };
+    return { survivors, tokens, counted, dynamic, vector, skipped, dropped: walk.length - survivors.size, budgeted, inPrompt };
 }

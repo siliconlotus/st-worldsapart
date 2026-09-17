@@ -1,0 +1,55 @@
+name: checks
+on:
+  pull_request:
+  push:
+    branches: [staging, release]
+
+# A newer push to the same PR supersedes the run in flight.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WA: sillytavern/public/scripts/extensions/third-party/st-worldsapart
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      # Checked out at its install depth: several checks resolve through stInstall(), which walks up for config.yaml.
+      - uses: actions/checkout@v5
+        with:
+          path: sillytavern/public/scripts/extensions/third-party/st-worldsapart
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+      # The suite runs as it does on a developer's machine: inside an install. acorn (undeclared-check) and tiktoken
+      # (tokens-check) are ST's own dependencies, resolved out of its node_modules rather than declared here.
+      - name: stand up a minimal install around the checkout
+        working-directory: sillytavern
+        run: |
+          printf 'dataRoot: ./data\n' > config.yaml
+          mkdir -p data/default-user
+          # "type": "module" is what ST's own package.json declares, and extension/wa-pack-en.js is ESM in a .js file:
+          # a package.json without it would parse that file as CommonJS and fail every check that loads the language pack.
+          printf '{"name":"sillytavern","private":true,"type":"module"}\n' > package.json
+          npm install --no-audit --no-fund --silent acorn@^8 tiktoken@^1
+      # eval-data/ is gitignored, so a fresh checkout has none; grade-pending-check and paired-check write scratch files there.
+      - name: scratch directory the harness writes into
+        run: mkdir -p "$WA/eval/eval-data"
+      # eq() sets process.exitCode, so a failed assertion and a thrown error are the same signal;
+      # the whole log is printed for a failure, because grepping for ^FAIL misses throws.
+      - name: regression suite
+        working-directory: sillytavern/public/scripts/extensions/third-party/st-worldsapart
+        run: |
+          fail=0
+          for f in test/*-check.mjs; do
+            if out=$(node "$f" 2>&1); then
+              echo "ok   $f"
+            else
+              echo "::error file=$f::$f failed"
+              echo "$out"
+              fail=1
+            fi
+          done
+          exit $fail

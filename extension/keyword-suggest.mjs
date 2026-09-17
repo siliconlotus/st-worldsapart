@@ -1,5 +1,5 @@
 // keyword-suggest.mjs — the key suggester: what to propose for an entry, from its own text (the TF-IDF ranker) and
-// from a model (the prompt, parser and post-filter). ST-free; keyword-suggest-design.md is the reference.
+// from a model (the prompt, parser and post-filter). ST-free; docs/keyword-suggestions.md is the reference.
 import { table } from './lang.mjs';
 import { buildAutomaton, scanAutomaton } from './smartkeys.mjs';
 import { FUNCTION_WORDS } from './keyword-audit.mjs';
@@ -241,7 +241,7 @@ export function buildKeySuggest(data, opts) {
     };
 
     // Frequency gate (lang.mjs table): names z 0; a unigram in the table is cut; a phrase rides its rarest word on a ramp (full at
-    // z<=2.5, gone at z>=3.8) and is cut if any non-linker, non-name word is top-500 English (S5). A lowercase -ing word inherits a junk-band pseudo-z.
+    // z<=2.5, gone at z>=3.8) and is cut if any non-linker, non-name word is top-500 English. A lowercase -ing word inherits a junk-band pseudo-z.
     // ponytail: constants eyeballed off one book's junk band; retune there.
     const isGer = w => w.length >= 6 && w.endsWith('ing');
     // Naive de-inflection for the table lookup, consulted on a miss only.
@@ -389,6 +389,6 @@ export function buildKeySuggest(data, opts) {
     return { entries, N, perEntry, canon, dfSubstr, avoid, exampleCanon, exampleWords };
 }
 
-/** dfCeil is the share of entries a candidate may appear in (S8); cap is a display budget, above the per-entry p75 (S9). */
+/** dfCeil is the share of entries a candidate may appear in, above a recurring cast’s own share; cap is a display budget, above the per-entry p75 (S9). */
 export const STUDIO_SUGGEST_OPTS = { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30, llmChunk: 5000 };
 

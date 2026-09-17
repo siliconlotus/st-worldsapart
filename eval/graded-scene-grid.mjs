@@ -29,13 +29,13 @@ import { norm } from '../plugin/vector.mjs';
 import * as queryBuild from '../extension/query.mjs';
 import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
-import { gradeValue } from './metrics.mjs';
+import { gradeValue, arg as sharedArg } from './lib/metrics.mjs';
 // One copy of the gazetteer and scorers: scene.mjs.
 import { entryKey } from '../extension/content-lexical.mjs';
-import { resolveModel } from './reindex.mjs';
-import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './scene.mjs';
+import { resolveModel } from './lib/reindex.mjs';
+import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './lib/scene.mjs';
 
-const arg = k => { const i = process.argv.indexOf(k); return i >= 0 ? process.argv[i + 1] : null; };
+const arg = k => sharedArg(process.argv, k);
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
 const S = openSample(arg('--sample'), arg('--arm'));
 // '' is a failed capture, not a frozen query.
@@ -48,7 +48,7 @@ const vArg = arg('--validate');
 const VALIDATE = process.argv.includes('--validate') ? ((vArg && !vArg.startsWith('--')) ? vArg : S.capture) : null;
 if (process.argv.includes('--validate') && !VALIDATE) { console.error('--validate given but the sample records no "capture" — pass --validate <capture.json>, or add a "capture" path to the sample'); process.exit(2); }
 const DEPTH = Number(arg('--depth') ?? S.params?.depth ?? 10);
-// Falls back to the bundle's own model, never a hardcoded name (H3).
+// Falls back to the bundle's own model, never a hardcoded name.
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? S.embedModel;
 if (!MODEL) { console.error('sample records no embedModel — set WA_EMBED_MODEL'); process.exit(2); }
 const EM = resolveModel(MODEL);
@@ -126,7 +126,7 @@ if (FREEZE) {
     console.log(`froze query (${query.length} chars) + ${frozenChat.length} scan message(s) into ${path}`);
 }
 
-// The gazetteer is built in loadScene (R22); only the query-dependent term weights are derived here.
+// The gazetteer is built in loadScene; only the query-dependent term weights are derived here.
 const termWeights = P.entityFilter ? entity.buildTermWeights(query, gaz, P.boost) : null;
 
 const keywordScore = makeKeywordScore(P);

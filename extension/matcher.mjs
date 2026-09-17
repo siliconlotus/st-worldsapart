@@ -53,8 +53,12 @@ export function wholeWordAdvice(keys, wholeWords, t = plainTag) {
     return out;
 }
 
-/** A /pattern/flags regex key, as countKey routes them. `[\s\S]`, not `.`: a body may hold a newline, as core's `[\w\W]` admits. */
-export const REGEX_KEY_RE = /^\/([\s\S]+)\/([gimsuy]*)$/;
+/** A /pattern/flags regex key, as countKey routes them. `[\s\S]`, not `.`: a body may hold a newline, as core's `[\w\W]` admits.
+ *  Every flag JS has, which is more than CORE_REGEX_KEY_RE's: `d` and `v` postdate core's list, so a key using one is WA-only. */
+export const REGEX_KEY_RE = /^\/([\s\S]+)\/([dgimsuvy]*)$/;
+/** A key matched by its own text: not a SmartKey, not a regex. */
+export const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
+
 export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
 
 /** Splits a key list on commas and newlines. A `/regex/` and a "quoted" term keep their commas; a `/` that is not the first
@@ -257,7 +261,7 @@ export function textSegments(text, matchWindow) {
 }
 
 /** Entry match-flag -> scan-sources field, as core's buffer does. */
-export const MATCH_SOURCE_FIELDS = {
+const MATCH_SOURCE_FIELDS = {
     matchPersonaDescription: 'personaDescription',
     matchCharacterDescription: 'characterDescription',
     matchCharacterPersonality: 'characterPersonality',
@@ -321,7 +325,7 @@ export function withExtraTexts(windowFor, texts, matchWindow) {
 }
 
 /** Tags and HTML comments replaced by spaces, one per character, so a literal key cannot match inside one. Every offset is
- *  preserved. Regex keys bypass this and match the raw text (matcher-design.md, *Divergences from ST core*). */
+ *  preserved. Regex keys bypass this and match the raw text (docs/matching-architecture.md, *Divergences from ST core*). */
 export const maskMarkup = text => String(text).replace(/<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>/g, m => ' '.repeat(m.length));
 
 let maskMemoIn = null, maskMemoOut = null;
@@ -350,7 +354,7 @@ export const foldedHay = (text, caseSensitive) => {
 /** The chat cut into the unit a conjunction is matched within — each message, each paragraph of each message, or blocks
  *  of `depth` messages joined as the live scan joins them, cut from the newest end so the last block is full. Through
  *  scanSegments, so a message reads `Name: text` exactly when the live scan would; a bare string is a nameless message. */
-export function chatUnits(messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
+function chatUnits(messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
     const chat = [...messages].map(m => (typeof m === 'string' ? { mes: m } : m));
     if (matchWindow !== 'scan') return scanSegments(chat, { depth: chat.length, includeNames, matchWindow });
     const n = Math.max(1, Number(depth) || chat.length);
@@ -372,7 +376,6 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     // names and count units; `unit` says which.
     messages = chatUnits(messages, { matchWindow, depth, includeNames });
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
-    const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
     // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
     const folded = [...new Set(literals.flatMap(k => keyVariants(k).map(fold)))];
@@ -410,7 +413,7 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
 /** The whole-word pattern for a needle, compiled once: a batch verifies every reported hit under this, and the runtime
  *  scorer every entry with the flag, and compiling per call was the cost. Bounded; the boundary mode is part of the key. */
 const wholeWordRe = new Map();
-export function wholeWordRegex(needle) {
+function wholeWordRegex(needle) {
     const id = `${boundaryBefore()}${needle}`;
     let re = wholeWordRe.get(id);
     if (!re) {
@@ -435,9 +438,15 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
     }
 
     if (raw.startsWith('?')) {
-        const { matched, scoreBoost } = evaluateSmartKey(raw, text, scope);
+        // Audit and Lab callers hand over keys usableKeys never filtered: a key the grammar refuses counts 0, and never aborts the scan matching it.
+        let sk;
+        try {
+            sk = evaluateSmartKey(raw, text, scope);
+        } catch {
+            return 0;
+        }
         // A negation-only SmartKey matches with zero weight; floor only that case, so a sub-1 :weight still down-weights.
-        return matched ? (scoreBoost > 0 ? scoreBoost : 1) : 0;
+        return sk.matched ? (sk.scoreBoost > 0 ? sk.scoreBoost : 1) : 0;
     }
 
     if (isRegexKey(raw)) return countRegexKey(raw, text);
@@ -641,7 +650,14 @@ const gateNodeFor = (gate, caseSensitive, wholeWords) => {
     const sec = (Array.isArray(gate?.keys) ? gate.keys : []).map(k => String(k ?? '').trim()).filter(Boolean);
     if (!sec.length) return () => null;
     const logic = Number(gate?.logic ?? WI_LOGIC.AND_ANY);
-    return key => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
+    return key => {
+        // A gate list a caller did not run through secondaryKeys can hold a key the grammar refuses: it gates nothing rather than aborting.
+        try {
+            return synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
+        } catch {
+            return null;
+        }
+    };
 };
 
 /** The leaves of the key's AST, or one synthetic TERM branch for a plain key with no gate. */
@@ -749,10 +765,27 @@ export const secondaryKeys = (entry) => {
 /** One primary key under the entry's selective logic, as one synthesised expression whose gate nodes carry weight 0.
  *  The cache id must join every input the tree depends on (US): registerTerms stamps scope-local indices onto it. */
 const SELECTIVE_SEP = '\u001f';
+
+/** The entry's WA-only exclusion list, filtered like any other key list. Set by the `@@exclude_keys`
+ *  decorator when `@@additional_keys` is present too, which ST's single `selectiveLogic` cannot hold. */
+const excludeKeys = entry =>
+    (Array.isArray(entry?.waExcludeKeys) ? entry.waExcludeKeys : []).filter(k => String(k ?? '').trim() && !fatalKey(k));
+
+/** `node` with one NOT per excluded key ANDed on. synthesizeSecondary with no secondaries IS keyNode, so a key
+ *  becomes a leaf whatever it holds — never serialised into an expression that would re-lex its quotes or sigils. */
+const withExclusions = (node, excl, flags) => excl.reduce(
+    (acc, k) => ({ type: 'AND', left: acc, right: { type: 'NOT', operand: synthesizeSecondary(k, [], WI_LOGIC.AND_ANY, flags) } }),
+    node);
+
+/** One primary key under the entry's selective logic, as one synthesised expression whose gate nodes carry weight 0.
+ *  The cache id must join every input the tree depends on (US): registerTerms stamps scope-local indices onto it. */
 function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
     const logic = entry?.selectiveLogic ?? WI_LOGIC.AND_ANY;
-    const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, ...sec].join(SELECTIVE_SEP);
-    return evaluateAst(id, () => synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords }), text);
+    const excl = excludeKeys(entry);
+    const flags = { caseSensitive, wholeWords };
+    // sec.length separates the two lists in the id, or [a,b]+[] and [a]+[b] would share a cached tree.
+    const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, sec.length, ...sec, ...excl].join(SELECTIVE_SEP);
+    return evaluateAst(id, () => withExclusions(synthesizeSecondary(key, sec, logic, flags), excl, flags), text);
 }
 
 /** One key's scoring units against one segment; a plain key is one unit seen n times, and a matched expression with no units is one unit (countKey's negation-only floor). */
@@ -760,9 +793,10 @@ function keyUnits(entry, key, text, caseSensitive, wholeWords, sec) {
     const raw = String(key ?? '').trim();
     if (!raw || !text) return [];
 
-    if (sec?.length || raw.startsWith('?')) {
-        const { matched, units } = sec?.length
-            ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec)
+    const gated = Boolean(sec?.length) || excludeKeys(entry).length > 0;
+    if (gated || raw.startsWith('?')) {
+        const { matched, units } = gated
+            ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec ?? [])
             : evaluateSmartKey(raw, text);
         if (!matched) return [];
         return units.length ? units : [{ id: raw, wsum: 1, n: 1 }];
@@ -835,8 +869,7 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     return { score, hits };
 }
 
-/** The leading `@@` lines of raw content, by core's parseDecorators, returned raw: withPromote must preserve their spelling.
- *  ponytail: the `@@@` fallback-chain rule (only after an unknown decorator) is not mirrored; over-detecting errs safe here. */
+/** The leading `@@` lines of raw content, by core's parseDecorators, returned raw: withPromote must preserve their spelling. */
 function leadingDecorators(content) {
     const text = String(content ?? '');
     if (!text.startsWith('@@')) return [];
@@ -846,29 +879,63 @@ function leadingDecorators(content) {
     return lines.slice(0, end);
 }
 
-/** A `@@@name` line is the fallback form of `@@name`; core's own test is a bare startsWith on the name. */
-const bareDecorator = line => (line.startsWith('@@@') ? line.slice(1) : line);
+/** Every decorator name WA acts on: core's two, WA's own, and the CCv3 set the desugar implements. */
+export const WA_DECORATORS = Object.freeze([
+    '@@activate', '@@dont_activate', '@@promote',
+    '@@depth', '@@reverse_depth', '@@role', '@@scan_depth', '@@position', '@@activate_only_after',
+    '@@is_greeting', '@@activate_only_every', '@@is_user_icon',
+    '@@additional_keys', '@@exclude_keys',
+    '@@dont_activate_after_match', '@@keep_activate_after_match',
+    '@@ignore_on_max_context',
+]);
+
+/** The leading decorator lines that apply, bare-spelled and in document order.
+ *  `fallbacked` mirrors core's parseDecorators: a `@@@` line counts only after an UNRECOGNISED one. */
+export function resolveDecorators(content) {
+    const out = [];
+    let fallbacked = false;
+    for (const line of leadingDecorators(content)) {
+        if (line.startsWith('@@@') && !fallbacked) continue;
+        const bare = bareDecorator(line);
+        if (WA_DECORATORS.some(name => decoratorArg(bare, name) !== null)) {
+            out.push(bare);
+            fallbacked = false;
+        } else {
+            fallbacked = true;
+        }
+    }
+    return out;
+}
+
+/** A `@@@name` line is the fallback form of `@@name`. */
+const bareDecorator = line => (String(line ?? '').startsWith('@@@') ? String(line).slice(1) : String(line ?? ''));
+
+/** The decorator's argument, `''` when it has none, or null when `line` is a different decorator.
+ *  Exact on the name: the namespace is open, so a prefix test would claim every future `@@name_*`. */
+export function decoratorArg(line, name) {
+    const bare = bareDecorator(line);
+    if (!bare.startsWith(name)) return null;
+    const rest = bare.slice(name.length);
+    if (rest === '') return '';
+    if (!/^\s/.test(rest)) return null;
+    return rest.trim();
+}
 
 /** Whether the entry carries a decorator. A parsed entry (getSortedEntries shape) has them in `decorators` with content stripped, so the array is authoritative. */
 export function hasDecorator(entry, name) {
-    if (Array.isArray(entry?.decorators)) {
-        return entry.decorators.some(d => String(d).startsWith(name));
-    }
-    return leadingDecorators(entry?.content).some(l => bareDecorator(l).startsWith(name));
+    const lines = Array.isArray(entry?.decorators) ? entry.decorators : leadingDecorators(entry?.content);
+    return lines.some(l => decoratorArg(l, name) !== null);
 }
-
-/** `@@promote`, exact: the namespace is open, so a prefix test would claim every future `@@promote_*`. A trailing argument is allowed. */
-const isPromoteDecorator = line => /^@@promote(\s|$)/.test(String(line ?? ''));
 
 /** Whether the author promoted this entry, off RAW content; false for a parsed entry, whose content core stripped — the runtime reads the stash. */
 export function hasPromoteDecorator(entry) {
-    return leadingDecorators(entry?.content).some(l => isPromoteDecorator(bareDecorator(l)));
+    return leadingDecorators(entry?.content).some(l => decoratorArg(l, '@@promote') !== null);
 }
 
 /** Content with `@@promote` added or removed — what a Studio toggle writes. Removal touches the leading run only; adding prepends. */
 export function withPromote(content, on) {
     const run = leadingDecorators(content);
-    const head = run.filter(l => !isPromoteDecorator(bareDecorator(l)));
+    const head = run.filter(l => decoratorArg(l, '@@promote') === null);
     if (on) head.unshift('@@promote');
     return [...head, ...String(content ?? '').split('\n').slice(run.length)].join('\n');
 }
@@ -882,8 +949,126 @@ export const usableKeys = keys => (Array.isArray(keys) ? keys : [])
 export const scanDepthFor = (entry, messageDepth, fallbackDepth = 0, depthSkew = 0) =>
     Number(entry?.scanDepth ?? ((messageDepth || fallbackDepth) + (depthSkew || 0)));
 
-/** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled, `constant` and
- *  `@@dont_activate`; `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives. */
+/** An entry's decorator lines: the stash the ST half writes before core strips them, else raw content. */
+const entryDecorators = entry =>
+    (Array.isArray(entry?.waDecorators) ? entry.waDecorators : resolveDecorators(entry?.content));
+
+/** The raw argument of the entry's first `name` decorator, or null when it carries none. */
+function decoratorFor(entry, name) {
+    for (const line of entryDecorators(entry)) {
+        const arg = decoratorArg(line, name);
+        if (arg !== null) return arg;
+    }
+    return null;
+}
+
+/** Same, as a whole number; null when absent or unparseable. */
+const decoratorCount = (entry, name) => {
+    const arg = decoratorFor(entry, name);
+    return arg === null ? null : wholeNumber(arg);
+};
+
+/** Whether the entry carries either latch decorator, regardless of which. */
+/** Each CCv3 activation gate against the `opts` field its verdict needs. All four quantities describe the
+ *  chat's SHAPE, which a graded scene cannot re-derive from its own window, so a capture records them
+ *  (eval/bundle-schema.md) and a bundle without them leaves those gates off. */
+export const GATE_INPUTS = Object.freeze({
+    '@@activate_only_after': 'assistantCount',
+    '@@activate_only_every': 'assistantCount',
+    '@@is_greeting': 'greetingIndex',
+    '@@is_user_icon': 'personaName',
+    '@@dont_activate_after_match': 'fired',
+    '@@keep_activate_after_match': 'fired',
+});
+
+/** Which gates `entries` carry that `opts` has no input for, once each, in GATE_INPUTS order. */
+export const unmodelledGates = (entries, opts = {}) => Object.keys(GATE_INPUTS).filter(name =>
+    opts[GATE_INPUTS[name]] === undefined && (entries ?? []).some(e => decoratorFor(e, name) !== null));
+
+/** How the activation gates rule on one entry: 'admit' forces it in with no keyword hit, 'skip' rules it
+ *  out, null leaves the caller its own test. A gate whose input `opts` lacks does not rule. */
+export function gateVerdict(entry, opts = {}) {
+    // Above the latch hoist: core drops a matched entry for an unarrived delay before WA's emit reaches it, so a
+    // latched-on entry is not exempt. `&&`, not `!= null`: delay 0 means no delay, as core's `if (!entry.delay)` reads it.
+    if (entry?.delay && Number(opts.chatLength ?? Infinity) < Number(entry.delay)) return 'skip';
+
+    // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and keeps only
+    // names prefix-matching its own two. Both present latches ON, as @@activate beats @@dont_activate.
+    if (opts.fired && latchActive(entry, opts.fired, opts.chatLength)) return 'admit';
+    if (opts.fired && decoratorFor(entry, '@@keep_activate_after_match') === null
+        && latchSuppressed(entry, opts.fired, opts.chatLength)) return 'skip';
+
+    const onlyAfter = decoratorCount(entry, '@@activate_only_after');
+    if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) return 'skip';   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0
+
+    const onlyGreeting = decoratorCount(entry, '@@is_greeting');
+    // `!== undefined`, not a truthy check: greeting 0 (first_mes) is a real, common index
+    if (onlyGreeting !== null && opts.greetingIndex !== undefined && opts.greetingIndex !== onlyGreeting) return 'skip';
+
+    const everyN = decoratorCount(entry, '@@activate_only_every');
+    if (everyN && Number(opts.assistantCount ?? 0) % everyN !== 0) return 'skip';   // `&&`, not `!== null`: `% 0` is NaN, which would gate the entry out silently forever
+
+    const wantsPersona = decoratorFor(entry, '@@is_user_icon');
+    if (wantsPersona && opts.personaName !== undefined && opts.personaName !== wantsPersona) return 'skip';   // `!== undefined`, not a truthy check: an empty persona name is still a value
+
+    return null;
+}
+
+export const hasLatch = entry =>
+    decoratorFor(entry, '@@dont_activate_after_match') !== null
+    || decoratorFor(entry, '@@keep_activate_after_match') !== null;
+
+/** WA's chat_metadata key for the latch record. */
+export const WA_METADATA_KEY = 'worldsApart';
+
+/** An entry's key in WA's latch record. US, not NUL: NUL makes git treat the file as binary. */
+export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1F)}${entry?.uid ?? ''}`;
+
+/** The book a latch key belongs to — the segment before the US. */
+export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F))[0];
+
+/** The latch record as it stood at `chatLength`: key -> the chat length when it fired, dropping anything
+ *  that fired later. A rewind past a firing point therefore un-latches, as core drops a timed effect on a
+ *  chat that has not advanced, and a frozen scene reads the record as of its own turn. */
+export const firedUpTo = (record, chatLength) => Object.fromEntries(
+    Object.entries(record ?? {}).filter(([, at]) => Number(at) <= Number(chatLength)));
+
+/** Whether `@@dont_activate_after_match` still holds this entry out: it has fired, and either carries no
+ *  duration (WA's extension — bare is CCv3's "in any case") or the chat is still inside it. Measured from
+ *  the FIRST firing, the record keeping no later one, so a duration delays re-entry rather than repeating. */
+export function latchSuppressed(entry, record, chatLength) {
+    if (decoratorFor(entry, '@@dont_activate_after_match') === null) return false;
+    const at = (record ?? {})[latchKey(entry)];
+    if (at === undefined) return false;
+    const n = decoratorCount(entry, '@@dont_activate_after_match');
+    return n === null || Number(chatLength) <= Number(at) + n;   // `=== null`, not falsy: a duration of 0 expires at once
+}
+
+/** Whether `@@keep_activate_after_match` still holds this entry in: it has fired, and either carries no
+ *  duration (WA's extension — bare is CCv3's "in any case") or the chat is still inside it. Sticky by
+ *  another name, so `layoutOrder` treats it as durable. */
+export function latchActive(entry, record, chatLength) {
+    if (decoratorFor(entry, '@@keep_activate_after_match') === null) return false;
+    const at = (record ?? {})[latchKey(entry)];
+    if (at === undefined) return false;
+    const n = decoratorCount(entry, '@@keep_activate_after_match');
+    return n === null || Number(chatLength) <= Number(at) + n;   // `=== null`, not falsy: a duration of 0 expires at once
+}
+
+/** A latch record split by book: `kept` for the record to write back, `dropped` for the delete's undo to
+ *  restore. Both halves, because a prune that returns only what it keeps cannot be undone. */
+export function partitionLatches(record, names) {
+    const drop = new Set(Array.isArray(names) ? names : []);
+    const kept = {}, dropped = {};
+    for (const [k, at] of Object.entries(record ?? {})) (drop.has(latchBook(k)) ? dropped : kept)[k] = at;
+    return { kept, dropped };
+}
+
+/** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled,
+ *  `constant`, `@@dont_activate`/`@@activate`, an unarrived `delay`, and any of the four conditional gates
+ *  (`@@activate_only_after`, `@@is_greeting`, `@@activate_only_every`, `@@is_user_icon`) an entry fails.
+ *  `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives — and a fired
+ *  `@@keep_activate_after_match` entry is admitted with no keyword hit at all, past the check below. */
 export function activationAdds(entries, windowFor, opts = {}) {
     const out = [];
     for (const entry of entries ?? []) {
@@ -891,6 +1076,11 @@ export function activationAdds(entries, windowFor, opts = {}) {
         // `@@activate` is core's to honour, like `constant`: WA leaves those keys unblanked and core's ladder reaches it
         // at a step above `@@dont_activate`, so forcing it again here would be noise (CCv3 gives `@@activate` precedence).
         if (hasDecorator(entry, '@@dont_activate') || hasDecorator(entry, '@@activate')) continue;
+
+        const verdict = gateVerdict(entry, opts);
+        if (verdict === 'admit') { out.push(entry); continue; }
+        if (verdict === 'skip') continue;
+
         const keys = usableKeys(entry.key);
         if (!keys.length) continue;
         const depth = scanDepthFor(entry, opts.messageDepth, opts.fallbackDepth, opts.depthSkew);
@@ -900,4 +1090,124 @@ export function activationAdds(entries, windowFor, opts = {}) {
         }
     }
     return out;
+}
+
+/** `position` values; must match core's `world_info_position` (world-info.js). */
+export const WI_POSITION = { before: 0, after: 1, ANTop: 2, ANBottom: 3, atDepth: 4, EMTop: 5, EMBottom: 6, outlet: 7 };
+
+/** `role` values; must match core's `extension_prompt_roles` (script.js). */
+export const WI_ROLE = { SYSTEM: 0, USER: 1, ASSISTANT: 2 };
+
+/** Core's DEFAULT_DEPTH (world-info.js). */
+export const DEFAULT_WI_DEPTH = 4;
+
+const POSITION_WORDS = { before_desc: WI_POSITION.before, after_desc: WI_POSITION.after, personality: WI_POSITION.after, scenario: WI_POSITION.after };
+const ROLE_WORDS = { system: WI_ROLE.SYSTEM, user: WI_ROLE.USER, assistant: WI_ROLE.ASSISTANT };
+
+/** A non-negative integer, or null. */
+const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg) : null);
+
+
+/** The ST field patch an entry's decorators ask for; `{}` when none apply. Pure: mutates nothing.
+ *  `ctx` is `{ chatLength, smartKeys }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
+export function decoratorFields(entry, ctx = {}) {
+    const lines = entryDecorators(entry);
+    if (!lines.length) return {};
+
+    const patch = {};
+    const set = (field, value) => { if (!(field in patch)) patch[field] = value; };
+    let sawPosition = false;
+    let role = null;
+    let additional = null;
+    let excluded = null;
+
+    for (const line of lines) {
+        let arg;
+
+        if ((arg = decoratorArg(line, '@@depth')) !== null) {
+            const n = wholeNumber(arg);
+            if (n === null) continue;
+            sawPosition = true;
+            set('position', WI_POSITION.atDepth);
+            if (patch.position === WI_POSITION.atDepth) set('depth', n);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@reverse_depth')) !== null) {
+            const n = wholeNumber(arg);
+            // Counted from the START, so it moves with the chat; the spec defines it as @@depth <total> - N.
+            const d = n === null ? null : Number(ctx?.chatLength ?? 0) - n;
+            if (d === null || d < 0) continue;
+            sawPosition = true;
+            set('position', WI_POSITION.atDepth);
+            if (patch.position === WI_POSITION.atDepth) set('depth', d);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@position')) !== null) {
+            const p = POSITION_WORDS[arg.toLowerCase()];
+            if (p === undefined) continue;
+            sawPosition = true;
+            set('position', p);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@scan_depth')) !== null) {
+            const n = wholeNumber(arg);
+            if (n === null) continue;
+            set('scanDepth', n);
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@role')) !== null) {
+            const r = ROLE_WORDS[arg.toLowerCase()];
+            if (r !== undefined && role === null) role = r;
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@additional_keys')) !== null) {
+            // splitKeys, not split(","): a /regex/ or a "quoted" argument keeps its commas, as every key list does.
+            const list = splitKeys(arg);
+            // CCv3 allows this decorator more than once, so the lists accumulate; not a field write, so
+            // first-write-wins does not reach it.
+            if (list.length) additional = [...(additional ?? []), ...list];
+            continue;
+        }
+
+        if ((arg = decoratorArg(line, '@@exclude_keys')) !== null) {
+            // splitKeys, not split(","): a /regex/ or a "quoted" argument keeps its commas, as every key list does.
+            const list = splitKeys(arg);
+            // CCv3 allows this decorator more than once, so the lists accumulate; not a field write, so
+            // first-write-wins does not reach it.
+            if (list.length) excluded = [...(excluded ?? []), ...list];
+            continue;
+        }
+    }
+
+    // Applied after the run, not as a write, so the outcome does not depend on where @@role was written.
+    if (role !== null) {
+        if (patch.position === WI_POSITION.atDepth || (!sawPosition && entry?.position === WI_POSITION.atDepth)) {
+            patch.role = role;
+        } else if (!sawPosition) {
+            patch.role = role;
+            patch.position = WI_POSITION.atDepth;
+            patch.depth = entry?.depth ?? DEFAULT_WI_DEPTH;
+        }
+    }
+
+    if (additional && excluded) {
+        // ST holds one selectiveLogic, so only @@additional_keys can be expressed natively. The exclusions ride
+        // on a WA-only field that selectiveEval composes into the gate as NOT nodes; core ignores it and honours
+        // the additional keys alone. The entry's own keys are never rewritten.
+        patch.keysecondary = additional;
+        patch.selectiveLogic = WI_LOGIC.AND_ANY;
+        patch.selective = true;
+        patch.waExcludeKeys = excluded;
+    } else if (additional || excluded) {
+        patch.keysecondary = additional ?? excluded;
+        patch.selectiveLogic = additional ? WI_LOGIC.AND_ANY : WI_LOGIC.NOT_ANY;
+        patch.selective = true;
+    }
+
+    return patch;
 }

@@ -1,5 +1,5 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys. Entry point evaluateSmartKey(); countKey() routes `?` keys here.
-// The grammar is SMARTKEYS.md's; matcher-design.md holds what each operator is worth.
+// The grammar is docs/smartkeys.md's; docs/matching-architecture.md holds what each operator is worth.
 
 import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
@@ -100,44 +100,52 @@ export function tokenize(input) {
     return tokens;
 }
 
+// Nesting ceiling: keywords, not programs. parse throws past it and validateSmartKey relays that as `too-deep`,
+// so the recursion below never reaches the stack limit (~2200 groups deep on the engine's own stack) and a
+// refused key can never abort the scan matching it.
+const MAX_DEPTH = 100;
+const tooDeep = () => new Error(`a SmartKey nests more than ${MAX_DEPTH} groups or negations deep`);
+
 /** Recursive descent; adjacent primaries get an implicit AND. Precedence: (...) > NOT > AND > OR/XOR. Malformed tails degrade to null (matches nothing). */
 export function parse(tokens) {
     let i = 0;
     const peek = () => tokens[i];
     // A binary operator with nothing on one side keeps the side that exists; the validator is what tells the author.
     const bin = (type, left, right) => (left && right ? { type, left, right } : left ?? right);
-    const parseOr = () => {
-        let left = parseAnd();
+    const parseOr = d => {
+        let left = parseAnd(d);
         while (peek()?.type === 'OR' || peek()?.type === 'XOR') {
             const type = tokens[i++].type;
-            left = bin(type, left, parseAnd());
+            left = bin(type, left, parseAnd(d));
         }
         return left;
     };
-    const parseAnd = () => {
-        let left = parseUnary();
+    const parseAnd = d => {
+        let left = parseUnary(d);
         while (peek() && (peek().type === 'AND' || peek().type === 'TERM' || peek().type === 'REGEX' || peek().type === 'LPAREN' || peek().type === 'NOT')) {
             if (peek().type === 'AND') i++;
-            left = bin('AND', left, parseUnary());
+            left = bin('AND', left, parseUnary(d));
         }
         return left;
     };
-    const parseUnary = () => {
+    const parseUnary = d => {
         if (peek()?.type === 'NOT') {
+            if (d >= MAX_DEPTH) throw tooDeep();
             i++;
-            const operand = parseUnary();
+            const operand = parseUnary(d + 1);
             // Dangling NOT ("? -") must not become NOT(null) = matches-everything.
             return operand ? { type: 'NOT', operand } : null;
         }
-        return parsePrimary();
+        return parsePrimary(d);
     };
-    const parsePrimary = () => {
+    const parsePrimary = d => {
         // A binary operator in prefix position is Lucene's per-term marker (`+fire`): skipped, not a missing left operand.
         while (peek() && (peek().type === 'AND' || peek().type === 'OR' || peek().type === 'XOR')) i++;
         const t = tokens[i++];
         if (!t) return null;
         if (t.type === 'LPAREN') {
-            const node = parseOr();
+            if (d >= MAX_DEPTH) throw tooDeep();
+            const node = parseOr(d + 1);
             let w, near;
             if (peek()?.type === 'RPAREN') { ({ weight: w, near } = tokens[i]); i++; }
             // `groupWeight`, never `weight`: a TERM already multiplies its own into wsum, and `(fire::2)::3` is both.
@@ -148,7 +156,7 @@ export function parse(tokens) {
         }
         return t.type === 'TERM' || t.type === 'REGEX' ? t : null; // stray RPAREN — drop
     };
-    return parseOr();
+    return parseOr(0);
 }
 
 /** Whether any term is reachable without passing through an odd number of NOTs — evaluate() gives NOT no score. */
@@ -160,6 +168,19 @@ const hasPositiveTerm = (node, negated = false) => {
 };
 
 /** Structural problems in a key: `error` cannot do what the author meant under any text, `warn` is legal and probably a typo. Structure only; whether a term ever occurs is the audit's df question. */
+/** A pattern body NFC composes away: countRegexKey normalises the haystack, so that sequence meets a composed text and
+ *  never matches. A warn, not an error — the decomposed run may sit in an optional group the rest of the pattern survives. */
+const decomposedFinding = raw => {
+    const m = String(raw).match(REGEX_KEY_RE);
+    if (!m) return null;
+    const nfc = m[1].normalize('NFC');
+    if (nfc === m[1]) return null;
+    return {
+        severity: 'warn', code: 'regex-decomposed',
+        message: `The pattern “${raw}” holds a decomposed character — a letter written as a base plus a combining mark. WA composes the text before matching, so that sequence can never match. Written composed it is “/${nfc}/${m[2]}”.`,
+    };
+};
+
 export function validateSmartKey(raw) {
     const out = [];
     const src = String(raw ?? '');
@@ -178,12 +199,14 @@ export function validateSmartKey(raw) {
                 });
                 return out;   // the reading question below is moot for a pattern that cannot run
             }
+            const decomposed = decomposedFinding(bare);
+            if (decomposed) out.push(decomposed);
         }
         if (isRegexKey(bare) && !coreReadsAsRegex(bare)) {
             const hatch = bare.includes('"') ? '' : ` If you meant the literal string, use ? "${bare}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it, so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
+                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
             });
         }
         return out;   // not a SmartKey; nothing further to say
@@ -196,7 +219,17 @@ export function validateSmartKey(raw) {
         return out;   // everything below reads the terms; no point compounding the report
     }
 
-    if (!hasPositiveTerm(parse(tokens))) {
+    let ast = null;
+    try {
+        ast = parse(tokens);
+    } catch {
+        out.push({
+            severity: 'error', code: 'too-deep',
+            message: `The key nests deeper than ${MAX_DEPTH} groups or negations, which is past what a keyword needs. Flatten some of the “(” levels — or split it into two keys.`,
+        });
+        return out;   // a key refused at parse needs no second opinion
+    }
+    if (!hasPositiveTerm(ast)) {
         out.push({
             severity: 'error', code: 'negation-only',
             message: 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.',
@@ -279,11 +312,13 @@ export function validateSmartKey(raw) {
             });
             continue;
         }
+        const decomposed = decomposedFinding(val);
+        if (decomposed) out.push(decomposed);
         if (!coreReadsAsRegex(val)) {
             const hatch = val.includes('"') ? '' : ` If you meant the literal string, quote the term: "${val}".`;
             out.push({
                 severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses any pattern with an unescaped “/” inside it, so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
+                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
             });
         }
     }
@@ -390,8 +425,8 @@ function ensureScan(scope, text) {
         // Masked, as foldedHay masks: the prescan and the walk have to agree on what the haystack is.
         counts = scanAutomaton(scope.automaton, fold(maskMarkup(text)));
     } else {
-        // A hit moves to the newest position. Eviction is by insertion order, and a segment two entries share — a repeated
-        // header — was being evicted from under the second entry's pass while it was still the one being read.
+        // A hit moves to the newest position: eviction is by insertion order, and a segment two entries share — a
+        // repeated header — would otherwise evict under the second entry's pass while it is still being read.
         scope.scans.delete(text);
     }
     scope.scans.set(text, counts);
@@ -621,7 +656,12 @@ export function registerKeys(rawKeys, scope = defaultScope) {
         const raw = String(key ?? '').trim();
         if (!raw || isRegexKey(raw)) continue;
         if (raw.startsWith('?')) {
-            ensureAst(scope, raw, () => parse(tokenize(raw)));
+            // Fed raw stashes too, not only usableKeys' output: a key the grammar refuses is skipped here, and countKey answers 0 for it.
+            try {
+                ensureAst(scope, raw, () => parse(tokenize(raw)));
+            } catch {
+                // Refused at parse — validateSmartKey is the author's answer.
+            }
         } else {
             for (const v of keyVariants(raw)) internLiteral(scope, fold(v));
         }

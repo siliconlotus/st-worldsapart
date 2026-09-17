@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, resolve as resolvePath, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDurable } from '../../extension/grading.mjs';
-import { arg } from '../metrics.mjs';
+import { arg } from '../lib/metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);

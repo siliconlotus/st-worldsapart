@@ -4,7 +4,7 @@
 // Read the >= 3 band first — every selection criterion is defined on it — and the agreement numbers against the contract-vs-itself reference printed at the end (G3).
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { qwk, mean, arg } from './metrics.mjs';
+import { qwk, mean, arg } from './lib/metrics.mjs';
 
 const argv = process.argv.slice(2);
 const dirs = argv.filter(a => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--labels');
@@ -80,4 +80,4 @@ for (const [s, d] of [...deltas.slice(0, 3), ...deltas.slice(-3)].filter((v, i, 
 }
 
 console.log(`\nreference: the contract vs itself is 87.7% exact / 98.3% within-1 overall, but 79% at the`);
-console.log(`head of a pool, and 4 of 13 rows originally >= 3 came back below it (CLAUDE.md, "Graded scenes").`);
+console.log(`head of a pool, and 4 of 13 rows originally >= 3 came back below it (CLAUDE.local.md, "Graded scenes").`);

@@ -14,6 +14,8 @@ export function joinQueryMessages(messages) {
 
 /** The messages buildQuery joins: substituted, attachments stripped, empties dropped, newest `depth`, chronological. `i` is the index in the array handed in, not in any canonical chat. */
 export function queryMessages(chat, { depth, substituteParams = s => s }) {
+    // slice(0, NaN) returns nothing.
+    const take = Number(depth) > 0 ? Number(depth) : Infinity;
     return chat
         .map((x, i) => ({
             name: String(x?.name ?? '').trim(),
@@ -22,6 +24,6 @@ export function queryMessages(chat, { depth, substituteParams = s => s }) {
         }))
         .filter(x => x.mes)
         .reverse()
-        .slice(0, Math.max(1, depth))
+        .slice(0, take)
         .reverse();
 }

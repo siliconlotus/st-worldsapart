@@ -2,7 +2,7 @@
 // Usage (any cwd):
 //   node eval/versus-score.mjs <graded-bundle.json> [more.json ...]
 import { readFileSync } from 'node:fs';
-import { gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './metrics.mjs';
+import { gradeCredit, fbeta, RECALL_WEIGHT, signTest } from './lib/metrics.mjs';
 
 const files = process.argv.slice(2).filter(a => a.endsWith('.json'));
 if (!files.length) {

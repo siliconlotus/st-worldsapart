@@ -1,21 +1,18 @@
-// How should buildKeyPrompt ask for a count? Five wordings substituted over the shipped phrase, every entry at one fixed seed, so a difference between variants is the wording alone; local only, since hosted models honour neither seed nor temperature (H1).
+// How should buildKeyPrompt ask for a count? Five wordings substituted over the shipped phrase, every entry at one fixed seed, so a difference between variants is the wording alone; local only, since hosted models honour neither seed nor temperature.
 // Usage:  node count-sweep.mjs --model gemma3:4b [--seed 42] [--temp 1]
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
-import { mean } from './metrics.mjs';
-import { booksOrExit, WORLDS } from './corpus.mjs';
+import { mean, arg as sharedArg } from './lib/metrics.mjs';
+import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const CACHE_PATH = `${HERE}eval-data/count-sweep-cache.json`;
 
-const arg = (n, d = null) => {
-    const i = process.argv.indexOf(`--${n}`);
-    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d;
-};
+const arg = (n, d = null) => sharedArg(process.argv, `--${n}`, d);
 const MODEL = arg('model', 'gemma3:4b');
 const SEED = Number(arg('seed', '42'));
 const TEMP = Number(arg('temp', '1'));

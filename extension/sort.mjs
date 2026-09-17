@@ -42,8 +42,9 @@ const titleKey = e => (e.comment ?? '').trim();
 export const SORT_FNS = {
     'priority':   sortWith((a, b) => sortPrio(a) - sortPrio(b)),
     'custom':     sortWith((a, b) => (a.displayIndex ?? 0) - (b.displayIndex ?? 0)),
-    'title-asc':  sortWith((a, b) => titleKey(a).localeCompare(titleKey(b))),
-    'title-desc': sortWith((a, b) => titleKey(b).localeCompare(titleKey(a))),
+    // 'en', never the user's locale: the title order is the same on every install, and matches the matcher's locale-independent fold.
+    'title-asc':  sortWith((a, b) => titleKey(a).localeCompare(titleKey(b), 'en')),
+    'title-desc': sortWith((a, b) => titleKey(b).localeCompare(titleKey(a), 'en')),
     'tokens-asc': sortWith((a, b) => String(a.content ?? '').length - String(b.content ?? '').length),
     'tokens-desc':sortWith((a, b) => String(b.content ?? '').length - String(a.content ?? '').length),
     'depth-asc':  sortWith(numAsc('depth')),
@@ -75,3 +76,13 @@ export const SORT_MENU = [
 export const PRESENTATION_ALIAS = { 'authored': 'order-asc', 'authored-inverse': 'order-desc' };
 export const normPresentation = k => PRESENTATION_ALIAS[k] ?? k ?? 'order-asc';
 export const presentationBaseLabel = k => SORT_LABELS[normPresentation(k)] ?? { 'best-first': 'Most relevant first', 'best-last': 'Most relevant last' }[k] ?? k;
+
+/** Explorer display order: `sortKey` (a SORT_FNS key or a legacy presentation alias), then tiered buckets by
+ *  tierRank with the base order kept within each. */
+export const sortTiered = (list, { sortKey, tiered = false, tierCfg = [] } = {}) => {
+    const sorted = [...list].sort(SORT_FNS[normPresentation(sortKey)] ?? SORT_FNS['order-asc']);
+    if (!tiered) return sorted;
+    const buckets = [];
+    for (const e of sorted) (buckets[tierRank(e, tierCfg)] ??= []).push(e);
+    return buckets.flat();   // sparse holes (empty ranks) are skipped by flat()
+};

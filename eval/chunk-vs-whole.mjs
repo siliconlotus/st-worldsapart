@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { splitRecursive } from '../extension/chunking.mjs';
 import { countKey } from '../extension/matcher.mjs';
-import { mean, fmt3 as fmt } from './metrics.mjs';
-import { booksOrExit, WORLDS } from './corpus.mjs';
+import { mean, fmt3 as fmt, arg as sharedArg, signTest } from './lib/metrics.mjs';
+import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -17,10 +17,7 @@ const BOOKS = Object.entries(booksOrExit()).map(([slug, b]) => [slug, b.file]);
 // The separators llmKeyCandidates passes, so a chunk boundary here is a chunk boundary there.
 const SEPS = ['\n\n', '\n', '. ', ' ', ''];
 
-const arg = (n, d = null) => {
-    const i = process.argv.indexOf(`--${n}`);
-    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d;
-};
+const arg = (n, d = null) => sharedArg(process.argv, `--${n}`, d);
 const hash = s => createHash('sha1').update(s).digest('hex').slice(0, 16);
 const cache = existsSync(CACHE_PATH) ? JSON.parse(readFileSync(CACHE_PATH, 'utf8')) : {};
 
@@ -96,17 +93,9 @@ for (const arm of ['whole', 'chunked', 'first']) {
     console.log(`${pad(arm, 10)}${lp(g('calls').toFixed(1), 7)}${lp(g('yield').toFixed(1), 8)}${lp(fmt(g('agreeOfRef')), 11)}${lp(fmt(g('agreeOfCand')), 12)}${lp(fmt(g('attested')), 10)}`);
 }
 
-const binomP = (k, n) => {
-    if (!n) return NaN;
-    const c = (a, b) => { let r = 1; for (let i = 0; i < b; i++) r = r * (a - i) / (i + 1); return r; };
-    let p = 0;
-    for (let i = 0; i <= n; i++) { const pr = c(n, i) / 2 ** n; if (pr <= c(n, k) / 2 ** n + 1e-12) p += pr; }
-    return Math.min(1, p);
-};
 console.log('\npaired: chunked vs whole, per entry');
 console.log(`${pad('metric', 12)}${lp('n', 4)}${lp('chunked+', 10)}${lp('whole+', 8)}${lp('mean d', 9)}${lp('p', 8)}`);
 for (const k of ['yield', 'agreeOfRef', 'agreeOfCand', 'attested']) {
-    const ds = rows.map(r => r.chunked[k] - r.whole[k]).filter(Number.isFinite);
-    const a = ds.filter(d => d > 0).length, b = ds.filter(d => d < 0).length;
-    console.log(`${pad(k, 12)}${lp(ds.length, 4)}${lp(a, 10)}${lp(b, 8)}${lp(mean(ds).toFixed(3), 9)}${lp(fmt(binomP(Math.min(a, b), a + b)), 8)}`);
+    const s = signTest(rows.map(r => r.chunked[k] - r.whole[k]));
+    console.log(`${pad(k, 12)}${lp(s.n + s.ties, 4)}${lp(s.plus, 10)}${lp(s.minus, 8)}${lp(s.mean.toFixed(3), 9)}${lp(fmt(s.p), 8)}`);
 }

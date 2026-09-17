@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import * as matcher from '../extension/matcher.mjs';
 import { countKey } from '../extension/matcher.mjs';
 import { openBundle } from '../extension/grading.mjs';
-import { gradeValue } from './metrics.mjs';
+import { gradeValue } from './lib/metrics.mjs';
 
 const files = process.argv.slice(2);
 if (!files.length) {

@@ -50,6 +50,9 @@ export function addVariant(entries, key, term, list = 'key') {
     return added;
 }
 
+/** Where the i-th of `n` selected rows lands in the block [start, start+n-1]; `desc` puts the top at the end. */
+export const blockTarget = (start, n, desc) => i => start + (desc ? n - 1 - i : i);
+
 /**
  * Places the selected entries (`orderedUids`, on-screen order) into a contiguous UID/order block [start, start+N-1].
  * Returns `{conflict: uid}` when an unselected entry holds a target UID, else `{moves: [[oldUid, newUid], …]}`.
@@ -58,7 +61,7 @@ export function addVariant(entries, key, term, list = 'key') {
 export function planUidReindex(entries, orderedUids, start, desc) {
     const n = orderedUids.length;
     const selUids = new Set(orderedUids);
-    const targetOf = i => start + (desc ? n - 1 - i : i);
+    const targetOf = blockTarget(start, n, desc);
     for (let i = 0; i < n; i++) { const u = targetOf(i); if (Object.hasOwn(entries, u) && !selUids.has(u)) return { conflict: u }; }
     return { moves: orderedUids.map((uid, i) => [uid, targetOf(i)]) };
 }

@@ -3,17 +3,14 @@
 // Appends one JSONL line per response as it lands and resumes from what is on disk; the queue is entry-outermost, so a partial run covers every arm.
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { mean, fmt3 as fmt } from './metrics.mjs';
-import { booksOrExit, WORLDS } from './corpus.mjs';
+import { mean, fmt3 as fmt, arg as sharedArg } from './lib/metrics.mjs';
+import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const BASE = process.env.NANO_BASE_URL ?? 'https://nano-gpt.com/api/v1';
 
-const arg = (n, d = null) => {
-    const i = process.argv.indexOf(`--${n}`);
-    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d;
-};
+const arg = (n, d = null) => sharedArg(process.argv, `--${n}`, d);
 const has = n => process.argv.includes(`--${n}`);
 const MODEL = arg('model');
 const CONC = Number(arg('concurrency', '8'));
@@ -68,7 +65,7 @@ if (!has('score-only')) {
     const t0 = Date.now();
     const sleep = ms => new Promise(res => setTimeout(res, ms));
 
-    /** A 429 is back-pressure, not a failure: exponential backoff with jitter, up to 5 retries; anything else fails at once (H5). */
+    /** A 429 is back-pressure, not a failure: exponential backoff with jitter, up to 5 retries; anything else fails at once. */
     const fetchWithBackoff = async (task) => {
         for (let attempt = 0; ; attempt++) {
             const r = await fetch(`${BASE}/chat/completions`, {

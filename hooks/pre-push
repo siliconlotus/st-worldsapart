@@ -22,14 +22,14 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
     fi
 
     if [ "$remote_ref" = "refs/heads/staging" ]; then
-        if ! WA_VERSION="$version" node -e "import('$ROOT/eval/version.mjs').then(m => process.exit(m.hasBuildCounter(process.env.WA_VERSION) ? 0 : 1))"; then
+        if ! WA_VERSION="$version" node -e "import('$ROOT/eval/lib/version.mjs').then(m => process.exit(m.hasBuildCounter(process.env.WA_VERSION) ? 0 : 1))"; then
             echo "pre-push: staging carries the build counter; manifest.json says $version, not X.Y.Z+build.N" >&2
             status=1
         fi
         continue
     fi
 
-    if ! WA_VERSION="$version" node -e "import('$ROOT/eval/version.mjs').then(m => process.exit(m.isReleaseVersion(process.env.WA_VERSION) ? 0 : 1))"; then
+    if ! WA_VERSION="$version" node -e "import('$ROOT/eval/lib/version.mjs').then(m => process.exit(m.isReleaseVersion(process.env.WA_VERSION) ? 0 : 1))"; then
         echo "pre-push: release carries a plain X.Y.Z; manifest.json says $version" >&2
         status=1
         continue

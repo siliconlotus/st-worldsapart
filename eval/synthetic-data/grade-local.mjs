@@ -9,7 +9,7 @@ import { archiveContract, contractBody, contractHash } from './contract.mjs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { arg } from '../metrics.mjs';
+import { arg } from '../lib/metrics.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolvePath(HERE, '..', '..');
@@ -40,7 +40,7 @@ const rubricHash = contractHash(system);
 if (archiveContract(system, rubricHash).written) console.log(`contract ${rubricHash} archived`);
 
 /**
- * The rater, resolved from the backend rather than from what was typed; a field a backend cannot answer stays absent, never guessed (bundle-schema.md, *A rater is whoever passed a verdict*).
+ * The rater, resolved from the backend rather than from what was typed; a field a backend cannot answer stays absent, never guessed (eval/bundle-schema.md, *A rater is whoever passed a verdict*).
  */
 async function resolveModel() {
     const out = { modelName: MODEL };

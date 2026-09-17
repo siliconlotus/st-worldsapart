@@ -2,7 +2,7 @@
 // Usage (any cwd):
 //   node eval/diff-delivered.mjs <baseline-rows.json> <arm-rows.json> [--limit 40] [--scene <substr>] [--scene-chars 700]
 import fs from 'node:fs';
-import { arg } from './metrics.mjs';
+import { arg } from './lib/metrics.mjs';
 
 const argv = process.argv.slice(2);
 const files = argv.filter((a, i) => a.endsWith('.json') && !['--limit', '--scene', '--scene-chars'].includes(argv[i - 1]));

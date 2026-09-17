@@ -13,7 +13,7 @@ export const defaultSettings = {
     meanCentered: true, // passed to the plugin as a parameter; off buys uncentered scores, not the no-plugin path
     relevanceCutoff: 0.10, // stage-4 E[credit] cutoff for dynamic rows of both tiers; one setting for every model, never the fit's own `cutoff`
     maxVectorEntries: 20, // stage-5 cap, counted off the `vectorized` flag
-    entityFilter: true, // keep capitalised tokens and lorebook vocabulary in raw-text queries; ignored in summary mode
+    entityFilter: true, // keep capitalised tokens and lorebook vocabulary in the query
     properNounBoost: 3, // weight multiplier for capitalised query tokens under entityFilter
     stopwordDocFreq: 0.25, // drop query terms found in more than this fraction of chunks; 0 disables
     messageDepth: 10, // recent messages read, for both the retrieval query and the keyword scan window; per-entry scanDepth overrides
@@ -40,7 +40,7 @@ export const defaultSettings = {
     worldPriorityMode: 'interleaved', // 'interleaved' (one list; weight scales score, offset shifts prompt position) | 'sequential' (strict book tiers)
     /** @type {Record<string, Array<{ world: string, weight: number, offset: number, cap: number }>>} keyed by character/group id; the chat's own book is the sentinel `'chat'` */
     worldPriorityByChar: {},
-    debugLog: true, // console.table the ranking every scan
+    debugLog: false, // console.table the ranking every scan; per-generation token counting when a budget is set
 };
 
 /** Settings with no UI; ensureSettings resets them to defaults each init, so a value here is never user-tuned. */
@@ -66,10 +66,18 @@ export function ensureSettings(extensionSettings) {
     // defaultSettings holds, so the first write to one (worldPriorityByChar) edits this module's exported defaults.
     store[MODULE_NAME] = Object.assign(structuredClone(defaultSettings), store[MODULE_NAME]);
     for (const k of INTERNAL_KEYS) store[MODULE_NAME][k] = defaultSettings[k];
+    // A boolean is defaulted, never coerced: `Boolean('false')` is true.
+    const s = store[MODULE_NAME];
+    for (const [k, d] of Object.entries(defaultSettings)) {
+        if (typeof d === 'number') { const n = Number(s[k]); s[k] = Number.isFinite(n) ? n : d; }
+        else if (typeof d === 'boolean' && typeof s[k] !== 'boolean') s[k] = d;
+    }
 }
 
 /** Cross-module mutable state. Stays a holder object: an imported `let` cannot be reassigned across modules. */
 export const runState = {
+    scanToken: 0,                 // generations increment it at intercept; after every await a continuation compares and bails when superseded
+    armedToken: 0,                // the token selectAndActivate committed for; a SCAN_DONE ranks only while it is still the current one
     lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}` — core's format, not the US separator
     lastPromptOrder: [],          // the last scan's prompt order, post-cut
     lastQuery: '',                // last retrieval query text
@@ -80,6 +88,7 @@ export const runState = {
     lastCandidates: [],           // selection-candidate rows from the last debug-class run
     lastCandidateEntries: [],     // the WI entries behind those rows, aligned by index
     lastSkipped: [],              // per-entry budget rejections + the cap that caused each
+    lastBudget: null,             // last scan's token totals + per-item counts; null when no token budget was in force
     attachedWorlds: new Set(),    // books ST currently has active for this chat
     waOwnsScan: false,            // WA intercepted the scan in flight; gates the ENTRIES_LOADED key blanking and the per-loop SCAN_DONE feed
     waMatched: new Set(),         // `${world}.${uid}` WA has emitted or seen activated this scan — never rescanned

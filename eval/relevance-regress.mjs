@@ -4,17 +4,18 @@
 //        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|bare|span|book|named] [--density-extract entity|book]
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
-import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './scene.mjs';
-import { ensureIndex, resolveModel } from './reindex.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './lib/scene.mjs';
+import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 import fs from 'node:fs';
-import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './metrics.mjs';
+import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './lib/metrics.mjs';
 import { PACK } from '../extension/wa-pack-en.js';
 import { table, usePack } from '../extension/lang.mjs';
 // table().common, not a second split: lang.mjs owns how a pack's word list is read.
 usePack(PACK);
 const COMMON_WORDS = table().common;
-import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './logistic.mjs';
+import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './lib/logistic.mjs';
 import * as entity from '../extension/entity.mjs';
+import { mean, sd } from '../extension/relevance.mjs';
 import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-suggest.mjs';
 import { fold, normalizeOrthography } from '../extension/smartkeys.mjs';
@@ -231,8 +232,7 @@ const bookTf = new Map();
 // Entry contents per book, for the --lobo lineage guard.
 const bookContents = new Map();
 
-const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
-const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
+
 const fx = n => (Number.isFinite(n) ? (n >= 0 ? '+' : '') + n.toFixed(3) : '  n/a');
 
 // Query embedding per (scene, arm).
@@ -714,7 +714,7 @@ const queryVec = async (S, name, value, em) => {
         if (bases.length > 1) {
             const b0 = bases[0];
             console.log(`\npaired against ${SWEPT}=${b0.value}, every arm at the ${AT} cutoff — per-scene F2, sign test`);
-            // Per book too: scenes on one book are nearer one observation than many (CLAUDE.md, Graded scenes).
+            // Per book too: scenes on one book are nearer one observation than many (CLAUDE.local.md, Graded scenes).
             const bk = b0.cutoff?.sceneBooks ?? [];
             const bookNames = [...new Set(bk)];
             for (const t of bases.slice(1)) {
@@ -764,5 +764,5 @@ const queryVec = async (S, name, value, em) => {
     }
 
     console.log('\nA coefficient is fitted over POOLED rows, so it has no paired sign test behind it — read the SE,');
-    console.log('and remember these rows sit on 3 corpora however many scenes they span (CLAUDE.md, graded scenes).');
+    console.log('and remember these rows sit on 3 corpora however many scenes they span (CLAUDE.local.md, graded scenes).');
 })();

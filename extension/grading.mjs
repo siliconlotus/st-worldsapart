@@ -12,7 +12,7 @@ export function stRelative(path) {
     return m ? path.slice(m.index + 1).replace(/\\/g, '/') : path;
 }
 
-/** A book's entries keyed by uid, verbatim and whole: a trimmed book moves stage 3's BM25 through the gazetteer (R22). */
+/** A book's entries keyed by uid, verbatim and whole: a trimmed book moves stage 3's BM25 through the gazetteer. */
 export function keyByUid(entries) {
     const out = {};
     for (const entry of (Array.isArray(entries) ? entries : Object.values(entries ?? {}))) out[entry.uid] = entry;
@@ -208,12 +208,14 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 /** Fields identical across every arm, stored once at document level. Not query, candidates, params, cutoff or primaryBook: those are per-arm. */
 const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
 
+const GATE_INPUT_FIELDS = ['assistantCount', 'greetingIndex', 'personaName', 'firedLatches'];
+
 const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's names for sceneChat / sceneChats / sceneInjects / sceneSources
 
 /** Numeric signal values, which live under `scores` and a fitted model indexes by name; ranks and the fused score stay flat, being arm-relative. */
 const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'properNouns', 'length'];
 
-export const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 3;
 
 /** A scene's id, `<chat basename>-msg-<end>`, every run outside `[A-Za-z0-9_]` collapsed to `-`. */
 const sceneId = (chat, end) => {
@@ -231,7 +233,7 @@ export const raterParts = r => (r?.kind === 'human'
     ? { id: r.id }
     : (([modelId, rubric]) => ({ modelId, rubric, isDigest: /^[0-9a-f]{64}$/.test(modelId) }))(String(r?.id ?? '').split(US)));
 
-/** A pass's identity, what a writer deduplicates on: the rater and the day. Settings are not identity (H1); `params` must not join it. */
+/** A pass's identity, what a writer deduplicates on: the rater and the day. Settings are not identity; `params` must not join it. */
 export const passKey = v => [v?.id ?? '', v?.gradedAt ?? ''].join(US);
 
 const RATER_DESC = ['modelName', 'family', 'quant', 'modelParams'];
@@ -356,7 +358,10 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
     const indexed = indexVerdicts(gradeEntries(first.grades, { user: scene.user, now: first.createdAt }));
 
     // A scene is the graded moment, not a span: `sceneStart` and `depth` belong to the arm's cell.
-    doc.scenes = [{ id, sceneChat: first.chat ?? '', sceneEnd: scene.end, entries: indexed.entries }];
+    // The gate inputs a scene cannot re-derive from its own window (eval/bundle-schema.md); omitted, not
+    // nulled, when the capture predates them, so a reader can tell "not recorded" from "none".
+    const gateInputs = Object.fromEntries(GATE_INPUT_FIELDS.filter(f => first[f] !== undefined).map(f => [f, first[f]]));
+    doc.scenes = [{ id, sceneChat: first.chat ?? '', sceneEnd: scene.end, ...gateInputs, entries: indexed.entries }];
 
     const whyBlock = {};
     doc.arms = arms.map(({ arm, sample }) => {
@@ -393,7 +398,7 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
 
     if (indexed.raters.length) doc.raters = indexed.raters;
 
-    // Field order is the schema (bundle-schema.md): the bulk goes last, and the hashes stay ahead of the books.
+    // Field order is the schema (eval/bundle-schema.md): the bulk goes last, and the hashes stay ahead of the books.
     const books = first.books ?? {};
     doc.bookHashes = await hashBooks(books);
 

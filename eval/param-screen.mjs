@@ -3,11 +3,11 @@
 //   node .../param-screen.mjs <sample.json> [sample2.json ...] [--arms K1=3,filter=off] [--k 10] [--list]
 // Pool first (/wa-super-grade): an arm that surfaces unjudged entries scores them 0 and looks worse than it is.
 import { readFileSync } from 'node:fs';
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels } from './scene.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels } from './lib/scene.mjs';
 import { modelKey } from '../extension/relevance.mjs';
-import { jaccard, signTest, spearman, gradeValue, arg } from './metrics.mjs';
+import { jaccard, signTest, spearman, gradeValue, arg } from './lib/metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
-import { ensureIndex, resolveModel } from './reindex.mjs';
+import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 
 const argv = process.argv.slice(2);
 const samples = argv.filter(a => a.endsWith('.json') && !a.startsWith('--'));
@@ -64,6 +64,8 @@ const ARMS = {
     'cutoff=0.22': { memoryCutoff: 0.22 },
     'cutoff=0.30': { memoryCutoff: 0.30 },
     'fit=noCosine': { relevanceFit: 'noCosine' },
+    // The whole no-plugin path, not just the fit: same admissions, no cosine column, so the noCosine fit selects itself.
+    'plugin=off': { cosineAvailable: false },
     'fit=bge-m3': { relevanceFit: 'bge-m3' },
     'fit=jina': { relevanceFit: 'cohee/jina-embeddings-v2-base-en' },
     'fit=gemma': { relevanceFit: 'embeddinggemma' },
@@ -78,7 +80,7 @@ const familyOf = arm => arm.split('=')[0];
 
 if (argv.includes('--list')) { console.log(Object.keys(ARMS).join('\n')); process.exit(0); }
 if (!samples.length) {
-    console.error('need at least one sample: node param-screen.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--metric fAtCut|f2|n|fAtR] [--list]');
+    console.error('need at least one sample: node param-screen.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--metric fAtCut|fAtCutMemory|fAtCutReference|f2|n|fAtR] [--list]');
     console.error('one sample runs, but reports no sign test — pairing needs scenes to pair.');
     process.exit(2);
 }
@@ -101,15 +103,17 @@ if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
 const GLOBAL = { ...(BUDGET ? { budgetTokens: BUDGET } : {}), ...(CUTOFF !== null ? { memoryCutoff: CUTOFF } : {}) };
 // fAtCut is F-beta(2) over the set the relevance cut admits; the others are diagnostics on the ordering at a fixed window.
 const METRIC = arg(argv, '--metric') ?? 'fAtCut';
-const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut?.f ?? NaN, nAtCut: r => r.atCut?.n ?? NaN, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN };
+const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut?.f ?? NaN, nAtCut: r => r.atCut?.n ?? NaN, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN,
+    // One tier's delivered set only: a scene with no relevant rows in that tier contributes NaN, not a zero.
+    fAtCutMemory: r => r.atCutMemory?.f ?? NaN, fAtCutReference: r => r.atCutReference?.f ?? NaN };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 // @cut is the one window the system chooses, and its cutoff is a user setting: scoring it needs --cutoff.
-if (CUTOFF === null && (METRIC === 'fAtCut' || METRIC === 'nAtCut')) {
+if (CUTOFF === null && METRIC.startsWith('fAtCut') || CUTOFF === null && METRIC === 'nAtCut') {
     console.error(`--metric ${METRIC} needs --cutoff: relevanceCutoff is a user setting, and nothing here may stand in for it`);
     process.exit(2);
 }
 const mOf = r => (WINDOWED[METRIC] ? WINDOWED[METRIC](r) : r[METRIC]);
-// Falls back to the bundle's own model, never a hardcoded name (H3).
+// Falls back to the bundle's own model, never a hardcoded name.
 const MODEL = process.env.WA_EMBED_MODEL ?? openSample(samples[0], arg(argv, '--arm')).embedModel;
 if (!MODEL) { console.error(`${samples[0]} records no embedModel — set WA_EMBED_MODEL`); process.exit(2); }
 const EM = resolveModel(MODEL);

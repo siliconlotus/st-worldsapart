@@ -4,9 +4,12 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { PLUGIN_FILES, pluginFingerprint } from './plugin/fingerprint.mjs';
+import { stInstall } from './eval/lib/st-install.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
-const DEST = path.resolve(SRC, '../../../../../plugins/worlds-apart');
+const ST = stInstall();
+if (!ST) { console.error('no SillyTavern install above this checkout (no config.yaml found) — set WA_ST_ROOT'); process.exit(2); }
+const DEST = path.join(ST.root, 'plugins/worlds-apart');
 
 const PACKAGE_JSON = JSON.stringify({
     name: 'worlds-apart-plugin',
@@ -23,8 +26,10 @@ fs.mkdirSync(DEST, { recursive: true });
 for (const [from, to] of PLUGIN_FILES) {
     const src = path.join(SRC, 'plugin', from);
     const dst = path.join(DEST, to);
-    fs.rmSync(dst, { force: true });
-    fs.copyFileSync(src, dst);
+    // Copy-then-swap: a failure mid-copy leaves the previously deployed copy intact, not half a plugin.
+    const tmp = `${dst}.deploying`;
+    fs.copyFileSync(src, tmp);
+    fs.renameSync(tmp, dst);
     console.log(`copied  ${path.relative(SRC, src)}  ->  plugins/worlds-apart/${to}`);
 }
 
@@ -35,7 +40,16 @@ console.log('wrote    package.json');
 for (const name of fs.readdirSync(DEST)) {
     if (KEEP.has(name)) continue;
     const stale = path.join(DEST, name);
-    if (!fs.statSync(stale).isFile()) {
+    let staleStat;
+    try {
+        staleStat = fs.statSync(stale);
+    } catch {
+        // A dangling symlink has no stat; removing it is the cleanup this sweep exists for.
+        fs.rmSync(stale, { force: true });
+        console.log(`removed  plugins/worlds-apart/${name}  (broken link)`);
+        continue;
+    }
+    if (!staleStat.isFile()) {
         console.log(`SKIP     ${name}/ is a directory — left alone, remove it yourself if it is stale`);
         continue;
     }
@@ -43,12 +57,17 @@ for (const name of fs.readdirSync(DEST)) {
     console.log(`removed  plugins/worlds-apart/${name}  (not in the manifest)`);
 }
 
-const configPath = path.resolve(DEST, '../../config.yaml');
+const configPath = path.join(ST.root, 'config.yaml');
 try {
     const cfg = fs.readFileSync(configPath, 'utf8');
     if (/^enableServerPlugins:\s*false\b/m.test(cfg)) {
-        fs.writeFileSync(configPath, cfg.replace(/^(enableServerPlugins:\s*)false\b/m, '$1true'));
-        console.log('enabled  enableServerPlugins: true in config.yaml (was false)');
+        // Re-taking it would back up the patched file.
+        const backup = `${configPath}.wa-backup`;
+        if (!fs.existsSync(backup)) fs.copyFileSync(configPath, backup);
+        const tmp = `${configPath}.deploying`;
+        fs.writeFileSync(tmp, cfg.replace(/^(enableServerPlugins:\s*)false\b/m, '$1true'));
+        fs.renameSync(tmp, configPath);
+        console.log('enabled  enableServerPlugins: true in config.yaml (was false; the original is at config.yaml.wa-backup)');
     } else if (/^enableServerPlugins:\s*true\b/m.test(cfg)) {
         console.log('ok       enableServerPlugins already true in config.yaml');
     } else {
