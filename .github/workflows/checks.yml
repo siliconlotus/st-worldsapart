@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Checked out at its install depth: several checks resolve through stInstall(), which walks up for config.yaml.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: sillytavern/public/scripts/extensions/third-party/st-worldsapart
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
       # The suite runs as it does on a developer's machine: inside an install. acorn (undeclared-check) and tiktoken
