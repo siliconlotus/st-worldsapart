@@ -39,7 +39,7 @@ Updates stay on the channel you chose. SillyTavern checks at startup and tells y
 updates by itself only when SillyTavern's own version changes.
 
 ### Server plugin
-> [!NOTE] WorldsApart ships with an extension
+> [!IMPORTANT] WorldsApart ships with an extension
 > SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search — everything still works, just without mean-centering (a meaningful loss of relevancy accuracy) and some performance boosts.
 
 From your SillyTavern root folder, run:

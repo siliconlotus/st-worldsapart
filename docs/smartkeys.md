@@ -35,7 +35,7 @@ The `^` flag makes a term case-sensitive in the same way.
 
 You can combine them to get very specific: you probably actually want `? =^NASA` for the space agency. (You can write the flags in any order; `? ^=NASA` and `? =^NASA` are equivalent in every way.)
 
-> [!NOTE]
+> [!IMPORTANT]
 > SmartKeys flags (or lack thereof) take precedence over the entry's own settings. `? NASA` is always case-insensitive and substring-matched even if the entry has case sensitivity and whole-word matching on. This is what allows you to be more granular with your keys, mixing `? =^NASA` and `? astronaut` to get you "NASA space program" and "Apollo 11 astronauts Neil Armstrong and Buzz Aldrin" (note the plural!) but not "nasal decongestant".
 
 ## Operators
@@ -61,7 +61,7 @@ You can combine as many terms as you want:
 
 As you can see, when you begin to combine them, things get a bit hard to work out— is that `moon AND sun` OR `star AND jupiter`, or `moon` AND  `sun OR star`? For these cases, you'll want to use groups to make your intent clear: `? moon AND (sun OR star) AND (jupiter OR saturn)`[^2]. These groups can nest: `? ((orion AND pegasus) OR (saturn AND jupiter)) AND telescope`— you need either stars or planets plus telescope. You can nest groups up to 100 deep; if you need more than that, email the maintainer and beg absolution for your sins.
 
-> [!NOTE]
+> [!IMPORTANT]
 > A key built only on negation (e.g., `? NOT water`) is refused in nearly every case, as it would match basically every message. It is only usable as a secondary key, where AND_ALL reads it as written and the NOT operators invert it (i.e., `NOT(NOT water)`, which is the same as requiring `water`). AND_ANY drops it entirely because it negates the entire gate.
 
 ## Operator Spelling
@@ -185,7 +185,7 @@ That can be written boolean-style as `(Ash OR Ketchum) AND (Pikachu OR Bulbasaur
 It also allows you to easily express things that ST simply does not allow:
 `? (=^Ash AND pikachu -=^Oak) OR (=^Misty AND squirtle -cerulean)`
 
-> [!WARNING]
+> [!CAUTION]
 > **Secondary keys always apply.** WorldsApart supports secondary keys because one of our goals is that a book performs essentially identically under WA as under ST core. That means that if you have pre-existing secondary keys, they will be applied. So if you have an entry with keys ["Ash", "Ketchum"] AND_ANY ["Pikachu", "Bulbasaur"], if you then add key `? =^Ash AND ^Misty`, the text must contain Ash, Misty, *and* Pikachu or Bulbasaur. You can't exempt keys from this; it's all or nothing. Either you leave the secondary keys and accept that, or you rewrite the conditions as a SmartKey: `? (=^Ash OR ^Ketchum) AND (pikachu OR bulbasaur)`. It's not necessary to delete the secondary keys if you rewrite them— you can simply set them to OFF in case you ever need to port to a non-WA system where the SmartKeys won't work.
 
 ---

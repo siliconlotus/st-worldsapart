@@ -45,8 +45,8 @@ The "what you meant, not what you wrote" principle extends to hyphens; WA expand
 > [!TIP]
 > **Hyphens are a one-way journey**. If you think the hyphenated form might appear in the text, it's best to draft the key with them; if the text doesn't use them, it will still match, but if you write a non-hyphenated key and the model uses hyphens, it won't.
 
-> [!NOTE]
-> WA does *not* strip accents like some systems do; `cafe` does not match `café`. Use an OR group to capture accent variants if they might arise: `? =cafe OR café`
+> [!IMPORTANT]
+> **WA does NOT strip accents like some systems do**; `cafe` does not match `café`. Use an OR group to capture accent variants if they might arise: `? =cafe OR café`
 
 ---
 
