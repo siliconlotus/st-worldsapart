@@ -291,8 +291,29 @@ async function syncWorld(world, entries) {
     }
 
     const wanted = new Set(items.map(x => x.hash));
-    const newItems = items.filter(x => !saved.includes(x.hash));
+    let newItems = items.filter(x => !saved.includes(x.hash));
     const staleHashes = saved.filter(x => !wanted.has(x));
+
+    // The chat-bound book with no rows yet is usually STMemoryBooks' copy-on-branch clone: the plugin copies what a sibling
+    // collection holds for the same (text, uid) instead of re-embedding it. Never runs again once the collection has rows.
+    if (!saved.length && newItems.length && world === chatBook() && await hasPlugin()) {
+        try {
+            const sourceSettings = vectorRequestBody();
+            const response = await fetch('/api/plugins/worlds-apart/adopt', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ collectionId, hashes: newItems.map(x => x.hash), source: sourceSettings.source, sourceSettings }),
+                signal: AbortSignal.timeout(SYNC_TIMEOUT_MS),
+            });
+            const adopted = new Set(response.ok ? (await response.json())?.adopted ?? [] : []);
+            if (adopted.size) {
+                newItems = newItems.filter(x => !adopted.has(x.hash));
+                console.log(`Worlds Apart: adopted ${adopted.size} chunks for "${world}" from another collection under the same model`);
+            }
+        } catch (error) {
+            console.warn('Worlds Apart: adopt failed, embedding instead', error);
+        }
+    }
 
     if (newItems.length) {
         console.log(`Worlds Apart: embedding ${newItems.length} new chunks for "${world}"`);

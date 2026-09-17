@@ -406,14 +406,7 @@ prefix stripped, joined as `name: text` blocks (`query.mjs`), with the embedding
 prefixed where the family has one (`relevance.mjs` `PREFIXES`). Neither the query nor an entry is
 summarised.
 
-`syncWorld` chunks every enabled entry with content (`chunking.mjs`: `paragraph` mode keeps one
-paragraph per chunk, splits one over `chunkSize` and merges fragments under `minChunkSize` forward)
-into the collection `wa_<hash of book name>`, one row per (text, uid), inserting new chunks and
-deleting stale ones. Every fetch in the generation path is time-bounded: a query, the plugin check
-and the fit fetches at ten seconds — one embedding round-trip, past which the endpoint is wedged and
-the turn degrades through the fallbacks below. The bulk insert is bounded at five minutes as a
-hang-detector only: the server finishes and persists the embed regardless of the client, and the next
-turn's `list` picks the chunks up.
+`syncWorld` chunks every enabled entry with content (`chunking.mjs`: `paragraph` mode keeps one paragraph per chunk, splits one over `chunkSize` and merges fragments under `minChunkSize` forward) into the collection `wa_<hash of book name>`, one row per (text, uid), inserting new chunks and deleting stale ones. The chat-bound book's first sync, when its collection has no rows — STMemoryBooks' copy-on-branch clone, or a renamed book — posts the new hashes to the plugin's `/adopt`, which copies the rows any sibling collection under the same source and model holds for them, and only the remainder is embedded; the check never runs again once the collection has rows, and without the plugin the book is embedded whole. Every fetch in the generation path is time-bounded: a query, the plugin check and the fit fetches at ten seconds — one embedding round-trip, past which the endpoint is wedged and the turn degrades through the fallbacks below. The bulk insert and the adoption are bounded at five minutes as a hang-detector only: the server finishes and persists the rows regardless of the client, and the next turn's `list` picks the chunks up.
 
 `queryCollections` asks the server plugin's `/query-multi`: every chunk of every attached book scored
 by cosine against the query, both centred on the collection's centroid — the memory tier's chunks,
@@ -426,11 +419,7 @@ column differs. Every scored entry keeps its cosine in `runState.lastScores`; on
 are retrieval winners. Retrieval is serialised so a query never reads a half-built index. A retrieval
 failure is reported and costs every entry its cosine; keyword matching and constants are unaffected.
 
-Plugin side (`plugin/server.js`, `scoring.mjs`, `vector.mjs`): an index's items and corpus mean are
-cached on the index file's mtime and size; `centroidFor` averages the named uids' chunks;
-`scoreCollection` is mean-centred cosine; `poolEntries` keeps the best chunk per entry; `selectTopK`
-sorts and cuts. The plugin is a generated copy: edits need `node deploy-plugin.mjs` and a restart, and
-the settings panel shows a drift banner until the fingerprints match.
+Plugin side (`plugin/server.js`, `scoring.mjs`, `vector.mjs`): an index's items and corpus mean are cached on the index file's mtime and size; `centroidFor` averages the named uids' chunks; `scoreCollection` is mean-centred cosine; `poolEntries` keeps the best chunk per entry; `selectTopK` sorts and cuts; `/adopt` copies rows by chunk hash from sibling collections under the same source and model into a new collection, vector and metadata intact, a hash being (text, uid) and the directory the model. The plugin is a generated copy: edits need `node deploy-plugin.mjs` and a restart, and the settings panel shows a drift banner until the fingerprints match.
 
 ## Stage 2 — Activation
 

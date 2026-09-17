@@ -357,6 +357,49 @@ export async function init(router) {
         }
     });
 
+    /** Copies the rows any other WA collection under the same source and model holds for `hashes` into `collectionId`, so a
+     *  cloned book (STMemoryBooks' copy-on-branch, a rename) is not re-embedded. A hash is (text, uid) and the directory is the
+     *  model, so a hit is the same vector. Body `{ collectionId, hashes, source, sourceSettings }`, reply `{ adopted: number[] }`. */
+    router.post('/adopt', async (request, response) => {
+        try {
+            const { collectionId, hashes, source, sourceSettings } = request.body ?? {};
+            if (typeof collectionId !== 'string' || !collectionId.startsWith('wa_') || !Array.isArray(hashes) || !hashes.length || !source) {
+                return response.status(400).send({ error: 'collectionId (wa_*), hashes and source are required' });
+            }
+            if (hashes.length > 100000) {
+                return response.status(400).send({ error: 'too many hashes (max 100000)' });
+            }
+            const model = modelScope(String(source), sourceSettings ?? {});
+            const dirs = request.user.directories;
+            const sourceDir = path.join(dirs.vectors, sanitize(String(source)));
+            const wanted = new Set(hashes.map(Number));
+            const found = new Map();
+            // getIndexPath per sibling, not a fixed depth: an empty model scope (llamacpp, extras) puts index.json in the collection dir itself.
+            for (const coll of fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : []) {
+                if (found.size === wanted.size) break;
+                if (!coll.isDirectory() || !coll.name.startsWith('wa_') || coll.name === sanitize(collectionId)) continue;
+                const sibling = new LocalIndex(getIndexPath(dirs, coll.name, String(source), model));
+                if (!await sibling.isIndexCreated()) continue;
+                for (const it of await sibling.listItems()) {
+                    const h = Number(it.metadata?.hash);
+                    if (wanted.has(h) && !found.has(h) && rowDim(it.vector)) found.set(h, it);
+                }
+            }
+            if (found.size) {
+                const target = new LocalIndex(getIndexPath(dirs, collectionId, String(source), model));
+                if (!await target.isIndexCreated()) await target.createIndex();
+                await target.beginUpdate();
+                for (const it of found.values()) await target.insertItem({ vector: it.vector, metadata: it.metadata });
+                await target.endUpdate();
+            }
+            console.log(`[Worlds Apart] ${collectionId}: adopted ${found.size}/${wanted.size} chunks from sibling collections`);
+            return response.send({ adopted: [...found.keys()] });
+        } catch (error) {
+            console.error('[Worlds Apart] adopt failed:', error);
+            return response.status(500).send({ error: String(error?.message ?? error) });
+        }
+    });
+
     router.post('/ping', (request, response) => {
         response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT });
     });
