@@ -7,7 +7,7 @@ WorldsApart is a set of tools for SillyTavern that allow a user to manage their 
 ## Entry Selection
 SillyTavern fills lorebook token budgets through a convoluted process that is similar to (but not actually) the entries' `order` values. This means that often, high-relevancy entries are pushed out of the budget by low-relevancy entries, and some things that you might expect (a constant entry is always in the budget) are not true by construction.
 
-WorldsApart takes over the entry selection and uses relevancy to determine where the budget starts cutting, ensuring that your least-relevant entries are the ones cut. It also shores up some of ST's behavior by making guarantees that constant and sticky entries will always be included[^1], while additionally providing for the promotion of entries that are important but not constant— things like character sheets that you definitely want in the prompt before memories.
+WorldsApart takes over the entry selection and uses relevancy to determine where the budget starts cutting, ensuring that your least-relevant entries are the ones cut. It also shores up some of ST's behavior by making guarantees that constant and sticky entries will always be included[^1], while additionally providing for the promotion of entries that are important but not constant— things like character sheets that you definitely want in the prompt over memories.
 
 ## Matcher improvements and SmartKeys
 WorldsApart draws from best practices in natural language processing and information retrieval to ensure the system behaves as humanely and efficiently as possible.
@@ -40,7 +40,7 @@ updates by itself only when SillyTavern's own version changes.
 
 ### Server plugin
 > [!IMPORTANT]
-> **WorldsApart ships with a plugin.** SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search — everything still works, just without mean-centering (a meaningful loss of relevancy accuracy) and some performance boosts.
+> **WorldsApart ships with a plugin.** SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search. Entries still get retrieved by similarity, but ST's endpoint doesn't return the similarity scores, so relevance is predicted from text, proper nouns and density alone — technically still better than ST alone, but noticeably worse than with the plugin (about four points of F2 across all entries, concentrated on vectorized entries).
 
 From your SillyTavern root folder, run:
 ```bash
