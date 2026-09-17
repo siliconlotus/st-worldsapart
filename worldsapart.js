@@ -743,10 +743,10 @@ function reportFailure(stage, consequence, error, severity = 'error', loud = fal
 }
 
 /** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
- *  `token` and `abort` are the generation's identity: after every await a superseded or aborted generation bails
- *  rather than write scan state or emit activations into whoever's prompt is now current. */
-async function selectAndActivate(chat, token, abort) {
-    const superseded = () => token !== runState.scanToken || Boolean(abort?.());
+ *  `token` is the generation's identity: after every await a superseded generation bails rather than write scan
+ *  state or emit activations into whoever's prompt is now current. A stop bumps the token, so it supersedes too. */
+async function selectAndActivate(chat, token) {
+    const superseded = () => token !== runState.scanToken;
 
     chat = dropChatTags(chat);
 
@@ -801,9 +801,9 @@ async function selectAndActivate(chat, token, abort) {
 
 // Hooks
 
-/** Generation interceptor. ST calls it (chat, contextSize, abort, type): abort() reads the generation's AbortSignal.
- *  Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
-async function intercept(chat, _maxContext, abort, type) {
+/** Generation interceptor. ST calls it (chat, contextSize, abort, type); `abort` is a setter that CANCELS the
+ *  generation, never a reader, so it is not taken. Quiet generations scan like visible ones; ST skips its dry runs. */
+async function intercept(chat, _maxContext, _abort, type) {
     // A quiet generation never displaces one the user has in flight: it stands down and runs core-native.
     // is_send_press is the send lock the UI paths hold; Generate('quiet') sets it only later, at the prompt build.
     if (type === 'quiet' && is_send_press) {
@@ -820,7 +820,7 @@ async function intercept(chat, _maxContext, abort, type) {
         return;
     }
 
-    await selectAndActivate(chat, token, abort);
+    await selectAndActivate(chat, token);
 }
 
 
@@ -2328,6 +2328,8 @@ async function initBody() {
 
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
     eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
+    // A stopped generation is superseded: the interceptor's `abort` cannot be read, so the token carries the stop.
+    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 
