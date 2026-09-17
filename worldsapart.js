@@ -545,7 +545,8 @@ async function queryTermWeights(searchText, { log = true, entries = null } = {})
 let retrievalQueue = Promise.resolve();
 
 /** Scores every entry with content against arbitrary query text; shared by retrieval and /wa-query.
- *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>}>} */
+ *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>, retrieved: Set<string>}>}
+ *           `retrieved` is stage 2's admission set, `scores` the stage-3 cosine column; the no-plugin path fills only the first. */
 function scoreEntries(searchText) {
     const run = () => scoreEntriesUnsafe(searchText);
     const result = retrievalQueue.then(run, run);
@@ -560,9 +561,11 @@ async function scoreEntriesUnsafe(searchText) {
     const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
+    /** @type {Set<string>} Every owner the query returned, scored or not — the same `${world}.${uid}` keys `scores` uses. */
+    const retrieved = new Set();
 
     if (!targets.length || !searchText) {
-        return { targets, scores };
+        return { targets, scores, retrieved };
     }
 
     const byWorld = Map.groupBy(targets, e => e.world);
@@ -601,6 +604,10 @@ async function scoreEntriesUnsafe(searchText) {
                 return;
             }
 
+            // Admission is retrieval identity, not magnitude: the no-plugin path returns the same chunks, so the same
+            // entries are stage-2 candidates whichever path answered. The Set is the pooling — K counts chunks there.
+            for (const owner of chunkOwners) retrieved.add(owner);
+
             // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit.
             const score = typeof item?.score === 'number' ? item.score : null;
             if (score === null) { rankOnly++; return; }
@@ -617,10 +624,11 @@ async function scoreEntriesUnsafe(searchText) {
 
     if (rankOnly) {
         console.warn(`Worlds Apart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
-            + 'The relevance model is running on text, proper nouns and density alone. Check that the server plugin is loaded and that its query is not failing.');
+            + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
+            + 'Check that the server plugin is loaded and that its query is not failing.');
     }
 
-    return { targets, scores };
+    return { targets, scores, retrieved };
 }
 
 /** Prints /wa-query's table: every scored entry by cosine, with the gap between neighbours. */
@@ -667,20 +675,20 @@ async function retrieve(chat) {
     runState.lastQueryChat = queryChat;
 
     // No entity filter here: stage 1 has no BM25 to spend its terms on (plugin/scoring.mjs).
-    const { targets, scores } = await scoreEntries(searchText);
+    const { targets, scores, retrieved } = await scoreEntries(searchText);
 
     if (!targets.length) {
         console.log('Worlds Apart: no entries with content in the active books, so retrieval has nothing to score');
         return [];
     }
-    if (!scores.size) {
-        console.log('Worlds Apart: the query scored no chunk in any collection');
+    if (!retrieved.size) {
+        console.log('Worlds Apart: the query matched no chunk in any collection');
         return [];
     }
 
     // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for stage 3.
     const vectorizedKeys = new Set(targets.filter(x => x.vectorized).map(x => `${x.world}.${x.uid}`));
-    const winnerKeys = new Set([...scores.keys()].filter(k => vectorizedKeys.has(k)));
+    const winnerKeys = new Set([...retrieved].filter(k => vectorizedKeys.has(k)));
 
     // Every scored entry, not the winners: stage 3 looks its cosine up here.
     for (const [key, value] of scores) {
@@ -1800,10 +1808,12 @@ async function probeQuery(_named, text) {
         return '';
     }
 
-    const { targets, scores } = await scoreEntries(searchText);
+    const { targets, scores, retrieved } = await scoreEntries(searchText);
 
     if (!scores.size) {
-        console.log(`Worlds Apart: the query scored no chunk for "${searchText.slice(0, 60)}…"`);
+        console.log(retrieved.size
+            ? `Worlds Apart: ${retrieved.size} entr(ies) came back with no cosine for "${searchText.slice(0, 60)}…" — the no-plugin path answered, so there is no table to print`
+            : `Worlds Apart: the query matched no chunk for "${searchText.slice(0, 60)}…"`);
         return '';
     }
 

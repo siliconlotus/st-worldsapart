@@ -420,10 +420,11 @@ by cosine against the query, both centred on the collection's centroid — the m
 named per collection by uid, every chunk when a book has none — pooled to the best chunk per entry and
 cut at `admitCeiling`, 1000 entries. No admission test: cosine only. Without the plugin the same
 request goes to ST's `/api/vector/query-multi`, which neither centres nor pools nor returns scores, so
-K counts chunks (10000) and stage 3 has no cosine. Every scored entry keeps its cosine in
-`runState.lastScores`; only `vectorized` entries are retrieval winners. Retrieval is serialised so a
-query never reads a half-built index. A retrieval failure is reported and costs every entry its cosine;
-keyword matching and constants are unaffected.
+K counts chunks (10000) and stage 3 has no cosine. Admission is the returned chunks' owners either way —
+retrieval identity, not magnitude — so the same entries are activated on both paths and only the cosine
+column differs. Every scored entry keeps its cosine in `runState.lastScores`; only `vectorized` entries
+are retrieval winners. Retrieval is serialised so a query never reads a half-built index. A retrieval
+failure is reported and costs every entry its cosine; keyword matching and constants are unaffected.
 
 Plugin side (`plugin/server.js`, `scoring.mjs`, `vector.mjs`): an index's items and corpus mean are
 cached on the index file's mtime and size; `centroidFor` averages the named uids' chunks;
