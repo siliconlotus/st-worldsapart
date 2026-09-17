@@ -64,6 +64,8 @@ const ARMS = {
     'cutoff=0.22': { memoryCutoff: 0.22 },
     'cutoff=0.30': { memoryCutoff: 0.30 },
     'fit=noCosine': { relevanceFit: 'noCosine' },
+    // The whole no-plugin path, not just the fit: same admissions, no cosine column, so the noCosine fit selects itself.
+    'plugin=off': { cosineAvailable: false },
     'fit=bge-m3': { relevanceFit: 'bge-m3' },
     'fit=jina': { relevanceFit: 'cohee/jina-embeddings-v2-base-en' },
     'fit=gemma': { relevanceFit: 'embeddinggemma' },

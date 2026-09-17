@@ -205,6 +205,10 @@ export const sceneParams = (S, overrides = {}) => ({
     // null = no cut: `@cut` is reported unavailable, never scored at the fit's own optimum. `relevanceCutoff` is a user
     // setting, so a caller that wants the window must supply the number; a cutoff arm sets one for both tiers.
     memoryCutoff: null,
+    // false models the no-plugin path (worldsapart.js scoreEntries): ST's endpoint returns the same chunks with the score
+    // discarded, so the SAME entries are admitted at stage 2 and stage 3 gets no cosine column. Admission is untouched;
+    // the noCosine fit then selects itself, as the runtime's does.
+    cosineAvailable: true,
     // Which fit scores the column, by name; null is production. An arm setting this must also fix memoryCutoff.
     relevanceFit: null,
     // Directory holding relevance-model-<tier>.json, from the cwd; null is the shipped extension/ pair. Same warning.
@@ -517,7 +521,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         for (const [book, g] of Object.entries(grouped)) for (const m of g.metadata ?? []) { const key = entryKey({ world: book, uid: m.index }); per.set(key, { score: Math.max(per.get(key)?.score ?? -Infinity, m.score) }); }
         const rows = [];
         // --- STAGE 2, retrieval route. Disabled entries drop here, not from `entries`: the gazetteer and BM25 corpus must still see them (F49).
-        for (const [key, s] of per) { const e = byKey.get(key); if (e && !e.disable) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: s.score, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
+        for (const [key, s] of per) { const e = byKey.get(key); if (e && !e.disable) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: P.cosineAvailable === false ? undefined : s.score, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: keywordScore(e, haystackFor(e), k1), vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
         // --- STAGE 2: activation, keyword route, run to a fixpoint. May admit only what core could activate, so never a
         // disabled entry (F49), and on the initial pass never a delayUntilRecursion one. Its LEVEL is not modelled:
         // core walks distinct levels (world-info.js currentRecursionDelayLevel), this admits at the first pass.
@@ -568,7 +572,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                 const key = entryKey(e);
                 admitted.add(key);
                 depthOf.set(key, depth);
-                rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: dense.get(key), textScore: contentText.get(key) ?? 0, keywordScore: 0, vectorEligible: dense.has(key) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true });
+                rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: P.cosineAvailable === false ? undefined : dense.get(key), textScore: contentText.get(key) ?? 0, keywordScore: 0, vectorEligible: dense.has(key) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true });
             }
             for (const e of found) if (feeds(e)) buffer.push(String(e.content).trim());
         }
@@ -585,7 +589,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                     ref.set(key, Math.max(ref.get(key) ?? -Infinity, scores[i]));
                 });
             }
-            for (const r of rows) if (!isMemory(r.entry) && ref.has(entryKey(r.entry))) r.score = ref.get(entryKey(r.entry));
+            if (P.cosineAvailable !== false) for (const r of rows) if (!isMemory(r.entry) && ref.has(entryKey(r.entry))) r.score = ref.get(entryKey(r.entry));
         }
         // --- STAGE 3, keys. Once, over the COMPLETE buffer, as onScanDone runs after core's last loop. An entry that fed
         // the buffer does not match its own content there: that is the entry naming itself, not the conversation naming it.
