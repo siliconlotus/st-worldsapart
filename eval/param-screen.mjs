@@ -78,7 +78,7 @@ const familyOf = arm => arm.split('=')[0];
 
 if (argv.includes('--list')) { console.log(Object.keys(ARMS).join('\n')); process.exit(0); }
 if (!samples.length) {
-    console.error('need at least one sample: node param-screen.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--metric fAtCut|f2|n|fAtR] [--list]');
+    console.error('need at least one sample: node param-screen.mjs <sample.json> [more.json ...] [--arms a,b] [--k 10] [--metric fAtCut|fAtCutMemory|fAtCutReference|f2|n|fAtR] [--list]');
     console.error('one sample runs, but reports no sign test — pairing needs scenes to pair.');
     process.exit(2);
 }
@@ -101,10 +101,12 @@ if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
 const GLOBAL = { ...(BUDGET ? { budgetTokens: BUDGET } : {}), ...(CUTOFF !== null ? { memoryCutoff: CUTOFF } : {}) };
 // fAtCut is F-beta(2) over the set the relevance cut admits; the others are diagnostics on the ordering at a fixed window.
 const METRIC = arg(argv, '--metric') ?? 'fAtCut';
-const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut?.f ?? NaN, nAtCut: r => r.atCut?.n ?? NaN, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN };
+const WINDOWED = { fAtR: r => r.atR.f, fAtCut: r => r.atCut?.f ?? NaN, nAtCut: r => r.atCut?.n ?? NaN, fAtBudget: r => r.atBudget?.f ?? NaN, nAtBudget: r => r.atBudget?.n ?? NaN,
+    // One tier's delivered set only: a scene with no relevant rows in that tier contributes NaN, not a zero.
+    fAtCutMemory: r => r.atCutMemory?.f ?? NaN, fAtCutReference: r => r.atCutReference?.f ?? NaN };
 if (!['n', 'nAt5', 'f2', 'recall', 'precision', ...Object.keys(WINDOWED)].includes(METRIC)) { console.error(`unknown --metric ${METRIC}`); process.exit(2); }
 // @cut is the one window the system chooses, and its cutoff is a user setting: scoring it needs --cutoff.
-if (CUTOFF === null && (METRIC === 'fAtCut' || METRIC === 'nAtCut')) {
+if (CUTOFF === null && METRIC.startsWith('fAtCut') || CUTOFF === null && METRIC === 'nAtCut') {
     console.error(`--metric ${METRIC} needs --cutoff: relevanceCutoff is a user setting, and nothing here may stand in for it`);
     process.exit(2);
 }

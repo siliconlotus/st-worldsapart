@@ -202,7 +202,8 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model, en
 /** The sample's own `params` over these defaults, then `overrides`. The scorer constants come off state.mjs, which owns them. */
 export const sceneParams = (S, overrides = {}) => ({
     K1: defaultSettings.bm25K1, B: defaultSettings.bm25B, boost: defaultSettings.properNounBoost, stopwordDf: defaultSettings.stopwordDocFreq,
-    // null = each tier's fit's own cutoff; a cutoff arm sets one number for both tiers (scoreScene admits).
+    // null = no cut: `@cut` is reported unavailable, never scored at the fit's own optimum. `relevanceCutoff` is a user
+    // setting, so a caller that wants the window must supply the number; a cutoff arm sets one for both tiers.
     memoryCutoff: null,
     // Which fit scores the column, by name; null is production. An arm setting this must also fix memoryCutoff.
     relevanceFit: null,
@@ -679,8 +680,8 @@ export const makeLayoutOrder = ({ scene, haystack, fit = null, fitDir = null }) 
             const fit = mine.some(r => Number.isFinite(r.score)) ? model : (model.noCosine ?? model);
             const population = (fit.standardise === 'pooled' ? rows : mine).filter(r => !r.entry?.constant).map(col);
             const e = scoreRelevance(fit, mine.map(col), population);
-            // tierCutoff is the fit's own optimum, provenance only; the cut and its number belong to scoreScene `admits`.
-            mine.forEach((r, i) => { r.eCredit = e[i]; r.tierCutoff = fit.cutoff; });
+            // No `cutoff` off the fit, not even as provenance: the cut and its number belong to scoreScene `admits`.
+            mine.forEach((r, i) => { r.eCredit = e[i]; });
         }
         return [...rows].sort((a, b) => (b.eCredit ?? -1) - (a.eCredit ?? -1));
     };
@@ -722,10 +723,12 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const f2 = fbeta(precision, recall, RECALL_WEIGHT);
 
     //   @R  the top `relevant` rows; budget-invariant by construction.
-    const scoreWindow = (rows) => {
+    //  `denom` is the relevant count the recall is against; a tier-restricted window must pass its OWN, or its recall
+    //  is measured against relevant rows it was never eligible to deliver.
+    const scoreWindow = (rows, denom = relevant) => {
         const gr = rows.map(r => gradeOf(r) ?? 0);
         const p = rows.length ? gr.reduce((s, x) => s + gradeCredit(x), 0) / rows.length : 0;
-        const rc = relevant ? gr.filter(x => x >= 3).length / relevant : 0;
+        const rc = denom ? gr.filter(x => x >= 3).length / denom : 0;
         const un = rows.filter(r => !scene.POOL.has(entryKey(r.entry)));
         return {
             precision: p, recall: rc, f: fbeta(p, rc, RECALL_WEIGHT), n: rows.length,
@@ -733,6 +736,9 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
             unjudgedRows: un.map(r => ({ uid: Number(r.uid), book: r.entry?.world, title: r.title })),
         };
     };
+    // Relevant rows per tier, for the tier-restricted windows below.
+    const relevantIn = tier => layoutOrder(rankable.filter(r => scene.POOL.has(entryKey(r.entry))))
+        .filter(r => (isMemory(r.entry) ? 'memory' : 'reference') === tier && (gradeOf(r) ?? 0) >= 3).length;
     const ranked = layoutOrder(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));
 
@@ -753,6 +759,11 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     }).kept);
     const admits = r => keptSet.has(r);
     const atCut = cutGiven ? scoreWindow(ranked.filter(admits)) : null;
+    // The same window split by tier: on a memory-bearing book the memory rows dominate `atCut`, so a signal that only
+    // moves one tier is invisible in the pooled number. Each side scores against its own relevant count.
+    const atCutTier = cutGiven ? Object.fromEntries(['memory', 'reference'].map(tier => [
+        tier, scoreWindow(ranked.filter(r => admits(r) && (isMemory(r.entry) ? 'memory' : 'reference') === tier), relevantIn(tier)),
+    ])) : null;
 
     //   @budget  what the token ceiling leaves — the delivered set. Recorded tokens where the capture has them, else this corpus's chars-per-token (G12).
     const recorded = new Map((S.candidates ?? []).map(c => [entryKey({ world: c.book ?? S.primaryBook, uid: c.uid }), c.tokens]).filter(([, t]) => typeof t === 'number'));
@@ -792,6 +803,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
         f2,
         atR,
         atCut,
+        atCutMemory: atCutTier?.memory ?? null,
+        atCutReference: atCutTier?.reference ?? null,
         atBudget,
         relevant,
         judged: top.length - unjudged.length,
