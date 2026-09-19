@@ -16,7 +16,7 @@ import {
 import { extension_settings, getContext } from '../../../extensions.js';
 import { t } from '../../../i18n.js';
 
-import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
+import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_max_recursion_steps, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
@@ -1235,6 +1235,13 @@ async function coreSelection() {
 }
 
 
+/** Whether this scan's map is the one that ships: core's loop ends on a falsy `next`, EXCEPT on the
+ *  max-recursion-steps break, which ends it with `next` still set. */
+function isLastLoop(args) {
+    return !args?.state?.next
+        || (world_info_max_recursion_steps > 0 && world_info_max_recursion_steps <= (args?.state?.loopCount ?? 0));
+}
+
 async function onScanDone(args) {
     const activated = args?.activated?.entries;
 
@@ -1270,25 +1277,31 @@ async function onScanDone(args) {
     try {
         await rankOwnedScan(activated, args, skip);
     } catch (error) {
-        delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
+        // Last loop only, as every other delete is: core re-activates what it no longer holds, and asks for one more loop.
+        if (isLastLoop(args)) delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
         reportFailure(t`activation error`,
             t`Only constant and sticky entries were included. Try again.`,
             error, 'error', true);
     }
 }
 
-/** The owned half of a scan: the recursion feed, then scoring (stage 3), the relevance cut (4) and the budget (5). Throws are the caller's. */
+/** The owned half of a scan: the recursion feed on every loop, then — on the last one — scoring (stage 3), the
+ *  relevance cut (4) and the budget (5). Throws are the caller's. */
 async function rankOwnedScan(activated, args, skip) {
     // Before the size-0 return: a pass that activated nothing can still be followed by a min-activations widening.
     if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
         await feedScanLoop(args);
     }
 
+    // Only the feed above is a per-loop job. Stages 3-5 write what the last loop writes again — and core reads
+    // `order` back in its inclusion-group prio sort, so the rewrite must not stand while the scan is still running.
+    if (!isLastLoop(args)) return;
+
     if (activated.size === 0) {
         skip('core activated nothing');
         runState.lastPromptOrder = [];
         runState.lastLayoutOrder = [];   // only written past this return, so without it the capture reads the PREVIOUS scan's population
-        if (!args?.state?.next) renderDeliveryPanel([]);
+        renderDeliveryPanel([]);
         return;
     }
 
@@ -1414,10 +1427,10 @@ async function rankOwnedScan(activated, args, skip) {
     // Before the cuts, so a capture holds every row this pass judged; survivors and losers cannot be re-interleaved afterwards.
     runState.lastLayoutOrder = [...sticky, ...constant, ...promoted, ...results];
 
-    // On the last loop only: the population grows with each recursion loop, and cutting once it is complete is what
-    // keeps the delivered set independent of recursion depth.
+    // Past the last-loop return above: cutting once the population is complete is what keeps the delivered set
+    // independent of recursion depth.
     const cutoffs = relevanceModel.value ?? {};
-    const { cut: relevanceCutRows } = args?.state?.next ? { cut: [] } : selection.relevanceCut(results, {
+    const { cut: relevanceCutRows } = selection.relevanceCut(results, {
         scoreOf: it => it.eCredit,
         cutoffOf: it => (cutoffs[isMemory(it.entry) ? 'memory' : 'reference'] ? settings().relevanceCutoff : NaN),
     });
@@ -1508,11 +1521,8 @@ async function rankOwnedScan(activated, args, skip) {
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
-    // Only the last loop (no further state) is the real prompt — recording earlier would latch entries a later loop still cuts.
-    if (!args?.state?.next) {
-        recordLatches(promptOrder.map(item => item.entry));
-        renderDeliveryPanel(runState.lastPromptOrder);
-    }
+    recordLatches(promptOrder.map(item => item.entry));
+    renderDeliveryPanel(runState.lastPromptOrder);
 
     if (runState.verboseRun) {
         // The pre-cut, pre-budget population, `cut`/`cutBy` recording which side each row fell on. candidates=N caps
@@ -1560,8 +1570,8 @@ async function rankOwnedScan(activated, args, skip) {
         console.table(rows);
     }
 
-    // Final loop only, and never on ST's dry runs, which fire on every chat load.
-    if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun && !args?.state?.next) {
+    // Never on ST's dry runs, which fire on every chat load.
+    if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun) {
         await reportLayout(false, maxTokens > 0);
     }
 }

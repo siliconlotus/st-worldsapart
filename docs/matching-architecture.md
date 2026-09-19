@@ -49,10 +49,14 @@ settings as parameters.
    `waKeys`/`waSecondary` and blanks them, so core's matcher matches nothing and the inclusion-group
    filter runs over WA's verdicts. Constants and `@@activate` entries keep their keys: core
    short-circuits both before matching, and the group filter's `getScore` reads `entry.key`.
-3. **`onScanDone`** (`WORLDINFO_SCAN_DONE`, once per scan loop) feeds the next pass (`feedScanLoop`),
-   then on every pass scores what core activated (stage 3), lays it out, cuts on relevance on the last
-   pass only (stage 4), applies the caps and the budget (stage 5), rewrites `order` so assembly reads the
-   prompt order, and deletes everything else from core's `activated` map.
+3. **`onScanDone`** (`WORLDINFO_SCAN_DONE`, once per scan loop) feeds the next pass (`feedScanLoop`).
+   That is all an intermediate pass does: on the last pass (`isLastLoop`) it scores what core activated
+   (stage 3), lays it out, cuts on relevance (stage 4), applies the caps and the budget (stage 5),
+   rewrites `order` so assembly reads the prompt order, and deletes everything else from core's
+   `activated` map. Both writes wait for the last pass. Core re-activates a force-activated entry its map
+   no longer holds, counts it as new and schedules one more pass for it, so deleting earlier never ends;
+   and core reads `order` back in its inclusion-group prio sort, so a rewrite mid-scan would pick that
+   group's winner by WA's prompt order.
 
 If WA is enabled it owns activation; there is no half-owned mode. A matcher failure is reported once
 per distinct message per session (`reportFailure`) and WA keeps ownership: no per-turn fallback to
@@ -501,7 +505,7 @@ This is the layout order (`runState.lastLayoutOrder`); the prompt order is separ
 
 ## Stage 4 — Selection
 
-`selection.mjs` `relevanceCut`, on the last scan loop only, over the dynamic block only: a row of
+`selection.mjs` `relevanceCut`, over the dynamic block only: a row of
 either tier whose `E[credit]` is below the `relevanceCutoff` setting (0.10) is dropped and deleted from
 core's map. The cutoff is one setting for every model and both tiers, never the fit's own `cutoff`,
 because `E[credit]` is calibrated across embedders (E4). A row with no finite score, or whose tier has
@@ -528,7 +532,8 @@ cap is a prefix cut of the layout order. `applyBudget` walks it once:
 - A blocked entry is skipped, not stopped at, so an exempt entry behind an oversized one is reached; a
   skip after the last admission is marked `tail`.
 
-Survivors stay in core's map, the rest are deleted. Then the **prompt order**: one flat sort of the
+Survivors stay in core's map, the rest are deleted. The last loop is a falsy `state.next`, or the loop
+core's `world_info_max_recursion_steps` break ends with `state.next` still set (`isLastLoop`). Then the **prompt order**: one flat sort of the
 survivors by the `presentationOrder` setting (any `SORT_FNS` key, `best-first` or `best-last` on
 `E[credit]`), grouped by tier first under `presentationTiered`, by book tier first under `sequential`;
 each survivor's `order` is rewritten to a base plus its index, since assembly sorts by `order`. The
