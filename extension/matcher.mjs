@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { addMessageHits, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, fold, keyVariants, normalizeOrthography, parse, primeScan, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, fold, keyVariants, normalizeOrthography, parse, primeScan, QUOTE_FAMILIES, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -68,7 +68,7 @@ export const isRegexKey = k => REGEX_KEY_RE.test(String(k));
  *  core's customTokenizer, which skips the character after every comma (upstream-st.md #17). */
 export function splitKeys(input) {
     const out = [];
-    let cur = '', inRegex = false, inQuote = false;
+    let cur = '', inRegex = false, quoteFam = null;   // the family the open phrase closes on
     const push = () => {
         const tok = cur.trim();
         // A token that opened a regex without closing it: core splits it on its commas.
@@ -80,10 +80,11 @@ export function splitKeys(input) {
     for (let i = 0; i < src.length; i++) {
         const c = src[i];
         if (c === '\\') { cur += c + (src[i + 1] ?? ''); i++; continue; }
-        if (c === '\n') { inRegex = false; inQuote = false; push(); continue; }
-        if (c === '"' && !inRegex) inQuote = !inQuote;
-        else if (c === '/' && !inQuote && (inRegex || !cur.trim())) inRegex = !inRegex;
-        else if (c === ',' && !inRegex && !inQuote) { push(); continue; }
+        if (c === '\n') { inRegex = false; quoteFam = null; push(); continue; }
+        if (!inRegex && quoteFam) { if (quoteFam.includes(c)) quoteFam = null; }
+        else if (!inRegex && QUOTE_FAMILIES.some(f => f.includes(c))) quoteFam = QUOTE_FAMILIES.find(f => f.includes(c));
+        else if (c === '/' && !quoteFam && (inRegex || !cur.trim())) inRegex = !inRegex;
+        else if (c === ',' && !inRegex && !quoteFam) { push(); continue; }
         cur += c;
     }
     push();

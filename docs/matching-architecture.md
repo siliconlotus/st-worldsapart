@@ -248,7 +248,7 @@ the application to disable a UI prompt by type, which is not WA's concern.
 
 A key is one of three things: a **plain** key, matched as a substring; a **regex** key, `/pattern/flags`
 (`REGEX_KEY_RE`: any body, flags `dgimsuvy`); or a **SmartKey**, an expression beginning `?`. `splitKeys`
-parses a key list on commas and newlines; a `/regex/` and a `"quoted"` term keep their commas, a `/`
+parses a key list on commas and newlines; a `/regex/` and a `"quoted"` term, under any family in `QUOTE_FAMILIES`, keep their commas, a `/`
 that is not the first character of a token is literal, and a token that opens a regex without closing
 it is re-split on its commas.
 
@@ -258,7 +258,7 @@ The sentinel is `?`, and only the first character; `what's up?` is a plain key. 
 resolves toward the literal: `*` is text, `~` is text except as `~N` on a group, a single colon is text,
 `+` is absorbed.
 
-- **Terms.** A run of non-space, non-syntax characters, or a `"quoted"` phrase. `-`, `!` and `+` are
+- **Terms.** A run of non-space, non-syntax characters, or a `"quoted"` phrase, where any quotation mark quotes: a phrase opens on `"`, a curly mark `“ ” „ ‟`, a guillemet `« »` or a CJK mark `「」 『』 《》 〈〉` and closes on the first mark of the same family (`QUOTE_FAMILIES`), so `"「月」"` keeps its brackets; a prime `″` is text, and the CJK marks are syntax in a SmartKey only, the fold leaving them in the text (K10). `-`, `!` and `+` are
   operators only at token start, so `sci-fi` and `c++` are terms. Prefix flags: `=` whole-word, `^`
   case-sensitive, in either order. A weight is the postfix `::N` or `^N` (Lucene's boost); a delimiter
   followed by non-digits stays in the term, so `10:30`, `re:code` and URLs need no quoting.

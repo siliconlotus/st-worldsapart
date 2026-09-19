@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
-import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert } from '../extension/smartkeys.mjs';
+import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey, splitKeys } from '../extension/matcher.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -27,6 +27,34 @@ eq(matches('? !cat', 'a dog barked'), true, '! negation');
 eq(matches('? cat && dog', 'cat dog'), true, '&& alias');
 eq(matches('? "moon mission"', 'the moon mission began'), true, 'quoted phrase, contiguous');
 eq(matches('? "moon mission"', 'mission to the moon'), false, 'quoted phrase, not contiguous');
+
+// Any quotation mark quotes: the paired marks the fold collapses onto `"` are `"` to the lexer too; primes are text.
+{
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    eq(matches('? «moon mission»', 'the moon mission began'), true, 'guillemets quote a phrase as straight quotes do');
+    eq(matches('? «moon mission»', 'mission to the moon'), false, '...and keep its order');
+    eq(matches('? “moon mission”', 'the moon mission began'), true, 'curly double quotes too');
+    eq(matches('? „moon mission“', 'the moon mission began'), true, '...and the low-high pair');
+    eq(matches('? ^«Navy SEAL»', 'navy seal'), false, 'flags sit in front of any mark');
+    eq(codes('? «moon'), 'error:stray-quote', 'an unclosed guillemet is the stray-quote error');
+    eq(matches('? /«x»/', 'he said «x»'), true, 'a pattern keeps its guillemets, being fold-exempt');
+    eq(matches('? 5″ screen', 'a 5″ screen'), true, 'a prime is not a quotation mark: it stays text and matches as text');
+    eq(splitKeys('? «a, b», c').join('|'), '? «a, b»|c', 'a guillemet phrase keeps its comma through the key splitter');
+    // CJK quotation and title marks quote too; the fold keeps them out of the text (K10), so a plain key with them stays literal.
+    eq(matches('? 「moon mission」', 'the moon mission began'), true, 'corner brackets quote a phrase');
+    eq(matches('? 『moon mission』', 'the moon mission began'), true, '...white corner brackets');
+    eq(matches('? 《moon mission》', 'mission to the moon'), false, '...double angle brackets, keeping order');
+    eq(matches('? 〈moon mission〉', 'the moon mission began'), true, '...and single angle brackets');
+    eq(codes('? 「moon'), 'error:stray-quote', 'an unclosed corner bracket is the stray-quote error');
+    eq(matches('「月」', '月'), false, 'a plain key keeps its brackets as text');
+    eq(matches('「月」', '「月」'), true, '...and matches the bracketed span');
+    eq(matches('? "「月」"', '「月」'), true, 'a SmartKey asks for the brackets by quoting them');
+    eq(matches('? «a "b" c»', 'say a "b" c now'), true, 'a phrase closes on its own family, so another family\'s mark is content');
+    eq(matches('? "《月亮代表我的心》"', '歌名是《月亮代表我的心》'), true, '...which is how a title keeps its marks: the user page\'s example');
+    eq(matches('? "a"b"', 'a"b'), false, 'a mark inside its own family closes the phrase; there is no escape within a family');
+    eq(splitKeys('? "「a, b」", c').join('|'), '? "「a, b」"|c', '...through the key splitter too');
+    eq([...'“”„‟«»'].every(c => ORTHO_FAMILIES.find(f => f.ascii === '"').variants.includes(c)), true, 'every non-CJK mark the lexer takes is one the fold collapses');
+}
 
 // Lexer edge cases the spec requires.
 eq(matches('? sci-fi', 'a sci-fi novel'), true, 'internal hyphen stays in the term');

@@ -6,6 +6,12 @@ import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, ke
 import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits } from './automaton.mjs';
 export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits };
 
+/** The marks that quote a phrase, by family: a phrase opens on any mark and closes on the first mark of the same family, so
+ *  `"「月」"` holds its brackets. The curly and guillemet families are marks the fold collapses onto `"`; the CJK quotation and
+ *  title marks stay in the text (K10) and are syntax here alone. splitKeys reads the same list. */
+export const QUOTE_FAMILIES = ['"', '“”„‟', '«»', '「」', '『』', '《》', '〈〉'];
+export const QUOTE_MARKS = QUOTE_FAMILIES.join('');
+
 const OPS = {
     '&&': 'AND', '&': 'AND', '+': 'AND', 'AND': 'AND',
     '||': 'OR', '|': 'OR', 'OR': 'OR',
@@ -70,13 +76,22 @@ export function tokenize(input) {
                 continue;
             }
         }
-        m = src.match(/^([=^]{0,2})(?:"([^"]*)"|([^\s()|&]+))/);
-        if (!m) { src = src.slice(1); continue; } // lone stray char (e.g. unmatched ") — drop
-        src = src.slice(m[0].length);
-        let value = m[2] ?? m[3];
+        // A term: optional flags, then a phrase closed by the first mark of its opener's family, or a run of non-syntax characters.
+        const fl = src.match(/^[=^]{0,2}/)[0];
+        const open = src[fl.length];
+        const fam = open === undefined ? undefined : QUOTE_FAMILIES.find(f => f.includes(open));
+        let close = -1;
+        if (fam) for (let i = fl.length + 1; i < src.length; i++) if (fam.includes(src[i])) { close = i; break; }
+        let value, quoted = close !== -1;
+        if (quoted) { value = src.slice(fl.length + 1, close); src = src.slice(close + 1); }
+        else {
+            const u = src.slice(fl.length).match(/^[^\s()|&]+/);
+            if (!u) { src = src.slice(1); continue; } // lone stray char — drop
+            value = u[0]; src = src.slice(fl.length + u[0].length);
+        }
         let weight = 1.0, near;
         // Weight is `::` or `^N`, never `:`, so `10:30`, `re:code` and URLs need no quoting; a delimiter followed by non-digits stays in the term.
-        if (m[2] !== undefined) {
+        if (quoted) {
             // `"…"~N` is taken so the validator can refuse it; left in `src` it would be a term that never matches.
             const p = src.match(/^~(\d+)/);
             if (p) { near = parseInt(p[1], 10); src = src.slice(p[0].length); }
@@ -90,9 +105,9 @@ export function tokenize(input) {
         tokens.push({
             type: 'TERM',
             value,
-            isExact: m[1].includes('='),
-            isCaseSensitive: m[1].includes('^'),
-            quoted: m[2] !== undefined,
+            isExact: fl.includes('='),
+            isCaseSensitive: fl.includes('^'),
+            quoted,
             weight,
             ...(near !== undefined && { near }),
         });
@@ -293,9 +308,9 @@ export function validateSmartKey(raw) {
         }
     }
 
-    // The only shape the lexer makes of an unclosed quote: `? "moon` keeps the `"` as the value's first character. Any other `"` is text.
+    // The only shape the lexer makes of an unclosed quote: `? "moon` keeps the mark as the value's first character. Any other mark is text.
     for (const t of terms) {
-        if (t.type === 'TERM' && !t.quoted && String(t.value).startsWith('"')) {
+        if (t.type === 'TERM' && !t.quoted && QUOTE_MARKS.includes(String(t.value)[0])) {
             out.push(new KeyAlert('stray-quote', 'Unclosed quote — close the phrase, or remove the quote.'));
         }
     }
