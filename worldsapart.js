@@ -2157,7 +2157,7 @@ function ensureDeliveryPanel() {
 
     deliveryTrigger = document.createElement('div');
     deliveryTrigger.className = 'wa-delivery-trigger fa-solid fa-fw fa-book-atlas';
-    deliveryTrigger.title = t`WorldsApart — delivered this turn`;
+    deliveryTrigger.title = t`WorldsApart — Entries delivered in the most recent turn`;
     deliveryTrigger.dataset.count = '0';
     deliveryPanel = document.createElement('div');
     deliveryPanel.className = 'wa-delivery-panel';
@@ -2275,7 +2275,7 @@ async function initBody() {
     updateEmbedInfo();   // refresh on drawer open so it tracks Vector Storage changes made mid-session
     $('#wa_embed_info').closest('.inline-drawer').children('.inline-drawer-toggle').on('click', updateEmbedInfo);
 
-    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="WorldsApart — Lorebook Studio: manage all lorebooks and entries" data-i18n="[title]WorldsApart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
+    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="WorldsApart Lorebook Studio: Manage lorebooks, entries, and keys." data-i18n="[title]WorldsApart Lorebook Studio: Manage lorebooks, entries, and keys."><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');

@@ -334,7 +334,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const coreNum = id => ({ get: () => Number(el(id)?.value) || 0, set: v => { const e = el(id); if (e) { e.value = v; fire(e); } refreshGlobalTray(); } });
         const coreChk = (id, after) => ({ get: () => !!el(id)?.checked, set: v => { const e = el(id); if (e) { e.checked = v; fire(e); } after?.(); } });
         panel.append(
-            col(t`WorldsApart (overrides core)`,
+            col(t`WorldsApart (overrides ST)`,
                 numRow(t`Scan depth`, wa('messageDepth', '#wa_message_depth'), t`messages`, t`Recent messages WA scans / queries — overrides core scan depth`),
                 numRow(t`Budget cap`, wa('maxTokens', '#wa_max_tokens'), t`tokens`, t`Absolute token budget over all activated entries (0 = leave to core)`),
                 numRow(t`Budget %`, wa('maxTokensPercent', '#wa_max_tokens_pct'), t`% of max`, t`Token budget as a % of max prompt tokens (0 = off); tighter of the two wins`),
