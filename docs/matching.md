@@ -50,6 +50,10 @@ The "what you meant, not what you wrote" principle extends to hyphens; WA expand
 
 ---
 
+## Macros
+
+A key may hold a macro such as `{{user}}` or `{{char}}`, replaced by its value when the scan runs, as SillyTavern does. A plain key is then a substring of the value. In a SmartKey the value's words become a group, so `? {{user}} sword` with the persona Kyle Parsons is `? (Kyle Parsons) sword` and takes a group's modifiers, `? {{user}}~0`, `? {{user}}::2`; `? "{{user}}"` keeps the name whole. A pattern gets the value with its special characters escaped. Macros in entries, yes; macros as keys are not recommended, since chat rarely writes a full name, but this is how they read.
+
 ## Regex keys
 
 A `/pattern/flags` key is matched by JavaScript's own engine on the text, NFC-normalised but otherwise unfolded. Everything here is true of a whole-key regex and of a `/…/` term inside a SmartKey alike.

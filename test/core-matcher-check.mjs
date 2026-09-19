@@ -1,7 +1,7 @@
 // How WA relates to ST core on an unmodified lorebook: parity with matchKeys/matchSecondaryKeys, and the named divergences.
 // An assertion citing core as the authority goes here; one about what a matched expression is WORTH goes in matcher-check.mjs.
 import { coreReadsAsRegex, countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, resolveDecorators, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
-import { synthesizeSecondary, validateSmartKey } from '../extension/smartkeys.mjs';
+import { setMacros, synthesizeSecondary, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const { AND_ANY, NOT_ALL, NOT_ANY, AND_ALL } = WI_LOGIC;
@@ -288,6 +288,16 @@ eq(countKey('wait-no', 'wait—no', false, false), 0, 'em dash does NOT collapse
 eq(countKey('a...b', 'a…b', false, false), 1, 'ellipsis normalises');
 eq(countKey('a b', 'a b', false, false), 1, 'non-breaking space normalises');
 eq(countKey('three-inch', 'three inch', false, false), 1, 'DIVERGENCE: a key expands hyphen <-> space, where core matches neither way');
+
+// --- macro keys: core substitutes the whole key and substring-matches it; WA the same for a plain key. A pattern diverges.
+{
+    setMacros({ '{{char}}': 'Dr. Brown' });
+    eq(countKey('{{char}}', 'dr. brown here', false, false), 1, 'a plain macro key is the substituted substring, as core');
+    eq(countKey('{{char}}', 'brown, dr.', false, false), 0, '...and nothing looser, as core');
+    eq(countKey('/{{char}}/', 'Dr. Brown', false, false), 1, 'a pattern takes the value');
+    eq(countKey('/{{char}}/', 'DrX Brown', false, false), 0, 'DIVERGENCE: the value is inserted escaped, where core inserts it raw and its dot would match here');
+    setMacros({});
+}
 eq(countKey('three inch', 'three-inch', false, false), 0, 'one way only: a spaces-only key interns no hyphenated form');
 eq(countKey('wait-no', 'wait\u2014no', false, false), 0, 'the expansion is not the fold: an em-dash stays two hyphens and no variant reaches it');
 eq(countKey('Bose\u2013Einstein', 'the Bose Einstein condensate', false, false), 1, 'an en-dash key expands as the hyphen it folds to');

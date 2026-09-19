@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey, splitKeys } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, setMacros, macroTokens, macroMap } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -618,3 +618,57 @@ console.log('ok   the docs/smartkeys.md worked example holds');
     eq(codes('? (a b)~3 "~5"'), '', '...and quoting it after a group says the text was meant');
 }
 console.log('ok   proximity: (…)~N clusters a group within N words, vetoes over the padded window');
+
+// --- macros: a key's `{{token}}`s expand to DATA at every leaf, under the map setMacros holds -------------------------
+{
+    setMacros({ '{{user}}': 'Nick Parsons', '{{char}}': 'Dr. (Doc) Brown', '{{alias}}': 'Nick OR Parsons', '{{empty}}': '' });
+    eq(matches('? {{user}} sword', 'Parsons handed Nick the sword'), true, 'an unquoted macro is its words as terms: any order, any distance');
+    eq(matches('? {{user}} sword', 'Nick drew a sword'), false, '...all of them');
+    eq(countKey('? {{user}}', 'Nick Parsons', false, false), 2, '...each a term, so the name scores its word count');
+    eq(matches('? "{{user}}" sword', 'Nick Parsons drew a sword'), true, 'quoted, the name is one phrase');
+    eq(matches('? "{{user}}" sword', 'Parsons handed Nick the sword'), false, '...in order');
+    eq(matches('? {{char}}', '(Doc) Brown and Dr. arrived'), true, 'a name with syntax characters is data: its words, never a group');
+    eq(matches('? {{alias}}', 'Parsons'), false, '...and an operator word in a name is a word, not an operator');
+    eq(matches('? {{alias}}', 'Nick OR Parsons'), true);
+    eq(matches('? ={{user}}', 'Nicky Parsons'), false, 'the flag reaches every word');
+    eq(matches('? ={{user}}', 'Nick Parsons'), true);
+    eq(matches("? {{user}}'s sword", "Parsons's sword, for Nick"), true, 'a suffix rides on the last word');
+    eq(matches('? ({{user}})~0', 'Parsons, Nick'), true, 'inside a proximity group the words are its conjuncts');
+    eq(matches('? ({{user}})~0', 'Nick and Parsons'), false);
+    // The expansion is a group, so a macro term takes the modifiers a group takes, in either order.
+    eq(matches('? {{user}}~0 sword', 'Parsons, Nick, has a sword'), true, '`~N` on a macro term is the group\'s');
+    eq(matches('? {{user}}~0 sword', 'Nick has a Parsons sword'), false);
+    const s = (k, x) => countKey(k, x, false, false);
+    eq(s('? {{user}}::2 sword', 'Nick Parsons sword'), s('? (Nick Parsons)::2 sword', 'Nick Parsons sword'), 'a weight on a macro term is the group\'s');
+    eq(s('? {{user}}~0::2', 'Parsons Nick'), s('? (Nick Parsons)~0::2', 'Parsons Nick'), '...with `~N` first');
+    eq(s('? {{user}}::2~0', 'Parsons Nick'), s('? (Nick Parsons)~0::2', 'Parsons Nick'), '...or the weight first');
+    eq(s('? {{user}}::0 sword', 'Nick Parsons sword'), 1, '...and ::0 gates the group');
+    eq(matches('? {{user}} OR "Warrior of Light"', 'the Warrior of Light'), true, 'the group sits in the tree, so OR binds outside it');
+    eq(matches('? {{user}} OR "Warrior of Light"', 'Parsons met Nick'), true);
+    eq(matches('? {{user}} OR "Warrior of Light"', 'Nick met the Warrior'), false, '...and neither side matches on half of itself');
+    eq(matches('? star~2', 'star~2 here'), true, '`~N` on any other term is still text');
+    eq(matches('? star~2', 'a star'), false);
+    eq(matches('/{{char}}/', 'Dr. (Doc) Brown'), true, 'a pattern takes the value escaped');
+    eq(matches('/{{char}}/', 'DrX (Doc) Brown'), false, '...so its dot is a dot');
+    eq(matches('{{user}}', 'nick parsons here'), true, 'a plain key is the substring, as core');
+    eq(matches('{{user}}', 'Parsons, Nick'), false);
+    eq(matches('? {{nope}} x', '{{nope}} x'), true, 'an unknown token stays as written');
+    eq(matches('? {{empty}} sword', 'a sword'), true, 'an empty value contributes no term');
+    setMacros({ '{{path}}': '/dev/null/' });
+    eq(matches('{{path}}', 'at /dev/null/ now'), true, 'a plain key whose value looks like a pattern is still a literal');
+    eq(matches('{{path}}', 'dev'), false);
+    setMacros({ '{{user}}': 'Kyle Sommers' });
+    eq(matches('? {{user}}', 'Kyle Sommers'), true, 'a changed map is in force at once');
+    eq(matches('? {{user}}', 'Nick Parsons'), false, '...and the old value is gone');
+    setMacros({ '{{user}}': 'Nick Parsons' });
+    const gated = { key: ['sword'], keysecondary: ['{{user}}'], selectiveLogic: 0 }, cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    eq(keywordScore(gated, 'Nick Parsons has a sword', gated.key, cfg).score > 0, true, 'a secondary key expands too');
+    eq(keywordScore(gated, 'Kyle has a sword', gated.key, cfg).score > 0, false);
+    const chat = countChatHits(['{{user}}', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody']);
+    eq(chat.messagesWith.get('{{user}}'), 1, 'the chat scan counts a plain macro key by its value');
+    eq(chat.messagesWith.get('? {{user}}'), 2, '...and a SmartKey by its words');
+    eq(macroTokens(['? {{user}} and {{char}}', '{{user}}', 'plain']).join(','), '{{user}},{{char}}', 'the tokens a key list carries, once each');
+    eq(JSON.stringify(macroMap(['? {{user}} x'], tok => tok.toUpperCase())), '{"{{user}}":"{{USER}}"}', 'the map is the tokens through the substitution the caller supplies');
+    setMacros({});
+    eq(matches('? {{user}} sword', 'Nick Parsons sword'), false, 'with no map a token is literal text again');
+}

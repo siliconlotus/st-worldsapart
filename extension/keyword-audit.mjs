@@ -3,7 +3,7 @@
 import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
 import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
-import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { buildAst, cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; common word still applies. */
@@ -69,7 +69,7 @@ const commonTerm = (n, isLoose) => { const v = String(n.value ?? '').trim(); ret
 function smartPaths(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return [];
     let paths;
-    try { paths = pathsOf(parse(tokenize(String(raw)))); } catch { return []; }
+    try { paths = pathsOf(buildAst(String(raw))); } catch { return []; }
     return paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
 }
 

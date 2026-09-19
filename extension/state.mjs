@@ -81,6 +81,7 @@ export const runState = {
     lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}` — core's format, not the US separator
     lastPromptOrder: [],          // the last scan's prompt order, post-cut
     lastQuery: '',                // last retrieval query text
+    lastMacros: {},               // the macro map the last scan ran under, `{{token}}` -> value; a capture records it
     lastQueryChat: [],            // the messages that query was joined from
     scanChat: null,               // the interceptor's chat — core's own scan haystack; SCAN_DONE consumers read this, not the raw chat
     lastScanChat: [],             // scan-eligible messages at capture depth

@@ -11,6 +11,7 @@ import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../../pl
 import { corpusMean, centeredCosineScores } from '../../plugin/vector.mjs';
 import * as entity from '../../extension/entity.mjs';
 import * as matcher from '../../extension/matcher.mjs';
+import { setMacros } from '../../extension/smartkeys.mjs';
 import { hasPromoteDecorator } from '../../extension/matcher.mjs';
 import { isDurable, openBundle } from '../../extension/grading.mjs';
 import * as selection from '../../extension/selection.mjs';
@@ -112,6 +113,7 @@ export function haystackFor(S, P, over = {}) {
 /** Key hits for one entry against a scan window — the same call onScanDone makes. */
 export function whyFor(entry, scanText, P) {
     matcher.setBoundaryMode(P.wordBoundary);
+    setMacros(P.macros);
     const keys = scoringKeys(entry, P);
     if (!keys.length || !scanText) return [];
     const { hits } = matcher.keywordScore(entry, scanText, keys, { k1: P.K1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords });
@@ -218,6 +220,7 @@ export const sceneParams = (S, overrides = {}) => ({
     matchWindow: 'scan',
     // What counts as inside a word when wholeWords is on (shipped 'strict'). Matcher module state: pushed through setBoundaryMode per call.
     wordBoundary: 'strict',
+    macros: S.macros ?? {},   // the map the capture recorded; pushed with the boundary mode wherever a key is matched
     // Occurrences -> score (matcher.mjs repeatCurveOf). 'bm25', not the shipped 'presence-log': captures predating the setting must reproduce.
     repeatCurve: 'bm25', repeatR: 1,
     meanCentered: true,
@@ -480,6 +483,7 @@ export const scoringKeys = (e, P) => {
 /** Keyword score via the shared matcher.keywordScore; the boundary mode is pushed per call, since arms hold their scorers across each other's runs. */
 export const makeKeywordScore = P => (e, text, k1) => {
     matcher.setBoundaryMode(P.wordBoundary);
+    setMacros(P.macros);
     return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, repeatCurve: P.repeatCurve, repeatR: P.repeatR }).score;
 };
 

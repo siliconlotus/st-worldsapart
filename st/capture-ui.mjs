@@ -185,6 +185,7 @@ function sceneGateInputs() {
         assistantCount: chat.filter(m => m && !m.is_user && !m.is_system).length,
         greetingIndex: chat[0]?.swipe_id ?? 0,
         personaName: name1 ?? '',
+        macros: { ...runState.lastMacros },
         firedLatches: matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, chat.length),
     };
 }

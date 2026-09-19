@@ -20,6 +20,7 @@ import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
 import { countChatHits, dropTags, setBoundaryMode } from './matcher.mjs';
+import { setMacros } from './smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
@@ -234,6 +235,7 @@ export async function init(router) {
             const wordBoundary = String(request.body?.wordBoundary ?? '');
             if (!wordBoundary) return response.status(400).send({ error: 'wordBoundary is required' });
             setBoundaryMode(wordBoundary);
+            setMacros(request.body?.macros ?? {});   // the caller's map: a macro key counts by its value here as in the browser
             // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
             const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
             // The elements WA strips from every message it reads live, so the audit counts the same text the runtime does.

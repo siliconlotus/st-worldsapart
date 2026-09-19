@@ -1,6 +1,6 @@
 // studio.mjs — Lorebook Studio (/wa-studio): the two-pane lorebook manager, all books on the left and the
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
-import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
+import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters, substituteParams } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
@@ -14,7 +14,7 @@ import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { validateSmartKey } from '../extension/smartkeys.mjs';
+import { macroMap, setMacros, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, partitionLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
@@ -186,10 +186,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const firstLine = e => { const txt = String(e.content ?? '').trim(); const nl = txt.indexOf('\n'); return (nl < 0 ? txt : txt.slice(0, nl)) || t`(empty)`; };
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
+    /** The book's macro map, every token its keys carry evaluated now: the audit, the chat scan and the Lab all read it. */
+    const macrosOf = () => macroMap(Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])]), substituteParams);
     const rebuildScan = () => {
         // Every term is judged below, so an edited row drops the false the edit forced.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
        
+        setMacros(macrosOf());
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             t, translate,
             matchWindow: settings().matchWindow,
@@ -1934,6 +1937,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
      *  chat has no file, so it is always the browser's. Results merge by summing every field (countChatHits), so the two
      *  routes can split the picked chats between them. */
     const scanKeys = async (keys, picked) => {
+        const macros = macrosOf();
+        setMacros(macros);
         const totals = new Map(keys.map(k => [k, 0])), typedTotals = new Map();
         let seen = 0, via = '', unit = 'message';
         // The chat is cut into the unit the book's match window matches a conjunction within; the scan depth only sizes
@@ -1951,7 +1956,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             try {
                 const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
                     method: 'POST', headers: getRequestHeaders(),
-                    body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+                    body: JSON.stringify({ keys, macros, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
                 });
                 if (!r.ok) throw new Error(String(r.status));
                 j = await r.json();

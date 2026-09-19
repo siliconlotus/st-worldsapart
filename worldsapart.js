@@ -27,7 +27,7 @@ import { admitCeiling } from './plugin/scoring.mjs';
 import * as query from './extension/query.mjs';
 import * as entity from './extension/entity.mjs';
 import * as matcher from './extension/matcher.mjs';
-import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
+import { macroMap, registerKeys, resetSmartKeys, setMacros } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
 import * as layout from './extension/layout.mjs';
 import * as delivery from './extension/delivery.mjs';
@@ -736,6 +736,13 @@ async function retrieve(chat) {
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
 }
 
+/** The macro map for this scan, `{{token}}` -> value over every key the entries carry, evaluated now: {{char}} moves per speaker in a group. */
+function applyMacros(entries) {
+    const keys = entries.flatMap(e => [...(e.key ?? []), ...(e.keysecondary ?? []), ...(e.waKeys ?? []), ...(e.waSecondary ?? [])]);
+    runState.lastMacros = macroMap(keys, substituteParams);
+    setMacros(runState.lastMacros);
+}
+
 /** The entries WA's own matcher activates over its window; candidacy and the verdict live in matcher.mjs activationAdds. */
 async function keywordActivations(chat) {
     const candidates = await getSortedEntries();
@@ -745,6 +752,7 @@ async function keywordActivations(chat) {
 
     const { windowFor } = await scanWindowFor(chat);
 
+    applyMacros(candidates);
     // Register every key up front, secondaries included (K13): a first-seen key mid-loop rebuilds the automaton and drops every cached scan.
     registerKeys(candidates.flatMap(e => {
         const keys = e.disable ? [] : matcher.usableKeys(e.key);
@@ -1383,6 +1391,7 @@ async function rankOwnedScan(activated, args, skip) {
             ? { ...entry, keysecondary: entry.waSecondary }
             : entry;
 
+        applyMacros(items.map(it => it.entry));
         // Registered before the loop, secondaries too, so the automaton is built once.
         registerKeys(items.flatMap(it => {
             const keys = scoreKeysOf(it.entry);

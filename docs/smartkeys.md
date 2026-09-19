@@ -191,6 +191,12 @@ It also allows you to easily express things that ST simply does not allow:
 
 ---
 
+## Macros
+
+Macros embedded in SmartKeys are treated as term groups and can take the same operations as any other group. If the user persona is `Neil Armstrong`, then `? {{user}} astronaut` is directly equivalent to `? (Neil Armstrong) astronaut`. This allows you to do things like `? {{user}}~0` or `? {{user}}::2 astronaut`. If you want the string-literal phrase, use quotes as normal: `? "{{user}}" astronaut`. That said, macros are exceptionally brittle keys because you don't know what a user has set. For every persona `Neil Armstrong`, there could be a {{user}} `Neil Armstrong (astronaut version)` which parses as `Neil AND Armstrong AND "(astronaut" AND "version)"`. Use cautiously if distributing outside your own books, and within your own books, consider explicit keys instead to avoid surprises.
+
+---
+
 ## Lucene Compatibility
 
 SmartKeys syntax is not meant to be compatible with Lucene. Nonetheless, it has been designed to avoid breaking muscle memory when possible (and boost and proximity syntax were inspired by Lucene). A few things that Lucene users should note:

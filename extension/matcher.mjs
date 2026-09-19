@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { addMessageHits, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, fold, keyVariants, normalizeOrthography, parse, primeScan, QUOTE_FAMILIES, synthesizeSecondary, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, astId, buildAst, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -381,7 +381,7 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
     // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
-    const folded = [...new Set(literals.flatMap(k => keyVariants(k).map(fold)))];
+    const folded = [...new Set(literals.flatMap(k => keyVariants(expandMacros(k)).map(fold)))];
     const idxOf = new Map(folded.map((f, i) => [f, i]));
     // Memoised on the folded list: the plugin calls this once per chat FILE with one book's keys, and rebuilding the
     // trie per file was the whole cost of a multi-chat scan.
@@ -389,7 +389,7 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     const counts = new Map();
     const messagesWith = new Map(rest.map(k => [k, 0]));
     // A key whose forms could both land in one message is counted by union; summing its indices would count it twice.
-    const expanded = literals.map(k => [k, keyVariants(k).map(v => idxOf.get(fold(v)))]).filter(([, idx]) => idx.length > 1);
+    const expanded = literals.map(k => [k, keyVariants(expandMacros(k)).map(v => idxOf.get(fold(v)))]).filter(([, idx]) => idx.length > 1);
     for (const [k] of expanded) messagesWith.set(k, 0);
     // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
     const scope = createScanScope();
@@ -405,7 +405,7 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
         }
         for (const k of rest) if (countKey(k, msg, false, false, scope) > 0) messagesWith.set(k, messagesWith.get(k) + 1);
     }
-    const typedWith = new Map(literals.map(k => [k, counts.get(idxOf.get(fold(k))) ?? 0]));
+    const typedWith = new Map(literals.map(k => [k, counts.get(idxOf.get(fold(expandMacros(k)))) ?? 0]));
     for (const k of literals) if (!messagesWith.has(k)) messagesWith.set(k, typedWith.get(k));
     return { messagesWith, typedWith, messages: seen, unit: matchWindow === 'scan' ? 'window' : matchWindow === 'paragraph' ? 'paragraph' : 'message' };
 }
@@ -452,7 +452,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
         return sk.matched ? (sk.scoreBoost > 0 ? sk.scoreBoost : 1) : 0;
     }
 
-    if (isRegexKey(raw)) return countRegexKey(raw, text);
+    if (isRegexKey(raw)) return countRegexKey(expandRegex(raw), text);
 
     // Aho-Corasick fast path: 0 is final under any flags; a positive count is final only for plain substring semantics.
     const cached = cachedCount(raw, text, scope);
@@ -462,7 +462,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
     // Must match smartkeys' fold exactly, or the trie and this walk disagree.
     const hay = foldedHay(text, caseSensitive);
     let count = 0;
-    for (const variant of keyVariants(raw)) {
+    for (const variant of keyVariants(expandMacros(raw))) {
         const needle = caseSensitive ? normalizeOrthography(variant) : fold(variant);
         if (!needle) continue;
         if (wholeWords) {
@@ -496,7 +496,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     let literalOnly = false;
     if (raw.startsWith('?')) {
         let node = null;
-        try { node = parse(tokenize(raw)); } catch { return out; }
+        try { node = buildAst(raw); } catch { return out; }
         if (!node) return out;
         if (node.type !== 'TERM' && node.type !== 'REGEX') return compoundExcerpts(node, text, context, limit);
         raw = String(node.value ?? '').trim();
@@ -505,6 +505,8 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         caseSensitive = node.type === 'REGEX' ? caseSensitive : !!node.isCaseSensitive;
         wholeWords = node.type === 'REGEX' ? wholeWords : !!node.isExact;
     }
+    // A bare key expands within its kind: a pattern escaped, a literal as text. A `?` key's node values are expanded already.
+    else raw = isRegexKey(raw) ? expandRegex(raw) : expandMacros(raw);
     // Folded -> source offset, folding one character at a time; the source must be NFC first or offsets drift.
     // Prefix sums, built once per segment: srcIndex runs twice per match and `limit` is Infinity on the proximity path.
     let sumsFor = null, sums = null;
@@ -666,7 +668,7 @@ const gateNodeFor = (gate, caseSensitive, wholeWords) => {
 /** The leaves of the key's AST, or one synthetic TERM branch for a plain key with no gate. */
 const branchesOf = (key, node, caseSensitive, wholeWords) => (node
     ? leafNodes(node).map(l => ({ id: l.node, negated: l.negated }))
-    : [{ id: { type: 'TERM', value: key, isCaseSensitive: caseSensitive, isExact: wholeWords }, negated: false }]);
+    : [{ id: { type: 'TERM', value: expandMacros(key), isCaseSensitive: caseSensitive, isExact: wholeWords }, negated: false }]);
 
 /** Every place one branch landed in `text`, under its own flags; a REGEX branch carries its flags in the pattern. */
 const branchExcerpts = (id, text, context, limit) => {
@@ -679,7 +681,7 @@ const astFor = (key, gateOf) => {
     const gated = gateOf(key);
     if (gated) return gated;
     if (!key.startsWith('?')) return null;
-    try { return parse(tokenize(key)); } catch { return null; }
+    try { return buildAst(key); } catch { return null; }
 };
 
 /** Overlapping spans folded to one, in source order: the first to start keeps its extent and every span it swallowed is
@@ -787,7 +789,7 @@ function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
     const excl = excludeKeys(entry);
     const flags = { caseSensitive, wholeWords };
     // sec.length separates the two lists in the id, or [a,b]+[] and [a]+[b] would share a cached tree.
-    const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, sec.length, ...sec, ...excl].join(SELECTIVE_SEP);
+    const id = astId([key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, sec.length, ...sec, ...excl].join(SELECTIVE_SEP));
     return evaluateAst(id, () => withExclusions(synthesizeSecondary(key, sec, logic, flags), excl, flags), text);
 }
 

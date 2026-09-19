@@ -61,6 +61,7 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
       "assistantCount": 412,        // non-user, non-system messages; @@activate_only_after, @@activate_only_every
       "greetingIndex": 0,           // message 0's swipe_id, swipes being [first_mes, ...alternate_greetings]; @@is_greeting
       "personaName": "Valentina",   // the active persona; @@is_user_icon
+      "macros": { "{{user}}": "Valentina" },   // every macro token the keys in play carry, as evaluated at THIS generation; scene.mjs substitutes them before matching. A slice keeps them, so in a group chat a sliced {{char}} may name the wrong speaker
       // Each latch key mapped to the chat length WHEN it fired, already filtered to `sceneEnd`. An index
       // rather than a flag so a bundle sliced to an earlier end re-filters it, and so a rewound chat
       // un-latches. Keys join book and uid with US in memory only; here they are the stored record's own.

@@ -270,6 +270,7 @@ resolves toward the literal: `*` is text, `~` is text except as `~N` on a group,
   and composes with term weights and nested groups. Groups and negations nest at most 100 deep; past
   that the key is refused (`too-deep` in `validateSmartKey`), which keeps parse and evaluate far from
   the stack limit — a refused key counts 0, and never aborts the scan matching it.
+- **Macros are data.** A `{{token}}` in a key is replaced under the map in force (`setMacros`): the ST half builds it once per scan from the tokens the keys in play carry, through `substituteParams`, a capture records it as `macros`, and `scene.mjs` pushes it before scoring. In an unquoted term the value's words become a group, `? {{user}} sword` reading `? (Kyle Parsons) sword`, which takes a group's `~N` and weight; in a phrase the value is inside the phrase; in a pattern it is inserted escaped, where core inserts it raw; in a plain key it is the substring, as core. An unknown token stays as written, an empty value drops the leaf. The map is part of the AST cache id (`astId`), so a changed map, a group chat's speaker, rebuilds.
 - **A regex is a term.** `/pattern/flags` at token start, negatable and weightable, closed at the
   leftmost `/` outside a character class whose body compiles and whose flag run ends at a token
   boundary; `\/` is a literal slash. A term reads exactly as the same string reads as a whole key
@@ -564,6 +565,7 @@ its `upstream-st.md` number.
   its family. The suggestion is the pair, never the whole family.
 - **Whole-word applies to multi-word keys.** Core splits the key on whitespace and uses `includes()`, so
   its checkbox is a no-op for any key with a space (the shape of `upstream-st.md` #1).
+- **A macro in a pattern is inserted escaped**, so the name is text in the pattern; core inserts it raw, and a dot or a parenthesis in a name is syntax there. A plain macro key is parity: the substituted substring on both sides.
 - **Whole-word stops at an affix in both directions.** Core's `\W` test lets `Joe` match `Joe's`; WA's
   boundary class applies both ways, and is Unicode where core's is ASCII (`upstream-st.md` #1).
 - **Markup is masked** for a literal key; core matches inside tags.
