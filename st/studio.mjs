@@ -50,6 +50,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     if (!(world_names ?? []).length) { toastr.warning(t`No lorebooks found.`, 'Worlds Apart'); return ''; }
     ensureStudioStyle();
 
+    /** The "additional lorebooks" a character carries: world_info.charLore, keyed by avatar filename.
+     *  Stays above attachedBookNames, which calls it while this body is still initialising. */
+    const extraBooksOf = avatar => {
+        const file = getCharaFilename(null, { manualAvatarKey: avatar });
+        return (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? [];
+    };
+
     /** bindings.mjs attachedBooks, bound to ST's globals. */
     const attachedBookNames = () => {
         const ctx = getContext();
@@ -121,11 +128,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let orphans = null;       // findOrphanBindings result, computed once in the background; null until it has run
     let orphanView = false;   // showing the list instead of a book — `selected` stays a real book name
 
-    /** The "additional lorebooks" a character carries: world_info.charLore, keyed by avatar filename. */
-    const extraBooksOf = avatar => {
-        const file = getCharaFilename(null, { manualAvatarKey: avatar });
-        return (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? [];
-    };
     const humanSize = n => (!Number.isFinite(n) ? '?' : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 
     /** The chat index: the plugin's chat-bindings route (reads line 0 only, P1), else ST's endpoint via loadChatIndex,
