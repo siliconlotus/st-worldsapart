@@ -556,8 +556,9 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
  *  The route and cause go to the console every time; the toast fires once per load, and the delivery panel shows the state. */
 export function pluginFallback(route, cause) {
     console.warn(`Worlds Apart: plugin ${route} failed (${String(cause?.message ?? cause)}), taking the no-plugin path`);
-    if (runState.pluginIncompatible) return;
-    runState.pluginIncompatible = route;
-    toastr.warning(t`Extension and server plugin versions are incompatible; falling back to the no-plugin path. Redeploy the plugin and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
-    document.dispatchEvent(new CustomEvent('wa-plugin-fallback'));
+    if (runState.pluginFailures.has(route)) return;
+    const first = !runState.pluginFailures.size;
+    runState.pluginFailures.add(route);
+    if (first) toastr.warning(t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Redeploy the plugin and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+    document.dispatchEvent(new CustomEvent('wa-plugin-fallback'));   // a new route repaints the settings bar's list
 }

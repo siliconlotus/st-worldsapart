@@ -197,20 +197,22 @@ function renderPluginSetup() {
     };
     const alert = $('#wa_plugin_alert').empty();
     // Top of the drawer, so neither state needs the setup box open to be seen.
-    const bannerOf = (tone, textTone) => (text, ...rest) => $(`<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, ${tone} 15%, transparent);border:1px solid color-mix(in srgb, ${tone} 45%, transparent);"></div>`)
-        .append($(`<div style="color:${textTone};"></div>`).text(text), ...rest);
-    const banner = bannerOf('var(--golden, #e0a86c)', 'var(--warning,#d80)');
-    const alarm = bannerOf('#e06c6c', '#e06c6c');
-    // First, above the stale or absent banner: a route has actually failed this load, which is the case where drift matters.
-    if (runState.pluginIncompatible) alert.append(alarm(t`🛑 Server plugin has demonstrated incompatibility with this extension version: a route failed this session and the no-plugin path stood in. Redeploy and restart:`, row(deployCmd)));
+    const AMBER = 'var(--golden, #e0a86c)', RED = '#e06c6c';
+    const banner = (...children) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>').append(...children);
+    const line = (text, colour) => $(`<div style="color:${colour};"></div>`).text(text);
     box.empty();
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     if (runState.pluginAvailable) {
         const stale = pluginDrifted();
+        const warn = t`⚠ Server plugin out of date — the deployed copy differs from this extension's source. Redeploy and restart:`;
+        // One box and one command for both facts: a route that failed this load, in red, above the drift it comes with.
+        const lines = [];
+        const routes = [...runState.pluginFailures].join(', ');
+        if (routes) lines.push(line(t`⚠ Server plugin has demonstrated incompatibility with this extension version; WA is falling back to running without it wherever it fails (${routes}).`, RED));
+        if (stale) lines.push(line(warn, AMBER));
+        if (lines.length) alert.append(banner(...lines, row(deployCmd)));
         if (stale) {
-            const warn = t`⚠ Server plugin out of date — the deployed copy differs from this extension's source. Redeploy and restart:`;
-            alert.append(banner(warn, row(deployCmd)));
-            box.append($('<div style="color:var(--warning,#d80);"></div>').text(warn));
+            box.append(line(warn, AMBER));
             box.append(row(deployCmd));
             return;
         }
@@ -220,7 +222,7 @@ function renderPluginSetup() {
         return;
     }
     const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
-    alert.append(banner(absent));
+    alert.append(banner(line(absent, AMBER)));
     box.append($('<div></div>').text(t`${absent} To install:`));
     box.append($('<div style="margin-top:3px;"></div>').text(t`1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):`));
     box.append(row(deployCmd));
@@ -2177,10 +2179,10 @@ function renderDeliveryPanel(layout) {
     lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
     // While a plugin route has fallen back this load; the route and cause are on the console.
     const warnRow = () => {
-        if (!runState.pluginIncompatible) return [];
+        if (!runState.pluginFailures.size) return [];
         const w = document.createElement('div');
         w.className = 'wa-delivery-warning';
-        w.textContent = t`Server plugin incompatible with this extension version: the no-plugin path stood in. Redeploy the plugin and restart SillyTavern.`;
+        w.textContent = t`⚠ Plugin incompatible; ran without it.`;
         return [w];
     };
     if (!layout.length) {
@@ -2218,13 +2220,15 @@ function renderDeliveryPanel(layout) {
         deliveryPanel.append(el);
     }
     if (budget) {
-        const n = runState.lastSkipped.length;
         const missed = runState.lastSkipped.reduce((a, x) => a + (x.tokens ?? 0), 0);
         const foot = document.createElement('div');
         foot.className = 'wa-delivery-budget';
         // `budgeted`, not `inPrompt`: headroom is what the cap still has, and an exempt entry may not charge it.
-        foot.textContent = t`Token budget: ${budget.inPrompt} delivered, ${Math.max(0, budget.maxTokens - budget.budgeted)} left of ${budget.maxTokens}.`;
-        if (n) foot.textContent += ' ' + (n === 1 ? t`${n} entry skipped, ${missed} tokens not delivered.` : t`${n} entries skipped, ${missed} tokens not delivered.`);
+        const num = x => Number(x).toLocaleString();
+        // Headroom is what the cap still has; `over` is delivery past the cap, which exempt entries can do.
+        const remain = Math.max(0, budget.maxTokens - budget.budgeted), over = Math.max(0, budget.inPrompt - budget.maxTokens);
+        const parts = [remain && t`${num(remain)} remain`, missed && t`${num(missed)} cut`, over && t`${num(over)} over`].filter(Boolean);
+        foot.textContent = t`Budget: ${num(budget.inPrompt)}/${num(budget.maxTokens)} tokens` + (parts.length ? ` (${parts.join(', ')})` : '');
         deliveryPanel.append(foot);
     }
     deliveryPanel.append(...warnRow(), lab);
