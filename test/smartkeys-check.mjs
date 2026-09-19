@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -84,6 +84,19 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('? /re/ -drill'), '', 'a regex is a positive contributor, so this is not negation-only');
     eq(codes('? /(/'), 'error:regex-invalid', 'a well-formed pattern new RegExp refuses is an error');
     eq(codes('? =/re/'), 'warn:flag-on-pattern', 'a flag in front of a pattern makes a literal nobody means');
+    // Every finding carries a display name of at most four words beside its sentence; one sample per code.
+    const SAMPLES = ['? ()', '? NOT water', '? fire ::3', '? (a b)~2 ~3', '? "a b"~2', '? "moon', '? /(/', '? ?', '? (a', '? a::0',
+        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/'];
+    const seen = new Set();
+    for (const k of SAMPLES) for (const f of validateSmartKey(k)) {
+        seen.add(f.code);
+        eq(f instanceof KeyAlert && ['error', 'warn', 'info'].includes(f.severity) && typeof f.message === 'string' && f.message.length > 0, true, `${f.code} is a KeyAlert with a severity and a message`);
+        eq(typeof f.label === 'string' && f.label.length > 0 && f.label.split(/\s+/).length <= 4, true, `${f.code} carries a label of at most four words`);
+    }
+    eq([...seen].sort().join(','), Object.keys(KEY_ALERTS).sort().join(','), 'the registry holds exactly the codes the validator emits, and every one is sampled here');
+    let threw = false; try { new KeyAlert('no-such-code', 'x'); } catch { threw = true; }
+    eq(threw, true, 'an unregistered code cannot become an alert');
+    eq(validateSmartKey('? =/re/')[0].label, 'Literal regex', 'the flagged-pattern label');
     eq(codes('? ^/re/'), 'warn:flag-on-pattern', '...the case flag too');
     eq(codes('? ="/re/"'), '', 'quoted, the literal is deliberate');
     eq(codes('? =/re'), '', 'not a pattern shape, so a flagged literal is what it says');
@@ -107,17 +120,17 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(tok('? (/a/|/b/) x'), 'LPAREN re:/a/ OR re:/b/ RPAREN term:x', 'grouping around patterns still lexes');
     eq(tok('? /[/]/ x'), 're:/[/]/ term:x', 'a space recovers the abutting form');
     eq(matches('? /\\/x/', 'the /x path'), true, '...and adjacency belongs inside the pattern');
-    eq(codes('? /(home/user|~/user)/file/'), 'warn:regex-core-refuses', 'a term reaches the core-refusal warning');
+    eq(codes('? /(home/user|~/user)/file/'), 'info:regex-core-refuses', 'a term reaches the core-refusal warning');
     eq(codes('? /(home\\/user|~\\/user)\\/file/'), '', '...and escaping the delimiters clears it');
     eq(countKey('? /home/user/file', '/home/user/file', false, false), 1, 'a path is one literal term');
     eq(matches('? /home/user/file', 'the home user file'), false, '...so the bare-word reading is gone');
 
-    eq(codes('/and/or/'), 'warn:regex-core-refuses', 'a bare regex core will refuse is flagged');
-    eq(codes('/24/7/'), 'warn:regex-core-refuses', '...whatever the pattern is; the slash is the fault');
+    eq(codes('/and/or/'), 'info:regex-core-refuses', 'a bare regex core will refuse is flagged');
+    eq(codes('/24/7/'), 'info:regex-core-refuses', '...whatever the pattern is; the slash is the fault');
     eq(codes('/and\\/or/'), '', '...and escaping the inner slash clears it, because core then reads it');
     eq(codes('/fire/'), '', 'a pattern with no inner slash was never in question');
     eq(codes('fire'), '', 'a plain key still gets no opinion at all');
-    eq(codes('? /and/or/'), 'warn:regex-core-refuses', 'a term reaches it too, on the same string');
+    eq(codes('? /and/or/'), 'info:regex-core-refuses', 'a term reaches it too, on the same string');
     eq(codes('? /and\\/or/'), '', '...and clears the same way');
     eq(countKey('? "/and/or/"', 'the config at /and/or/ is set', false, false), 1, '? "…" is the literal hatch');
     eq(countKey('"/and/or/"', 'the config at /and/or/ is set', false, false), 0, '...and a bare "…" is not one');
@@ -195,7 +208,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
         eq(withChat.classifyEntry(entries[1]).some(f => String(f.key) === '/\\n/'), false, '...and with a chat that does not bear it out, nothing: ubiquity in entry text is a fact about the story');
     }
     eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that matches nowhere is flagged dead');
-    eq(reasonOf(flags.get('/zzznope/')).text, 'never matches (book)', '...worded as evaluating false, not as absent text');
+    eq(reasonOf(flags.get('/zzznope/')).label, 'never matches (book)', '...worded as evaluating false, not as absent text');
     eq(flags.has('/by the door/i'), false, 'a pattern that matches in exactly one entry draws nothing');
     eq(flags.get('/zzznope/')?.flag !== 'short', true, 'short-key never reads a pattern');
     eq(flags.get('x')?.flag, 'unattested', '...while a genuine literal is judged on its characters as before');
@@ -298,7 +311,7 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     // which is what lets the English-list verdicts below be observed. Without one, `book common` stands in (further down).
     const quiet = { messagesWith: new Map(Object.values(entries).flatMap(e => e.key).map(k => [k, 0])), messages: 50 };
     const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false, chatScan: quiet });
-    const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).text}` : ''; };
+    const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).label}` : ''; };
 
     eq(verdict(2), 'unattested|never matches (book/chat)', 'a query that evaluates false everywhere is flagged dead');
     eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same verdict');
@@ -308,7 +321,7 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     // The common list is the no-chat fallback, so its verdicts are observed without one.
     const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
     const flagOf = uid => noChat.classifyEntry(entries[uid])[0]?.flag;
-    const textOf = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).text : ''; };
+    const textOf = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).label : ''; };
     eq(textOf(1), 'book common (100%)', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
     eq(textOf(1), textOf(3), '...for the SmartKey and the plain key alike');
     eq(textOf(4), 'common word (the)', 'a query reducing to a common word earns the English-common flag while no chat is scanned');
@@ -329,14 +342,14 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
     const chat = countChatHits([entries[9].key[0], ...probes], msgs);
     const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
-    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'chat common (80%, mostly mother & my)',
+    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).label, 'chat common (80%, mostly mother & my)',
         'over the share it is chat common, naming the path that matches most — the chat\'s question, not the list\'s');
     eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'severe', '...and severe by degree at 80%, whatever the path');
     // The breadth earned by a legitimate path: named as such, which is what clears the English-list concern.
     const legit = ['my mom once', 'the parent Parsons', 'parent Parsons again', 'Parsons the parent', 'Nick and his parent'];
     const chat2 = countChatHits([entries[9].key[0], ...probes], legit);
     const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
-    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).text, 'chat common (100%, mostly parent & Parsons)',
+    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).label, 'chat common (100%, mostly parent & Parsons)',
         'a legitimate path matching most is what the chip names');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');

@@ -144,7 +144,8 @@ Explorer's key chips, where curation happens; only one flag means "delete this k
 
 | flag | condition | severity | says |
 |---|---|---|---|
-| `unusable` | the validator refuses the key | severe | the validator's code; a correction, not a deletion |
+| `unusable` | the validator refuses the key | severe | the alert's label, its message as the tooltip; a correction, not a deletion |
+| `warning` | the validator warns on the key: legal, and probably not what was meant | moderate | the alert's label, its message as the tooltip |
 | `substring` | a literal key over the chat-common share whose whole-word probe share is <= 1/3, or whose case-sensitive probe share is <= 1/3 where the key has a capital; only a flag the entry lacks is suggested | moderate | `consider ? =k` / `? ^k` |
 | `chat common` | in >= `KEY_CHAT_COMMON` (20%) of units; not on a `constant` or sticky entry, the author having declared it ubiquitous | severe at >= `KEY_CHAT_SEVERE` (50%, an assertion), else moderate | the rate, and for a SmartKey the path that matches most; remedies are `constant` or a narrower key |
 | `book common` | no chat scanned; content df >= `KEY_BOOK_COMMON` (45%, an assertion) of a book of at least `KEY_MIN_SHARED_ENTRIES` (10) | moderate | the share |
@@ -155,6 +156,7 @@ Explorer's key chips, where curation happens; only one flag means "delete this k
 | `short` | a literal under `KEY_MIN_LENGTH` (4) on a non-whole-word entry, with hits | minor at every hit clean, severe at <= 1/3, else moderate | `clean/total exact`, and `consider ? =k` at <= 1/3 |
 | `unattested` | df 0 and no chat rate; a proper-looking literal is exempt under `ignoreProper` | none | `unattested` for a literal, `never matches` for a `?` or regex key, naming what was checked |
 | `variant only` | a hyphenated literal the chat, or failing that the book, holds only un-hyphenated | minor | which |
+| `note` | an info-level alert on a key nothing else flags | minor | the alert's label, its message as the tooltip |
 | `regex orthography` | a pattern holding one side of a quote family with no evidence either way | minor | `will not match` the other form |
 
 A `short` key's clean count rejects a boundary hit whose surrounding run of digits and currency marks

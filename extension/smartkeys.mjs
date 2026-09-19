@@ -175,11 +175,39 @@ const decomposedFinding = raw => {
     if (!m) return null;
     const nfc = m[1].normalize('NFC');
     if (nfc === m[1]) return null;
-    return {
-        severity: 'warn', code: 'regex-decomposed',
-        message: `The pattern “${raw}” holds a decomposed character — a letter written as a base plus a combining mark. WA composes the text before matching, so that sequence can never match. Written composed it is “/${nfc}/${m[2]}”.`,
-    };
+    return new KeyAlert('regex-decomposed', `The pattern “${raw}” holds a decomposed character — a letter written as a base plus a combining mark. WA composes the text before matching, so that sequence can never match. Written composed it is “/${nfc}/${m[2]}”.`);
 };
+
+/** Every alert code with its severity and label, the registry KeyAlert reads from, so a code cannot exist without both.
+ *  `error` bars the key; `warn` is legal and probably a typo; `info` is a note. `label` is at most four words, translated where drawn. */
+export const KEY_ALERTS = Object.freeze({
+    'no-terms': { severity: 'error', label: 'No terms' },
+    'negation-only': { severity: 'error', label: 'Negation only' },
+    'too-deep': { severity: 'error', label: 'Nested too deep' },
+    'stray-weight': { severity: 'error', label: 'Stray weight' },
+    'stray-proximity': { severity: 'error', label: 'Stray proximity' },
+    'proximity-on-phrase': { severity: 'error', label: 'Proximity on a phrase' },
+    'stray-quote': { severity: 'error', label: 'Unclosed quote' },
+    'regex-invalid': { severity: 'error', label: 'Invalid regex' },
+    'punctuation-term': { severity: 'warn', label: 'Punctuation only' },
+    'unbalanced-parens': { severity: 'warn', label: 'Unbalanced parentheses' },
+    'all-zero-weights': { severity: 'warn', label: 'All weights zero' },
+    'regex-decomposed': { severity: 'warn', label: 'Decomposed accent' },
+    'flag-on-pattern': { severity: 'warn', label: 'Literal regex' },
+    'regex-core-refuses': { severity: 'info', label: 'WA-only regex' },
+});
+
+/** One validator finding: `code`, `severity` and `label` from KEY_ALERTS, `message` the sentence a tooltip shows. An unregistered code throws. */
+export class KeyAlert {
+    constructor(code, message) {
+        const def = KEY_ALERTS[code];
+        if (!def) throw new Error(`unregistered key alert: ${code}`);
+        this.code = code;
+        this.severity = def.severity;
+        this.label = def.label;
+        this.message = String(message);
+    }
+}
 
 export function validateSmartKey(raw) {
     const out = [];
@@ -193,10 +221,7 @@ export function validateSmartKey(raw) {
             try {
                 new RegExp(rx[1], rx[2]);
             } catch (e) {
-                out.push({
-                    severity: 'error', code: 'regex-invalid',
-                    message: `The pattern ${JSON.stringify(bare)} is not a valid regular expression (${e.message}), so it can never match.`,
-                });
+                out.push(new KeyAlert('regex-invalid', `The pattern ${JSON.stringify(bare)} is not a valid regular expression (${e.message}), so it can never match.`));
                 return out;   // the reading question below is moot for a pattern that cannot run
             }
             const decomposed = decomposedFinding(bare);
@@ -204,10 +229,7 @@ export function validateSmartKey(raw) {
         }
         if (isRegexKey(bare) && !coreReadsAsRegex(bare)) {
             const hatch = bare.includes('"') ? '' : ` If you meant the literal string, use ? "${bare}".`;
-            out.push({
-                severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
-            });
+            out.push(new KeyAlert('regex-core-refuses', `WA runs “${bare}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`));
         }
         return out;   // not a SmartKey; nothing further to say
     }
@@ -215,7 +237,7 @@ export function validateSmartKey(raw) {
     const terms = tokens.filter(t => t.type === 'TERM' || t.type === 'REGEX');
 
     if (!terms.length) {
-        out.push({ severity: 'error', code: 'no-terms', message: 'No search terms — this key can never match.' });
+        out.push(new KeyAlert('no-terms', 'No search terms — this key can never match.'));
         return out;   // everything below reads the terms; no point compounding the report
     }
 
@@ -223,17 +245,11 @@ export function validateSmartKey(raw) {
     try {
         ast = parse(tokens);
     } catch {
-        out.push({
-            severity: 'error', code: 'too-deep',
-            message: `The key nests deeper than ${MAX_DEPTH} groups or negations, which is past what a keyword needs. Flatten some of the “(” levels — or split it into two keys.`,
-        });
+        out.push(new KeyAlert('too-deep', `The key nests deeper than ${MAX_DEPTH} groups or negations, which is past what a keyword needs. Flatten some of the “(” levels — or split it into two keys.`));
         return out;   // a key refused at parse needs no second opinion
     }
     if (!hasPositiveTerm(ast)) {
-        out.push({
-            severity: 'error', code: 'negation-only',
-            message: 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.',
-        });
+        out.push(new KeyAlert('negation-only', 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.'));
     }
 
     // A weight lexes as a term only when it followed neither a term nor a group, so it cannot be anything but misplaced.
@@ -245,12 +261,9 @@ export function validateSmartKey(raw) {
         const bare = /^(?:::|\^)\d+(?:\.\d+)?$/.test(v);
         const flagged = t.isCaseSensitive && /^\d+(?:\.\d+)?$/.test(v);
         if (!bare && !flagged) continue;
-        out.push({
-            severity: 'error', code: 'stray-weight',
-            message: flagged
+        out.push(new KeyAlert('stray-weight', flagged
                 ? `“^${v}” reads as a case-sensitive search for “${v}”, since “^” at the start of a term is the case flag. A weight goes straight after the term or the group it weights, with no space: “fire^${v}”, “(copper pipe)^${v}”.`
-                : `The weight ${JSON.stringify(v)} is not attached to anything. A weight goes straight after the term or the group it weights, with no space: “fire::3”, “(copper pipe)::3”.`,
-        });
+                : `The weight ${JSON.stringify(v)} is not attached to anything. A weight goes straight after the term or the group it weights, with no space: “fire::3”, “(copper pipe)::3”.`));
     }
 
     // The same for `~N`, which the lexer absorbs onto the group: one left over is a second the group cannot take.
@@ -260,42 +273,30 @@ export function validateSmartKey(raw) {
         if (t.type !== 'TERM' || t.quoted || tokens[i - 1].type !== 'RPAREN') continue;
         const v = String(t.value);
         if (!/^~\d+$/.test(v)) continue;
-        out.push({
-            severity: 'error', code: 'stray-proximity',
-            message: `“${v}” is not attached to anything: a group takes one “~N” and this is a second, so it is being searched for as text. Keep the one that applies — “(copper pipe)~3” — or quote it as "${v}" to search for it.`,
-        });
+        out.push(new KeyAlert('stray-proximity', `“${v}” is not attached to anything: a group takes one “~N” and this is a second, so it is being searched for as text. Keep the one that applies — “(copper pipe)~3” — or quote it as "${v}" to search for it.`));
     }
 
     // Quoting is the one construct that carries order, so proximity has nothing to say about a phrase.
     for (const t of terms) {
         // `quoted`, not just `near`: parse() stamps `near` on the lone term of a one-term group, which is the supported spelling.
         if (t.type !== 'TERM' || t.near === undefined || !t.quoted) continue;
-        out.push({
-            severity: 'error', code: 'proximity-on-phrase',
-            message: `“~${t.near}” after a quoted phrase means nothing: the phrase is already its words adjacent and in order. To allow words between, group the terms instead: (${t.value})~${t.near}.`,
-        });
+        out.push(new KeyAlert('proximity-on-phrase', `“~${t.near}” after a quoted phrase means nothing: the phrase is already its words adjacent and in order. To allow words between, group the terms instead: (${t.value})~${t.near}.`));
     }
 
     // The usual cause is a doubled `?`: only the first is stripped. A quoted punctuation term is deliberate.
     for (const t of terms) {
         if (t.type !== 'TERM') continue;
         if (!t.quoted && !/[\p{L}\p{N}]/u.test(String(t.value))) {
-            out.push({
-                severity: 'warn', code: 'punctuation-term',
-                message: String(t.value) === '?'
+            out.push(new KeyAlert('punctuation-term', String(t.value) === '?'
                     ? 'Only the first “?” marks a SmartKey, so the second one is being searched for as text — this matches nearly every message. Remove it, or quote it as "?" if you meant it.'
-                    : `The term ${JSON.stringify(String(t.value))} is punctuation only, so it matches almost anything.`,
-            });
+                    : `The term ${JSON.stringify(String(t.value))} is punctuation only, so it matches almost anything.`));
         }
     }
 
     // The only shape the lexer makes of an unclosed quote: `? "moon` keeps the `"` as the value's first character. Any other `"` is text.
     for (const t of terms) {
         if (t.type === 'TERM' && !t.quoted && String(t.value).startsWith('"')) {
-            out.push({
-                severity: 'error', code: 'stray-quote',
-                message: 'Unclosed quote — close the phrase, or remove the quote.',
-            });
+            out.push(new KeyAlert('stray-quote', 'Unclosed quote — close the phrase, or remove the quote.'));
         }
     }
 
@@ -303,10 +304,7 @@ export function validateSmartKey(raw) {
     for (const t of terms) {
         if (t.type !== 'TERM' || t.quoted || !(t.isExact || t.isCaseSensitive) || !isRegexKey(t.value)) continue;
         const flag = `${t.isExact ? '=' : ''}${t.isCaseSensitive ? '^' : ''}`;
-        out.push({
-            severity: 'warn', code: 'flag-on-pattern',
-            message: `Flag ${flag} makes this a literal; remove it if you want the expression, or use quotes to suppress this warning.`,
-        });
+        out.push(new KeyAlert('flag-on-pattern', `Flag ${flag} makes this a literal; remove it if you want the expression, or use quotes to suppress this warning.`));
     }
 
     for (const t of terms) {
@@ -316,37 +314,25 @@ export function validateSmartKey(raw) {
         try {
             new RegExp(m[1], m[2]);
         } catch (e) {
-            out.push({
-                severity: 'error', code: 'regex-invalid',
-                message: `The pattern ${JSON.stringify(val)} is not a valid regular expression (${e.message}), so it can never match.`,
-            });
+            out.push(new KeyAlert('regex-invalid', `The pattern ${JSON.stringify(val)} is not a valid regular expression (${e.message}), so it can never match.`));
             continue;
         }
         const decomposed = decomposedFinding(val);
         if (decomposed) out.push(decomposed);
         if (!coreReadsAsRegex(val)) {
             const hatch = val.includes('"') ? '' : ` If you meant the literal string, quote the term: "${val}".`;
-            out.push({
-                severity: 'warn', code: 'regex-core-refuses',
-                message: `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`,
-            });
+            out.push(new KeyAlert('regex-core-refuses', `WA runs “${val}” as a pattern. SillyTavern's own matcher refuses it — it takes neither an unescaped “/” inside the body nor a flag newer than its list — so without WA the key matches only where that exact delimited string appears in the text.${hatch}`));
         }
     }
 
     const lp = tokens.filter(t => t.type === 'LPAREN').length;
     const rp = tokens.filter(t => t.type === 'RPAREN').length;
     if (lp !== rp) {
-        out.push({
-            severity: 'warn', code: 'unbalanced-parens',
-            message: `${lp} “(” against ${rp} “)”. The SmartKey still parses, but probably not the way you grouped it.`,
-        });
+        out.push(new KeyAlert('unbalanced-parens', `${lp} “(” against ${rp} “)”. The SmartKey still parses, but probably not the way you grouped it.`));
     }
 
     if (terms.every(t => t.weight === 0)) {
-        out.push({
-            severity: 'warn', code: 'all-zero-weights',
-            message: 'Every term is weighted 0, so this key gates without contributing to the score.',
-        });
+        out.push(new KeyAlert('all-zero-weights', 'Every term is weighted 0, so this key gates without contributing to the score.'));
     }
 
     return out;

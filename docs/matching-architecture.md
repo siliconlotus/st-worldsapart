@@ -301,25 +301,26 @@ resolves toward the literal: `*` is text, `~` is text except as `~N` on a group,
 - **Entry flags reach plain keys only.** `caseSensitive` and `matchWholeWords` do not reach inside a
   SmartKey or a pattern: `? nasa` in a case-sensitive entry is still insensitive.
 
-**The validator** (`validateSmartKey`) reports structure. An `error` bars the key from activation and
+**The validator** (`validateSmartKey`) reports structure as `KeyAlert`s, `{ code, severity, label, message }`. `severity` and `label`, a display name of at most four words translated where drawn, come from `KEY_ALERTS`, the registry every alert is built from: the constructor throws on a code it lacks, so a code cannot exist without both. `message` is the sentence a tooltip shows. An `error` bars the key from activation and
 scoring (`usableKeys`; `secondaryKeys` for a secondary, which excepts `negation-only` under every logic
-but `AND_ANY`); a `warn` is legal and probably a typo.
+but `AND_ANY`); a `warn` is legal and probably a typo, the audit's `warning` flag; an `info` is a note, the audit's `note` flag where nothing else flags the key.
 
-| code | severity | when |
-|---|---|---|
-| `no-terms` | error | no term at all |
-| `negation-only` | error | no term reachable without an odd number of NOTs |
-| `stray-weight` | error | a `::N` or `^N` attached to nothing |
-| `stray-proximity` | error | a `~N` term straight after a group, which already took one |
-| `proximity-on-phrase` | error | `~N` after a quoted phrase |
-| `stray-quote` | error | an unclosed quote |
-| `regex-invalid` | error | a `/…/flags` shape `new RegExp` refuses; asked of a bare regex key too |
-| `punctuation-term` | warn | an unquoted term with no letter or digit, usually a second `?` |
-| `unbalanced-parens` | warn | the counts differ; it still parses |
-| `all-zero-weights` | warn | every term weighted 0 |
-| `flag-on-pattern` | warn | `=` or `^` in front of an unquoted `/…/flags`, which lexes as a flagged literal; the pattern branch runs after the flag branch |
-| `regex-core-refuses` | warn | a pattern with an unescaped `/` inside, which core reads as literal text; bare key or term |
-| `regex-decomposed` | warn | a pattern holding a decomposed character, a base letter plus a combining mark, which the NFC text can never match; bare key or term |
+| code | label | severity | when |
+|---|---|---|---|
+| `no-terms` | No terms | error | no term at all |
+| `too-deep` | Nested too deep | error | groups or negations nested past 100 |
+| `negation-only` | Negation only | error | no term reachable without an odd number of NOTs |
+| `stray-weight` | Stray weight | error | a `::N` or `^N` attached to nothing |
+| `stray-proximity` | Stray proximity | error | a `~N` term straight after a group, which already took one |
+| `proximity-on-phrase` | Proximity on a phrase | error | `~N` after a quoted phrase |
+| `stray-quote` | Unclosed quote | error | an unclosed quote |
+| `regex-invalid` | Invalid regex | error | a `/…/flags` shape `new RegExp` refuses; asked of a bare regex key too |
+| `punctuation-term` | Punctuation only | warn | an unquoted term with no letter or digit, usually a second `?` |
+| `unbalanced-parens` | Unbalanced parentheses | warn | the counts differ; it still parses |
+| `all-zero-weights` | All weights zero | warn | every term weighted 0 |
+| `flag-on-pattern` | Literal regex | warn | `=` or `^` in front of an unquoted `/…/flags`, which lexes as a flagged literal; the pattern branch runs after the flag branch |
+| `regex-core-refuses` | WA-only regex | info | a pattern with an unescaped `/` inside, which core reads as literal text; bare key or term |
+| `regex-decomposed` | Decomposed accent | warn | a pattern holding a decomposed character, a base letter plus a combining mark, which the NFC text can never match; bare key or term |
 
 ### Selective logic (`keysecondary`)
 

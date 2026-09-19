@@ -99,7 +99,7 @@ const KEY_BOOK_COMMON = 0.45;
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
-export const FLAG_PRIORITY = ['unusable', 'substring', 'chat common', 'book common', 'book shared', 'regex orthography', 'common word', 'fragment', 'short', 'unattested', 'variant only'];
+export const FLAG_PRIORITY = ['unusable', 'warning', 'substring', 'chat common', 'book common', 'book shared', 'regex orthography', 'common word', 'fragment', 'short', 'unattested', 'variant only', 'note'];
 
 /** Each orthographic form a regex key cannot reach: `alt` is the pattern rewritten into it, `label` names it, and
  *  `shape` marks the one that flags without evidence. Exported so a chat scan can count these beside the keys —
@@ -130,7 +130,7 @@ export function orthoAlternates(k) {
  *  message, so probing every key would cost more than the scan. */
 export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
-export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain } = {}) {
+export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain, translate = s => s } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     // The unit the chat scan counted, named for a chip: what a rate is a rate of.
     const units = { message: t`messages`, paragraph: t`paragraphs`, window: t`scan windows` }[chatScan?.unit] ?? t`messages`;
@@ -340,8 +340,14 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const classify = (key, cs, ww, declared = false) => {
         const k = String(key).trim();
         if (!k) return null;
-        // usableKeys, not a validator call, so which codes are fatal here stays a matcher.mjs rule.
-        if (!usableKeys([k]).length) return { flag: 'unusable', code: validateSmartKey(k).find(f => f.severity === 'error')?.code };
+        // usableKeys, not a validator call, so which codes are fatal here stays a matcher.mjs rule; a warn is legal and is its own flag.
+        const alerts = validateSmartKey(k);
+        const err = alerts.find(a => a.severity === 'error');
+        if (!usableKeys([k]).length) return { flag: 'unusable', code: err?.code, alert: err };
+        const warn = alerts.find(a => a.severity === 'warn');
+        if (warn) return { flag: 'warning', code: warn.code, alert: warn };
+        // An info is a note: reported last, only where no evidence flag has anything to say.
+        const info = alerts.find(a => a.severity === 'info');
         const { literal, chatRate, hits, bookContent } = evidence(k, cs, ww);
 
         // --- evidence about this chat and this book, in the order the more specific diagnosis wins ---------------
@@ -395,7 +401,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             if (chatAny > 0 && chatTyped === 0) return { flag: 'variant only', bookContent, where: 'chat' };
             if (hits.total > 0 && hits.typed === 0 && !chatTyped) return { flag: 'variant only', bookContent, where: 'book' };
         }
-        return regexOrtho(k, false);
+        return regexOrtho(k, false) ?? (info ? { flag: 'note', code: info.code, alert: info } : null);
     };
     /** Secondary keys that do nothing, in the entry's order: refused by the matcher (`unusable`, with the validator's message, by set
      *  difference against secondaryKeys so which codes are fatal stays a matcher.mjs rule) or live and attested nowhere (`unattested`);
@@ -409,7 +415,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         for (const key of (Array.isArray(e?.keysecondary) ? e.keysecondary : [])) {
             const k = String(key ?? '').trim();
             if (!k) continue;
-            if (!live.has(key)) { out.push({ uid: e?.uid, key, flag: 'unusable', ...(validateSmartKey(key).find(f => f.severity === 'error') ?? {}) }); continue; }
+            if (!live.has(key)) { const err = validateSmartKey(key).find(a => a.severity === 'error'); out.push({ uid: e?.uid, key, flag: 'unusable', code: err?.code, alert: err }); continue; }
             const dead = unattested(k, cs, ww);
             if (dead) out.push({ uid: e?.uid, key, ...dead });
         }
@@ -432,6 +438,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
         if (p.flag === 'unusable') return SEVERE;
+        if (p.flag === 'warning') return MODERATE;
+        if (p.flag === 'note') return MINOR;
         if (p.flag === 'common word') return MODERATE;   // an assertion about the language; only the chat can make it severe, as chat common
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
@@ -451,30 +459,32 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // Every text is one template, so a translation can reorder it; a branch per variant rather than a joined fragment.
         if (p.flag === 'unattested') {
             // A SmartKey or a pattern is not absent from the text: it evaluated false everywhere it was run.
-            const text = p.literal ? (p.chatChecked ? t`unattested (book/chat)` : t`unattested (book)`)
+            const label = p.literal ? (p.chatChecked ? t`unattested (book/chat)` : t`unattested (book)`)
                 : (p.chatChecked ? t`never matches (book/chat)` : t`never matches (book)`);
-            return { text, severity };
+            return { label, severity };
         }
-        if (p.flag === 'unusable') return { text: p.code ? t`unusable — ${p.code}` : t`unusable`, severity };
-        if (p.flag === 'common word') return { text: p.term ? t`common word (${p.term})` : t`common word`, severity };
-        if (p.flag === 'book shared') return { text: t`book shared (${pct(p.bookListed / nBook)}%)`, severity };
-        if (p.flag === 'chat common') return { text: p.via ? t`chat common (${pct(p.chatRate)}%, mostly ${p.via})` : t`chat common (${pct(p.chatRate)}%)`, severity };
-        if (p.flag === 'book common') return { text: t`book common (${pct(p.bookContent / nBook)}%)`, severity };
-        if (p.flag === 'fragment') return { text: t`phrase fragment`, severity };
+        // A validator verdict: the alert's label for a chip or a row, its message for the tooltip.
+        if (p.flag === 'unusable') return { label: p.alert ? translate(p.alert.label) : t`unusable`, message: p.alert?.message, severity };
+        if (p.flag === 'warning' || p.flag === 'note') return { label: translate(p.alert.label), message: p.alert.message, severity };
+        if (p.flag === 'common word') return { label: p.term ? t`common word (${p.term})` : t`common word`, severity };
+        if (p.flag === 'book shared') return { label: t`book shared (${pct(p.bookListed / nBook)}%)`, severity };
+        if (p.flag === 'chat common') return { label: p.via ? t`chat common (${pct(p.chatRate)}%, mostly ${p.via})` : t`chat common (${pct(p.chatRate)}%)`, severity };
+        if (p.flag === 'book common') return { label: t`book common (${pct(p.bookContent / nBook)}%)`, severity };
+        if (p.flag === 'fragment') return { label: t`phrase fragment`, severity };
         if (p.flag === 'substring') {
             const how = [p.wordShare !== undefined && p.suggest.includes('=') ? t`${pct(p.wordShare)}% as a word` : null,
                 p.caseShare !== undefined && p.suggest.includes('^') ? t`${pct(p.caseShare)}% in this case` : null].filter(Boolean).join(', ');
-            return { text: t`matches in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
+            return { label: t`matches in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
         }
-        if (p.flag === 'variant only') return { text: p.where === 'chat' ? t`chat uses it only un-hyphenated` : t`book uses it only un-hyphenated`, severity };
+        if (p.flag === 'variant only') return { label: p.where === 'chat' ? t`chat uses it only un-hyphenated` : t`book uses it only un-hyphenated`, severity };
         if (p.flag === 'regex orthography') {
             const form = { 'curly form': t`curly form`, 'straight form': t`straight form`, 'en-dash': t`en-dash` }[p.label] ?? p.label;
             const lead = p.where === 'chat' ? t`chat uses ${form}` : p.where === 'book' ? t`book uses ${form}` : t`will not match ${form}`;
-            return { text: t`${lead}, consider ${p.suggest}`, severity };
+            return { label: t`${lead}, consider ${p.suggest}`, severity };
         }
         // The same suggestion substring makes, measured over the book: hits mostly inside longer words want `=`.
         const ratio = p.total ? p.clean / p.total : 0;
-        return { text: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} exact)`, severity };
+        return { label: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} exact)`, severity };
     };
     // Near-duplicates: Jaccard over rare vocabulary; an arc and its member scene are skipped. Advisory only.
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));
@@ -525,7 +535,7 @@ export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scan
 export function cleanupRows(entry, scan, { showAll = false, ignored = new Set() } = {}) {
     const rows = scan.classifyEntry(entry).map(p => {
         const rc = scan.reasonOf(p);
-        return { term: p.key, why: rc.text, sev: rc.severity, p };
+        return { term: p.key, why: rc.label, message: rc.message, sev: rc.severity, p };
     });
     if (!showAll) return rows;
     const shown = new Set(rows.map(r => r.term));

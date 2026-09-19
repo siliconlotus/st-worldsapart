@@ -113,7 +113,7 @@ console.log('ok   a key and its case variant count one entry once');
     const book = { entries: { 0: { uid: 0, key: ['mother', 'zzznope'], content: 'Nothing relevant here.' } } };
     const run = chatScan => {
         const s = buildKeyPruneScan(book, opts, new Set(), { chatScan });
-        return Object.fromEntries(s.classifyEntry(book.entries[0]).map(p => [p.key, { flag: p.flag, why: s.reasonOf(p).text, sev: s.severityOf(p) }]));
+        return Object.fromEntries(s.classifyEntry(book.entries[0]).map(p => [p.key, { flag: p.flag, why: s.reasonOf(p).label, sev: s.severityOf(p) }]));
     };
     const none = run(undefined);
     eq(none.zzznope.flag, 'unattested', 'no chat: a key absent from entry text is dead');
@@ -138,7 +138,7 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
     const book = { entries: { 0: { uid: 0, key: ['zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
         const s = buildKeyPruneScan(book, opts, new Set(), { chatScan });
-        return s.reasonOf(s.classifyEntry(book.entries[0])[0]).text;
+        return s.reasonOf(s.classifyEntry(book.entries[0])[0]).label;
     };
     eq(why({ messagesWith: new Map([['zzznope', 0]]), messages: 100 }), 'unattested (book/chat)',
         'in the scan and silent: both were checked');
@@ -175,7 +175,7 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
     const book = { entries: { 0: { uid: 0, key: ['? zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
         const sc = buildKeyPruneScan(book, opts, new Set(), { chatScan });
-        return sc.reasonOf(sc.classifyEntry(book.entries[0])[0]).text;
+        return sc.reasonOf(sc.classifyEntry(book.entries[0])[0]).label;
     };
     eq(why(undefined), 'never matches (book)', 'a dead query claims only what was checked');
     eq(why(got), 'never matches (book/chat)', '...and says so when the chat was checked too');

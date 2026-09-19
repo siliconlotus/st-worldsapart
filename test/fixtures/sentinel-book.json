@@ -354,6 +354,19 @@
             "selectiveLogic": 0,
             "comment": "SECONDARY GATE under AND_ANY whose one secondary appears nowhere: in no entry and in no message. The primary sits in its own text and is clean, so nothing on the primary row says the gate can never open. The Studio paints the secondary chip unattested, never green.",
             "content": "The zzgatehouse is shut before dawn."
+        },
+        "26": {
+            "uid": 26,
+            "key": [
+                "? =/re/"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "VALIDATOR WARNING: `=` in front of `/re/` lexes as a whole-word literal, which is legal and so not unusable, and which nobody means. The audit reports the validator's warn as `warning`, moderate, ahead of the dead verdict it explains: the Studio paints the chip amber and Cleanup lists it.",
+            "content": "A flag written in front of a pattern."
         }
     }
 }

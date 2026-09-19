@@ -24,13 +24,13 @@ const keys = [...new Set(entries.flatMap(e => e.key.map(k => String(k).trim())))
 const secondaries = [...new Set(entries.flatMap(e => e.keysecondary ?? []))];
 
 /** The chat scan through the function the Studio's client path calls. */
-// The substring probes ride along as the Studio's second pass would send them: a 22-key fixture needs no gate.
+// The substring probes ride along as the Studio's second pass would send them: a 23-key fixture needs no gate.
 const chatRate = () => countChatHits([...keys, ...secondaries, ...keys.flatMap(substringProbes)], msgs);
 
 const verdicts = (chat, matchWindow = 'scan') => {
     const s = buildKeyPruneScan(data, OPTS, new Set(), { chatScan: chat, matchWindow });
     const out = {};
-    for (const e of entries) for (const p of s.classifyEntry(e)) out[p.key] = { flag: p.flag, why: s.reasonOf(p).text, sev: s.severityOf(p) };
+    for (const e of entries) for (const p of s.classifyEntry(e)) out[p.key] = { flag: p.flag, why: s.reasonOf(p).label, message: s.reasonOf(p).message, sev: s.severityOf(p) };
     return out;
 };
 
@@ -44,9 +44,13 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.why, 'common word', 'the common list flags a generic word while no chat has been scanned');
     eq(v.CIA?.why, 'short (1/4 exact) — consider ? =CIA', 'a short key mostly inside longer words is offered the whole-word flag, measured over the book');
+    eq(v['? =/re/']?.flag, 'warning', 'a validator warn is an audit flag, ahead of the dead verdict it explains');
+    eq(v['? =/re/']?.why, 'Literal regex', '...named by the validator\'s label, short enough for a chip');
+    eq(v['? =/re/']?.message, 'Flag = makes this a literal; remove it if you want the expression, or use quotes to suppress this warning.', '...with the validator\'s sentence as the tooltip');
+    eq(v['? =/re/']?.sev, 'moderate', '...at the amber severity');
     // A key the audit never scanned — edited in since — is judged on demand, not handed "never matches" by default.
     const later = buildKeyPruneScan(data, OPTS, new Set());
-    const fresh = key => { const f = later.classifyEntry({ uid: 99, key: [key] })[0]; return f ? later.reasonOf(f).text : ''; };
+    const fresh = key => { const f = later.classifyEntry({ uid: 99, key: [key] })[0]; return f ? later.reasonOf(f).label : ''; };
     eq(fresh('? =quarkspindle'), '', 'an edited-in whole-word term the book holds is judged attested');
     eq(fresh('? =zzunattested'), 'never matches (book)', '...and one it does not hold is dead, by a scan and not by default');
     const flagOf = key => later.classifyEntry({ uid: 99, key: [key] })[0]?.flag;
@@ -200,7 +204,7 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(s.unusableKeysOf(data.entries['15']).map(row).join(','), 'morning:unattested,? "moon:unusable:stray-quote',
         'without a chat the positive secondary is unattested by the book and the malformed one carries the validator\'s code; the negation-only one is neither');
     const [dead, bad] = s.unusableKeysOf(data.entries['15']);
-    eq(s.reasonOf(dead).text, 'unattested (book)', 'the words a primary gets');
+    eq(s.reasonOf(dead).label, 'unattested (book)', 'the words a primary gets');
     eq(s.severityOf(dead), '', 'and the blank severity a primary gets: a dead key is neutral');
     eq(s.severityOf(bad), RED, 'a refused secondary is severe');
     eq(s.unusableKeysOf({ ...data.entries['15'], selective: false }).length, 0, 'a switched-off gate lists nothing');
@@ -208,6 +212,6 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
 
     const c = _pruneScan(data, OPTS, new Set(), { chatScan: chatRate() });
     eq(c.unusableKeysOf(data.entries['15']).map(row).join(','), '? "moon:unusable:stray-quote', 'the chat attests the positive secondary');
-    eq(c.unusableKeysOf(data.entries['25']).map(r => `${r.key}:${c.reasonOf(r).text}`).join(','), 'zzghostgate:unattested (book/chat)',
+    eq(c.unusableKeysOf(data.entries['25']).map(r => `${r.key}:${c.reasonOf(r).label}`).join(','), 'zzghostgate:unattested (book/chat)',
         'a secondary in no entry and no message stays unattested once the chat is scanned, and says the chat was checked');
 }

@@ -1,6 +1,7 @@
 // Guards buildKeyPruneScan / buildKeySuggest (keyword-audit.mjs, keyword-suggest.mjs) on a tiny synthetic book.
 import assert from 'node:assert';
 import { buildKeyPruneScan, KEY_MIN_LENGTH, KEY_MIN_SHARED_ENTRIES } from '../extension/keyword-audit.mjs';
+import { KEY_ALERTS } from '../extension/smartkeys.mjs';
 import { buildKeySuggest, classifyLlmCand } from '../extension/keyword-suggest.mjs';
 
 // --- buildKeyPruneScan ---------------------------------------------------------------------------
@@ -27,17 +28,24 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
         0: { uid: 0, comment: 'Cosmonaut', content: 'the cosmonaut waited', key: ['cosmonaut', '? -zebra', '/[/'],
             keysecondary: ['? -gagarin', '? "moon', 'apollo'], selectiveLogic: 3 },
         1: { uid: 1, comment: 'Clean', content: 'apollo flew', key: ['apollo'], keysecondary: [] },
+        2: { uid: 2, comment: 'Portable', content: 'the a/b path', key: ['/a/b/'], keysecondary: [] },
     } };
     const scan = buildKeyPruneScan(book, pruneOpts, new Set());
     const prim = scan.classifyEntry(book.entries[0]);
     assert.deepStrictEqual(prim.map(f => `${f.key}:${f.flag}:${f.code ?? ''}`),
         ['? -zebra:unusable:negation-only', '/[/:unusable:regex-invalid'],
         'an unusable primary is flagged as such, with the validator\'s own code, not as unattested');
-    assert.ok(prim.every(f => scan.reasonOf(f).text.startsWith('unusable') && scan.reasonOf(f).severity),
-        'it reads as unusable on the chip and carries a severity colour');
+    assert.ok(prim.every(f => scan.reasonOf(f).label === KEY_ALERTS[f.code].label && scan.reasonOf(f).message && scan.reasonOf(f).severity),
+        'it reads as the validator\'s label on the chip, carries its sentence as the tip, and a severity colour');
     assert.deepStrictEqual(scan.unusableKeysOf(book.entries[0]).map(r => `${r.key}:${r.code}`), ['? "moon:stray-quote'],
         'only the secondary needs the separate list; the negation-only one is legitimate there');
-    assert.ok(scan.unusableKeysOf(book.entries[0]).every(r => r.message), 'each carries the validator message the author reads');
+    assert.ok(scan.unusableKeysOf(book.entries[0]).every(r => r.alert?.message), 'each carries the alert whose message the author reads');
+    // An info-level alert is a note: minor, and only where no evidence flag fired, so the pattern must be attested.
+    const note = scan.classifyEntry(book.entries[2]);
+    assert.deepStrictEqual(note.map(f => `${f.flag}:${f.code}`), ['note:regex-core-refuses'], 'a WA-only pattern the book attests reads as a note');
+    assert.strictEqual(scan.reasonOf(note[0]).label, 'WA-only regex', '...with the alert label as its label');
+    assert.strictEqual(scan.severityOf(note[0]), 'minor', '...at minor severity');
+    assert.deepStrictEqual(scan.classifyEntry({ uid: 3, key: ['/c/d/'] }).map(f => f.flag), ['unattested'], 'a dead WA-only pattern reads as dead, the note being moot');
     // selectiveLogic 3 (AND_ALL) above is load-bearing: under AND_ANY the negation-only secondary is reported too.
     assert.deepStrictEqual(
         scan.unusableKeysOf({ ...book.entries[0], selectiveLogic: 0 }).map(r => `${r.key}:${r.code}`),
@@ -200,7 +208,7 @@ const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true
     assert.ok(row, '"astronaut" flagged though it appears in only one entry\'s text');
     assert.strictEqual(row.flag, 'book shared', 'flagged on how many entries LIST it, not on its content df');
     assert.strictEqual(row.bookListed, 12, 'bookListed counts entries that LIST the key');
-    assert.strictEqual(s.reasonOf(row).text, 'book shared (100%)', 'reason names the corpus and reports the share');
+    assert.strictEqual(s.reasonOf(row).label, 'book shared (100%)', 'reason names the corpus and reports the share');
     assert.ok(!s.classifyEntry(sharedBook.entries[0]).some(r => r.key === 'moonwalk' && r.flag === 'book shared'), 'a key on one entry is not over-shared');
 }
 {
@@ -431,7 +439,7 @@ import { cleanupRows } from '../extension/keyword-audit.mjs';
     // A stand-in scan: only the two methods cleanupRows calls.
     const stub = flagged => ({
         classifyEntry: () => flagged.map(([key, flag, severity, text]) => ({ key, flag, severity, text })),
-        reasonOf: p => ({ text: p.text, severity: p.severity }),
+        reasonOf: p => ({ label: p.text, severity: p.severity }),
     });
     const entry = { uid: 1, key: ['ravensgate', 'the gate', 'gate', 'moss'] };
     const scan = stub([['gate', 'too-common', 'severe', 'matches almost every message'],

@@ -188,6 +188,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
        
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
+            t, translate,
             matchWindow: settings().matchWindow,
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
             chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs, unit: chatUnit } : undefined,
@@ -966,7 +967,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             const softer = (flagged?.size ?? 0) - counted.length;
             // No colour means the uncoloured flag; name it from reasonOf.
-            const worstTxt = worst ? translate(worst) : scan.reasonOf(counted[0]).text;
+            const worstTxt = worst ? translate(worst) : scan.reasonOf(counted[0]).label;
             const tip = [t`Flagged keys. Worst: ${worstTxt}.`];
             if (secBad) tip.push(secBad === 1 ? t`Includes ${secBad} secondary key the matcher cannot run.` : t`Includes ${secBad} secondary keys the matcher cannot run.`);
             if (softer) tip.push(t`${softer} more are warnings, not counted here.`);
@@ -1004,16 +1005,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const isDead = v && v.flag === 'unattested';
             const isIgnored = ignoreSet.has(key);
             // Tooltip wording comes from reasonOf even for dead: the (book) and (book/chat) scopes are different claims.
-            const why = v && !isIgnored ? scan.reasonOf(v).text : '';
+            const rc = v && !isIgnored ? scan.reasonOf(v) : null;
+            const why = rc?.label ?? '';
             if (isIgnored) { annot = t`ignored`; chip.classList.add('wa-kw-ignored'); }
             else if (v && !isDead) {
-                const rc = scan.reasonOf(v); annot = why;
+                annot = why;
                 const c = SEVERITY_COLOR[rc.severity];
                 if (c) { chip.style.borderColor = c; chip.style.background = `color-mix(in srgb, ${c} 18%, transparent)`; }
             }
             else if (isDead) chip.classList.add('wa-kw-dead');
             else if (flagged) chip.style.borderColor = WA_GREEN;
-            text.title = isIgnored ? t`${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? t`${key} — ${why} (click to edit)` : t`${key} (click to edit)`);
+            text.title = isIgnored ? t`${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? t`${key} — ${rc?.message ?? why} (click to edit)` : t`${key} (click to edit)`);
             text.addEventListener('click', () => editKeyInline(e, key, text));
             chip.append(text);   // term only inside the chip
             const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = t`Delete key. Shift-click to ignore it instead.`;
@@ -1099,8 +1101,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (isDead) chip.classList.add('wa-kw-dead');
                 else if (rc) { const c = SEVERITY_COLOR[rc.severity]; if (c) { chip.style.borderColor = c; chip.style.background = `color-mix(in srgb, ${c} 18%, transparent)`; } }
                 else if (scan && gated) chip.style.borderColor = WA_GREEN;
-                const why = rc && !isDead ? rc.text : '';
-                const tip = v?.message ?? rc?.text;   // the validator's sentence where there is one; a dead key's says (book) or (book/chat)
+                const why = rc && !isDead ? rc.label : '';
+                const tip = rc?.message ?? rc?.label;   // the validator's sentence where there is one; a dead key's says (book) or (book/chat)
                 text.title = v ? t`${key} — ${tip} (click to edit)` : t`${key} (click to edit)`;
                 text.addEventListener('click', () => editKeyInline(e, key, text, 'keysecondary'));
                 chip.append(text);
@@ -1737,6 +1739,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (termColor) name.style.color = termColor;
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why === 'ignored' ? t`ignored` : (r.why ?? '');   // muted, whatever the flag: the term's own colour carries the state
+        if (r.message) why.title = r.message;
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
         row.append(cb, name);
         if (onEdit) {

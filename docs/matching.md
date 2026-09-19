@@ -149,7 +149,7 @@ If you write a regex containing unescaped slashes and plan to port it to a non-W
 /(home\/user|~\/user)\/file/      both: pattern. Identical matches; `\/` is just `/` to a regex.
 ```
 
-Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The Studio warns on the first row's shape, for a bare `/regex/` key and a `? /re/` term alike.
+Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The Studio warns when the key is saved and the audit lists it, for a bare `/regex/` key and a `? /re/` term alike.
 
 [^1]: `REGEX_KEY_RE` in `extension/matcher.mjs` is the authority for which flags a key may carry.
       Core's own list is the narrower `CORE_REGEX_KEY_RE` beside it, which is why `/d` and `/v` are WA-only.

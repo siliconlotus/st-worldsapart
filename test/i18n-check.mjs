@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SORT_LABELS, SORT_MENU, TIER_DEFS } from '../extension/sort.mjs';
 import { FLAG_PRIORITY, SEVERE, MODERATE, MINOR } from '../extension/keyword-audit.mjs';
+import { KEY_ALERTS } from '../extension/smartkeys.mjs';
 import { GRADE_ANCHORS } from '../extension/grading.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,6 +24,7 @@ const TABLE_KEYS = [
     ...SORT_MENU.flatMap(m => [m.label, ...(m.kids ?? []).map(([l]) => l)]),
     ...Object.values(TIER_DEFS).map(d => d.label),
     ...FLAG_PRIORITY, SEVERE, MODERATE, MINOR, 'ignored',
+    ...Object.values(KEY_ALERTS).map(a => a.label),
     ...GRADE_ANCHORS,
 ];
 
