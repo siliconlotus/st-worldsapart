@@ -1,6 +1,6 @@
 # SmartKeys
 
-A SmartKey is a key with some (optional) special features. They can be identified with their leading `?` character[^1]. `astronaut` is a plain keyword; `? astronaut` is a SmartKey (albeit one that behaves identically).
+A SmartKey is a key with some (optional) special features. They can be identified with their leading `?` character[^1]. `astronaut` is a plain keyword; `? astronaut` is a SmartKey (albeit one that behaves identically, in an entry with both match flags off).
 
 For how a key matches in general— substring, word boundaries, orthography, regex behaviour — see [How WorldsApart matches keys](matching.md).
 
@@ -152,6 +152,7 @@ There are a few things to watch out for:
 - A term is read as a regex only when it begins and ends with a forward slash; `? /24-7/` is a regex, `? 24/7` is four literal characters, `? /home/user/file` is also literal.
 - Regexes can be escaped with quotes; `? "/re/"` is literal four-character `/re/`.
 - Two (or more) regexes expect a space between them; `? /apples?/bananas?/` is one regex that contains apple with optional s, a literal forward slash, and banana with optional s.
+- A flag in front of a pattern makes it a literal: `? =/re/` is the whole-word term `/re/`, four characters, not a whole-word pattern. Write word boundaries inside the pattern instead.
 
 For more on how a pattern itself matches — flags, folding, `\b`, anchors — see the [matching documentation](matching.md#regex-keys).
 

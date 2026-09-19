@@ -1,7 +1,7 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys. Entry point evaluateSmartKey(); countKey() routes `?` keys here.
 // The grammar is docs/smartkeys.md's; docs/matching-architecture.md holds what each operator is worth.
 
-import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
+import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_FLAGS, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
 import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits } from './automaton.mjs';
 export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits };
@@ -25,7 +25,7 @@ function regexLiteral(s) {
         else if (c === '/' && !inClass) {
             const body = s.slice(1, i);
             if (!body) continue;
-            const f = s.slice(i + 1).match(/^[gimsuy]*(?=[\s()|&]|::|\^|$)/);
+            const f = s.slice(i + 1).match(new RegExp(`^[${REGEX_FLAGS}]*(?=[\\s()|&]|::|\\^|$)`));
             if (!f) continue;
             try { new RegExp(body, f[0]); } catch { continue; }
             return { value: `/${body}/${f[0]}`, rest: s.slice(i + 1 + f[0].length) };

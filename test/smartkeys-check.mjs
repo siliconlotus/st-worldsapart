@@ -96,6 +96,8 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
         eq(tok('? ' + k), plainReads(k), `a term reads as the whole key does: ${k}`);
     }
     eq(tok('? /re/is night'), 're:/re/is term:night', 'flags followed by a space are still taken');
+    eq(tok('? /x/v night'), 're:/x/v term:night', 'every flag REGEX_KEY_RE takes of a whole key is taken of a term');
+    eq(tok('? /x/d night'), 're:/x/d term:night', '...d as well as v, the two core lacks');
     eq(tok('? /re/::2'), 're:/re/', '...as is a weight straight after the close');
     eq(tok('? /re/gi)'), 're:/re/gi RPAREN', '...and a closing paren is a boundary too');
     eq(tok('? (/a/|/b/) x'), 'LPAREN re:/a/ OR re:/b/ RPAREN term:x', 'grouping around patterns still lexes');

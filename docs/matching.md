@@ -114,14 +114,14 @@ Dreamweaver, Adobe's once-vaunted web development suite, // No match (segment st
 
 ## Settings that change matching
 
-**Word boundary**[^3] decides what counts as *inside* a word, for whole-word matching only:
+**Word boundary**[^3] decides what counts as *inside* a word: where whole-word matching stops, and what counts as a word between the terms of a proximity group (`~N`, see [SmartKeys](smartkeys.md#proximity)):
 
 | | inside a word | `Joe` matches |
 |---|---|---|
 | **Strict** (default) | letters, digits, marks, `-` `'` | *Joe*, not *Joe's* or *Joe-adjacent* |
 | **Permissive** | letters, digits, marks | *Joe*, *Joe's* and *Joe-adjacent* |
 
-Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_` matches: underscore is a word character for programming identifiers, not for prose. **Word boundaries are Unicode-aware**: a word character is any letter, digit or combining mark in any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`.
+Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_` matches: underscore is a word character for programming identifiers, not for prose. A doubled hyphen is a boundary in both too, because an em dash is written `--` after normalisation, so whole-word `Joe` matches *Joe—wait* even under Strict. **Word boundaries are Unicode-aware**: a word character is any letter, digit or combining mark in any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`.
 
 **Match window** is the unit every part of a key must match within — *Paragraph* (the default), *Message*, or *Whole scan window* (SillyTavern's own behaviour). Under *Paragraph*, `? apple banana` needs both words in the same paragraph. A block element's open or close ends a window as a blank line does, so a preset that writes chat bubbles or a tracker panel as `<div>`s gives each one its own; `<b>`, `<em>`, `<span>` and `<br>` do not.
 

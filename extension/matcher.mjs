@@ -53,9 +53,11 @@ export function wholeWordAdvice(keys, wholeWords, t = plainTag) {
     return out;
 }
 
-/** A /pattern/flags regex key, as countKey routes them. `[\s\S]`, not `.`: a body may hold a newline, as core's `[\w\W]` admits.
- *  Every flag JS has, which is more than CORE_REGEX_KEY_RE's: `d` and `v` postdate core's list, so a key using one is WA-only. */
-export const REGEX_KEY_RE = /^\/([\s\S]+)\/([dgimsuvy]*)$/;
+/** Every flag JS has, which is more than CORE_REGEX_KEY_RE's: `d` and `v` postdate core's list, so a key using one is WA-only.
+ *  The one list: smartkeys' regexLiteral reads a term's flags off it too, or a term stops reading as the whole key does. */
+export const REGEX_FLAGS = 'dgimsuvy';
+/** A /pattern/flags regex key, as countKey routes them. `[\s\S]`, not `.`: a body may hold a newline, as core's `[\w\W]` admits. */
+export const REGEX_KEY_RE = new RegExp(`^\\/([\\s\\S]+)\\/([${REGEX_FLAGS}]*)$`);
 /** A key matched by its own text: not a SmartKey, not a regex. */
 export const isLiteral = k => !k.startsWith('?') && !isRegexKey(k);
 
