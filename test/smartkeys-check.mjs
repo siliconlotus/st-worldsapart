@@ -35,6 +35,8 @@ eq(matches('? "moon mission"', 'mission to the moon'), false, 'quoted phrase, no
     eq(matches('? «moon mission»', 'mission to the moon'), false, '...and keep its order');
     eq(matches('? “moon mission”', 'the moon mission began'), true, 'curly double quotes too');
     eq(matches('? „moon mission“', 'the moon mission began'), true, '...and the low-high pair');
+    eq(matches('? »moon mission«', 'the moon mission began'), true, '...and inward guillemets: a family closes in either direction');
+    eq(matches('? „moon mission”', 'the moon mission began'), true, '...and the Polish low-high-right pair, low and curly being one family');
     eq(matches('? ^«Navy SEAL»', 'navy seal'), false, 'flags sit in front of any mark');
     eq(codes('? «moon'), 'error:stray-quote', 'an unclosed guillemet is the stray-quote error');
     eq(matches('? /«x»/', 'he said «x»'), true, 'a pattern keeps its guillemets, being fold-exempt');
