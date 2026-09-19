@@ -299,6 +299,16 @@ export function validateSmartKey(raw) {
         }
     }
 
+    // `=` or `^` before an unquoted `/…/`: the flag branch lexes first, so the flags stay and the pattern becomes a literal.
+    for (const t of terms) {
+        if (t.type !== 'TERM' || t.quoted || !(t.isExact || t.isCaseSensitive) || !isRegexKey(t.value)) continue;
+        const flag = `${t.isExact ? '=' : ''}${t.isCaseSensitive ? '^' : ''}`;
+        out.push({
+            severity: 'warn', code: 'flag-on-pattern',
+            message: `Flag ${flag} makes this a literal; remove it if you want the expression, or use quotes to suppress this warning.`,
+        });
+    }
+
     for (const t of terms) {
         if (t.type !== 'REGEX') continue;
         const val = String(t.value);

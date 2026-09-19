@@ -83,6 +83,10 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('? /re/'), '', 'a lone regex is not no-terms');
     eq(codes('? /re/ -drill'), '', 'a regex is a positive contributor, so this is not negation-only');
     eq(codes('? /(/'), 'error:regex-invalid', 'a well-formed pattern new RegExp refuses is an error');
+    eq(codes('? =/re/'), 'warn:flag-on-pattern', 'a flag in front of a pattern makes a literal nobody means');
+    eq(codes('? ^/re/'), 'warn:flag-on-pattern', '...the case flag too');
+    eq(codes('? ="/re/"'), '', 'quoted, the literal is deliberate');
+    eq(codes('? =/re'), '', 'not a pattern shape, so a flagged literal is what it says');
     eq(codes('? /re'), '', 'an unterminated pattern is simply not a pattern');
     eq(codes('? //g'), '', '...and neither is an empty one');
     eq(countKey('? /re', 'anything /re', false, false), 1, '...it matches the characters, as the bare key does');

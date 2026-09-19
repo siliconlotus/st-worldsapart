@@ -152,7 +152,7 @@ There are a few things to watch out for:
 - A term is read as a regex only when it begins and ends with a forward slash; `? /24-7/` is a regex, `? 24/7` is four literal characters, `? /home/user/file` is also literal.
 - Regexes can be escaped with quotes; `? "/re/"` is literal four-character `/re/`.
 - Two (or more) regexes expect a space between them; `? /apples?/bananas?/` is one regex that contains apple with optional s, a literal forward slash, and banana with optional s.
-- A flag in front of a pattern makes it a literal: `? =/re/` is the whole-word term `/re/`, four characters, not a whole-word pattern. Write word boundaries inside the pattern instead.
+- A flag in front of a pattern makes it a literal: `? =/re/` is the whole-word term `/re/`, four characters, not a whole-word pattern. Write word boundaries inside the pattern instead; the validator warns when it sees this.
 
 For more on how a pattern itself matches — flags, folding, `\b`, anchors — see the [matching documentation](matching.md#regex-keys).
 
