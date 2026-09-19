@@ -19,8 +19,8 @@ export const packStore = {
     put: async (lang, pack) => {
         try {
             const r = await fetch('/api/files/upload', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ name: `wa-pack-${lang}.json`, data: toBase64(JSON.stringify(pack)) }) });
-            if (!r.ok) console.warn(`Worlds Apart: storing the ${lang} pack failed (${r.status}); it is in memory for this session`);
-        } catch (e) { console.warn('Worlds Apart: storing the pack failed', e); }
+            if (!r.ok) console.warn(`WorldsApart: storing the ${lang} pack failed (${r.status}); it is in memory for this session`);
+        } catch (e) { console.warn('WorldsApart: storing the pack failed', e); }
     },
 };
 

@@ -47,7 +47,7 @@ const LOGIC_OPTS = [
  *   Lab tab, `entry` opens that entry in the Explorer.
  */
 export async function lorebookStudio(preferredBook = null, open = null) {
-    if (!(world_names ?? []).length) { toastr.warning(t`No lorebooks found.`, 'Worlds Apart'); return ''; }
+    if (!(world_names ?? []).length) { toastr.warning(t`No lorebooks found.`, 'WorldsApart'); return ''; }
     ensureStudioStyle();
 
     /** The "additional lorebooks" a character carries: world_info.charLore, keyed by avatar filename.
@@ -334,7 +334,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const coreNum = id => ({ get: () => Number(el(id)?.value) || 0, set: v => { const e = el(id); if (e) { e.value = v; fire(e); } refreshGlobalTray(); } });
         const coreChk = (id, after) => ({ get: () => !!el(id)?.checked, set: v => { const e = el(id); if (e) { e.checked = v; fire(e); } after?.(); } });
         panel.append(
-            col(t`Worlds Apart (overrides core)`,
+            col(t`WorldsApart (overrides core)`,
                 numRow(t`Scan depth`, wa('messageDepth', '#wa_message_depth'), t`messages`, t`Recent messages WA scans / queries — overrides core scan depth`),
                 numRow(t`Budget cap`, wa('maxTokens', '#wa_max_tokens'), t`tokens`, t`Absolute token budget over all activated entries (0 = leave to core)`),
                 numRow(t`Budget %`, wa('maxTokensPercent', '#wa_max_tokens_pct'), t`% of max`, t`Token budget as a % of max prompt tokens (0 = off); tighter of the two wins`),
@@ -414,10 +414,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
 
         // UID is the entries-object key and the entry's identity, so this rebuilds data.entries.
-        if (data.originalData) { toastr.warning(t`UID renumbering is not available for character-embedded books.`, 'Worlds Apart'); return; }
-        if (start < 0) { toastr.warning(t`Start must be 0 or greater when renumbering UIDs.`, 'Worlds Apart'); return; }
+        if (data.originalData) { toastr.warning(t`UID renumbering is not available for character-embedded books.`, 'WorldsApart'); return; }
+        if (start < 0) { toastr.warning(t`Start must be 0 or greater when renumbering UIDs.`, 'WorldsApart'); return; }
         const plan = planUidReindex(data.entries, ordered.map(e => e.uid), start, desc);
-        if (plan.conflict != null) { toastr.warning(t`UID ${plan.conflict} is used by an unselected entry.`, 'Worlds Apart'); return; }
+        if (plan.conflict != null) { toastr.warning(t`UID ${plan.conflict} is used by an unselected entry.`, 'WorldsApart'); return; }
         const byUid = new Map(ordered.map(e => [e.uid, e]));
         const selUids = new Set(byUid.keys());
         const next = {};
@@ -427,7 +427,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
         entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
-        toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'Worlds Apart');
+        toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'WorldsApart');
     };
     const bulkDelete = async () => {
         const n = selectedEntries.size; if (!n) return;
@@ -445,26 +445,26 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         applyBulk(e => { if (!hasKey(e, term)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(term); added++; } });
         const skipped = n - added;
         const addedTxt = added === 1 ? t`“${term}” added to ${added} entry` : t`“${term}” added to ${added} entries`;
-        toastr[added ? 'success' : 'info'](added ? (skipped ? t`${addedTxt} (${skipped} already had it).` : `${addedTxt}.`) : t`Every selected entry already has “${term}”.`, 'Worlds Apart');
+        toastr[added ? 'success' : 'info'](added ? (skipped ? t`${addedTxt} (${skipped} already had it).` : `${addedTxt}.`) : t`Every selected entry already has “${term}”.`, 'WorldsApart');
     };
     // Undo restores by uid (a rescan rebuilds rows) and refuses if the book changed, since save() writes to `selected`.
     const bulkClearTerms = async () => {
         const sel = selectedList(); if (!sel.length) return;
         const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
-        if (!total) { toastr.info(t`The selected entries have no keys.`, 'Worlds Apart'); return; }
+        if (!total) { toastr.info(t`The selected entries have no keys.`, 'WorldsApart'); return; }
         const kwTxt = total === 1 ? t`${total} key` : t`${total} keys`;
         if (!await Popup.show.confirm(sel.length === 1 ? t`Delete all ${kwTxt} from ${sel.length} selected entry?` : t`Delete all ${kwTxt} from ${sel.length} selected entries?`, t`Undo is available for 20 seconds.`)) return;
         const book = selected, before = sel.map(e => [e.uid, Array.isArray(e.key) ? [...e.key] : []]);
         applyBulk(e => e.key = []);
         suggest = null; if (scan) { rebuildScan(); sel.forEach(x => renderEntry(x)); }
         const undo = () => {
-            if (selected !== book) { toastr.warning(t`That undo belongs to “${book}”. Reopen it first.`, 'Worlds Apart'); return; }
+            if (selected !== book) { toastr.warning(t`That undo belongs to “${book}”. Reopen it first.`, 'WorldsApart'); return; }
             let n = 0;
             for (const [uid, keys] of before) { const e = data?.entries?.[uid]; if (!e) continue; e.key = keys; n += keys.length; }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-            toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'Worlds Apart');
+            toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'WorldsApart');
         };
-        toastr.success(total === 1 ? t`Deleted ${total} key. Click to undo.` : t`Deleted ${total} keys. Click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
+        toastr.success(total === 1 ? t`Deleted ${total} key. Click to undo.` : t`Deleted ${total} keys. Click to undo.`, 'WorldsApart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
     };
     const menuBtn = (label, onClick, cls = '', style = '') => {
         const b = document.createElement('button'); b.type = 'button';
@@ -560,7 +560,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ? secondaryKeys({ keysecondary: [term], selectiveLogic: entry?.selectiveLogic }).length
             : usableKeys([term]).length;
         const err = usable ? null : problems.find(p => p.severity === 'error');
-        if (err) { toastr.warning(err.message, 'Worlds Apart', { timeOut: 8000 }); return false; }
+        if (err) { toastr.warning(err.message, 'WorldsApart', { timeOut: 8000 }); return false; }
         // One toast per code, not per instance.
         const byCode = new Map();
         for (const w of problems) {
@@ -569,7 +569,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (seen) seen.n++; else byCode.set(w.code, { message: w.message, n: 1 });
         }
         for (const { message, n } of byCode.values()) {
-            toastr.info(n > 1 ? t`${message} (${n} keys)` : message, 'Worlds Apart', { timeOut: 6000 });
+            toastr.info(n > 1 ? t`${message} (${n} keys)` : message, 'WorldsApart', { timeOut: 6000 });
         }
         return true;
     };
@@ -692,7 +692,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const s = ensureSuggest();
         const pe = s.perEntry.find(p => String(p.entry.uid) === String(e.uid));
         const fresh = (pe?.newRows ?? []).map(r => r.display).filter(x => !hasKey(e, x));
-        if (!fresh.length) { toastr.info(t`No TF-IDF suggestions for this entry.`, 'Worlds Apart'); return; }
+        if (!fresh.length) { toastr.info(t`No TF-IDF suggestions for this entry.`, 'WorldsApart'); return; }
         const g = getSugg(e.uid);
         const seen = new Set([...g.tfidf, ...g.llm].map(x => s.canon(x)));
         for (const x of fresh) { const c = s.canon(x); if (!seen.has(c)) { g.tfidf.push(x); seen.add(c); } }
@@ -720,9 +720,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const s = ensureSuggest();
         let cands;
         try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
-        catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); return; }
+        catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'WorldsApart'); return; }
         const added = mergeLlmCands(e, cands, s);
-        toastr[added ? 'success' : 'info'](added ? t`${wiTitleOf(e)}: +${added} from model` : t`Model returned nothing usable — click ✨ to retry.`, 'Worlds Apart');
+        toastr[added ? 'success' : 'info'](added ? t`${wiTitleOf(e)}: +${added} from model` : t`Model returned nothing usable — click ✨ to retry.`, 'WorldsApart');
         after(e);
     });
     const acceptSugg = (e, term, after = renderEntry) => {
@@ -795,14 +795,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const hits = kwHits(key);
         if (hits.length > 1 && !await Popup.show.confirm(t`Delete “${key}” from ${hits.length} entries?`, t`Removes the key everywhere it appears in this book.`)) return;
         const touched = deleteKey(Object.values(data.entries), key);
-        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Deleted “${key}” from ${touched} entry.` : t`Deleted “${key}” from ${touched} entries.`, 'Worlds Apart'); }
+        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Deleted “${key}” from ${touched} entry.` : t`Deleted “${key}” from ${touched} entries.`, 'WorldsApart'); }
     };
     const replaceKeyEverywhere = async key => {
         const next = (await Popup.show.input(t`Replace key`, t`Replace “${key}” across all entries with:`, key))?.trim();
         if (!next || next === key) return;   // exact-match only: a case-only rewrite is a real edit, not a no-op
         if (!keyWriteOk(next)) return;
         const touched = replaceKey(Object.values(data.entries), key, next);
-        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Replaced “${key}” → “${next}” in ${touched} entry.` : t`Replaced “${key}” → “${next}” in ${touched} entries.`, 'Worlds Apart'); }
+        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Replaced “${key}” → “${next}” in ${touched} entry.` : t`Replaced “${key}” → “${next}” in ${touched} entries.`, 'WorldsApart'); }
     };
     // A second term on every entry keyed `key` — the alias case.
     const addVariantEverywhere = async key => {
@@ -814,7 +814,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (added) { save(); keepScroll(renderExplorer); }
         toastr[added ? 'success' : 'info'](added
             ? (added === 1 ? t`“${term}” added to ${added} entry keyed “${key}”.` : t`“${term}” added to ${added} entries keyed “${key}”.`)
-            : t`Every entry keyed “${key}” already has “${term}”.`, 'Worlds Apart');
+            : t`Every entry keyed “${key}” already has “${term}”.`, 'WorldsApart');
     };
     const toggleIgnore = key => { ignoreSet.has(key) ? ignoreSet.delete(key) : ignoreSet.add(key); persistIgnore(); afterIgnoreChange([key]); };
     // Menus mount in this popup's <dialog> so they stack above the modal.
@@ -1075,7 +1075,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             logic.value = gated ? String(e.selectiveLogic ?? WI_LOGIC.AND_ANY) : 'off';
             logic.title = gated
                 ? t`How the secondary keys gate the primaries above. They never activate on their own.`
-                : t`Switched off: ST and Worlds Apart both ignore these keys. Pick an operator to gate on them again.`;
+                : t`Switched off: ST and WorldsApart both ignore these keys. Pick an operator to gate on them again.`;
             // A negation-only secondary changes meaning per operator with no visible change; warn at the moment it moves.
             const negOnly = e.keysecondary.filter(k => validateSmartKey(k).some(f => f.code === 'negation-only'));
             logic.addEventListener('change', () => {
@@ -1087,7 +1087,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     toastr.warning(logic.value === String(WI_LOGIC.AND_ANY)
                         ? t`${names} — a negation is satisfied by absence, so AND_ANY would never gate on it. Dropped under this operator; the key is kept, and counts again under any other.`
                         : t`${names} — ${op} negates the key again, so it now REQUIRES the term it excludes.`,
-                    'Worlds Apart', { timeOut: 9000 });
+                    'WorldsApart', { timeOut: 9000 });
                 }
                 save(); renderEntry(e);
             });
@@ -1235,7 +1235,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** New blank entry from core's createWorldInfoEntry — never a hand-rolled object, so the field set cannot drift. */
     const newEntry = () => {
         const ne = createWorldInfoEntry(selected, data);
-        if (!ne) { toastr.warning(t`Could not create an entry.`, 'Worlds Apart'); return; }
+        if (!ne) { toastr.warning(t`Could not create an entry.`, 'WorldsApart'); return; }
         save(); suggest = null; if (scan) rebuildScan();   // corpus changed -> ranker/scan stale
         entryOpen.add(ne.uid); expanded.add(ne.uid);
         renderExplorer();
@@ -1253,7 +1253,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // The copy sorts wherever its uid falls, often off-screen, so scroll to it and flash.
         const row = rowEls.get(ne.uid);
         if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('wa-flash'); setTimeout(() => row.classList.remove('wa-flash'), 1200); }
-        toastr.success(t`Entry duplicated.`, 'Worlds Apart');
+        toastr.success(t`Entry duplicated.`, 'WorldsApart');
     };
     const delEntry = async e => {
         if (!await deleteWorldInfoEntry(data, e.uid)) return;   // shows its own confirm
@@ -1265,7 +1265,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     // `withSelected` includes the open book, which a copy/move target must not offer.
     const pickBook = async (prompt, withSelected = false) => {
         const others = [...world_names].filter(n => withSelected || n !== selected).sort((a, b) => a.localeCompare(b));
-        if (!others.length) { toastr.info(t`No other lorebook to target.`, 'Worlds Apart'); return null; }
+        if (!others.length) { toastr.info(t`No other lorebook to target.`, 'WorldsApart'); return null; }
         const wrap = document.createElement('div');
         const lbl = document.createElement('div'); lbl.textContent = prompt; lbl.style.marginBottom = '6px';
         const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.width = '100%';
@@ -1287,7 +1287,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const target = await pickBook(deleteOriginal ? t`Move ${what} to:` : t`Copy ${what} to:`);
         if (!target) return;
         const tgt = await loadWorldInfo(target);
-        if (!tgt?.entries) { toastr.warning(t`Could not load “${target}”.`, 'Worlds Apart'); return; }
+        if (!tgt?.entries) { toastr.warning(t`Could not load “${target}”.`, 'WorldsApart'); return; }
         let maxDisplay = Object.values(tgt.entries).reduce((m, x) => Math.max(m, x.displayIndex ?? -1), -1);
         const copied = [];
         for (const e of list) {
@@ -1302,7 +1302,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); lastSel?.delete(e.uid); }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
         }
-        toastr.success(deleteOriginal ? t`Moved ${copied.length} to “${target}”.` : t`Copied ${copied.length} to “${target}”.`, 'Worlds Apart');
+        toastr.success(deleteOriginal ? t`Moved ${copied.length} to “${target}”.` : t`Copied ${copied.length} to “${target}”.`, 'WorldsApart');
     };
     const copyEntryTo = e => entriesToBook([e], false);
     const moveEntryTo = e => entriesToBook([e], true);
@@ -1369,8 +1369,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             onClosing: pp => {
                 if (pp.result !== POPUP_RESULT.AFFIRMATIVE || !inp) return true;
                 const v = inp.value.trim();
-                if (!v) { toastr.warning(t`Give the copy a name.`, 'Worlds Apart'); return false; }
-                if (nameTaken(v)) { toastr.warning(t`A lorebook named “${v}” already exists.`, 'Worlds Apart'); return false; }
+                if (!v) { toastr.warning(t`Give the copy a name.`, 'WorldsApart'); return false; }
+                if (nameTaken(v)) { toastr.warning(t`A lorebook named “${v}” already exists.`, 'WorldsApart'); return false; }
                 return true;
             },
         }).show();
@@ -1383,7 +1383,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!name) return;
         await updateWorldInfoList();
         renderBooks();
-        toastr.success(t`Duplicated to “${name}”.`, 'Worlds Apart');
+        toastr.success(t`Duplicated to “${name}”.`, 'WorldsApart');
         openBook(name);
     };
     const bulkCopyBooks = async () => {
@@ -1394,7 +1394,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         await updateWorldInfoList();
         selectedBooks.clear(); bookAnchor = null;
         renderBooks();
-        toastr.success(names.length === 1 ? t`Duplicated ${names.length} lorebook.` : t`Duplicated ${names.length} lorebooks.`, 'Worlds Apart');
+        toastr.success(names.length === 1 ? t`Duplicated ${names.length} lorebook.` : t`Duplicated ${names.length} lorebooks.`, 'WorldsApart');
     };
     // Deletes books, keeping snapshots for the nav undo bar; switches the open book away if it was among them.
     const deleteBooks = async names => {
@@ -1475,8 +1475,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (restored && !selected) selected = p.books.find(b => world_names.includes(b.name))?.name ?? null;
         renderBooks();
         if (selected) openBook(selected); else renderExplorer();
-        if (skipped.length) toastr.warning(t`Skipped ${skipped.length} (name already exists again): ${skipped.join(', ')}`, 'Worlds Apart');
-        if (restored) toastr.success(restored === 1 ? t`Restored ${restored} lorebook.` : t`Restored ${restored} lorebooks.`, 'Worlds Apart');
+        if (skipped.length) toastr.warning(t`Skipped ${skipped.length} (name already exists again): ${skipped.join(', ')}`, 'WorldsApart');
+        if (restored) toastr.success(restored === 1 ? t`Restored ${restored} lorebook.` : t`Restored ${restored} lorebooks.`, 'WorldsApart');
     };
     /**
      * Re-points one closed chat's binding by round-tripping the whole chat through /api/chats/get and /api/chats/save; ST has no metadata-only write.
@@ -1540,9 +1540,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const raw = await Popup.show.input(t`Rename lorebook`, t`New name:`, prefill ?? oldName);
         const newName = (raw ?? '').trim();
         if (!newName || newName === oldName) return;
-        if (world_names.some(n => n.toLowerCase() === newName.toLowerCase())) { toastr.warning(t`A lorebook with that name already exists.`, 'Worlds Apart'); return; }
+        if (world_names.some(n => n.toLowerCase() === newName.toLowerCase())) { toastr.warning(t`A lorebook with that name already exists.`, 'WorldsApart'); return; }
         const bookData = (oldName === selected) ? data : await loadWorldInfo(oldName);
-        if (!bookData) { toastr.warning(t`Could not load “${oldName}”.`, 'Worlds Apart'); return; }
+        if (!bookData) { toastr.warning(t`Could not load “${oldName}”.`, 'WorldsApart'); return; }
         const ctx = getContext();
         const wasSelected = selected_world_info.includes(oldName);
         const wasPersona = power_user.persona_description_lorebook === oldName;
@@ -1577,13 +1577,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (cards.moved.length) bits.push(cards.moved.length === 1 ? t`${cards.moved.length} character card` : t`${cards.moved.length} character cards`);
         const joined = bits.length === 2 ? t`${bits[0]} and ${bits[1]}` : bits[0];
         const also = bits.length ? ' ' + t`Re-pointed ${joined}.` : '';
-        toastr.success(t`Renamed to “${newName}”.` + also, 'Worlds Apart');
+        toastr.success(t`Renamed to “${newName}”.` + also, 'WorldsApart');
         const stuck = [...failed, ...cards.failed];
-        if (stuck.length) toastr.warning(t`Still bound to “${oldName}”: ${stuck.join(', ')}.`, 'Worlds Apart', { timeOut: 12000 });
+        if (stuck.length) toastr.warning(t`Still bound to “${oldName}”: ${stuck.join(', ')}.`, 'WorldsApart', { timeOut: 12000 });
     };
     // Batch TF-IDF into every entry's ⚡ chips; yields a frame first so the button can dim before the build.
     const suggestAll = btn => withBusy(btn, '0.5', async () => {
-        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'Worlds Apart'); return; }
+        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'WorldsApart'); return; }
         let n = 0;
         for (const pe of s.perEntry) {
             const e = data.entries[pe.entry.uid]; if (!e) continue;
@@ -1595,24 +1595,24 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             entryOpen.add(e.uid); n++;
         }
         renderExplorer();
-        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Suggestions added to ${n} entry — review the ⚡ chips.` : t`Suggestions added to ${n} entries — review the ⚡ chips.`) : t`No TF-IDF suggestions to add.`, 'Worlds Apart');
+        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Suggestions added to ${n} entry — review the ⚡ chips.` : t`Suggestions added to ${n} entries — review the ⚡ chips.`) : t`No TF-IDF suggestions to add.`, 'WorldsApart');
     });
 
     // One ✨ pass per visible non-empty entry, sequential: a small model serves one request at a time.
     const suggestAllLlm = btn => withBusy(btn, '0.5', async () => {
         const label = btn.innerHTML;
-        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'Worlds Apart'); return; }
+        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'WorldsApart'); return; }
         const targets = Object.values(data?.entries ?? {}).filter(filterMatch).filter(e => String(e.content ?? '').trim());
         let n = 0, i = 0;
         for (const e of targets) {
             btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i><small class="wa-rail-count">${++i}/${targets.length}</small>`;
             let cands; try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
-            catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); break; }
+            catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'WorldsApart'); break; }
             if (mergeLlmCands(e, cands, s)) { n++; entryOpen.add(e.uid); }
         }
         btn.innerHTML = label;
         renderExplorer();
-        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Model suggestions added to ${n} entry — review the ✨ chips.` : t`Model suggestions added to ${n} entries — review the ✨ chips.`) : t`Model returned nothing usable.`, 'Worlds Apart');
+        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Model suggestions added to ${n} entry — review the ✨ chips.` : t`Model suggestions added to ${n} entries — review the ✨ chips.`) : t`Model returned nothing usable.`, 'WorldsApart');
     });
 
     // The term tabs' entry set: type filter + the shared sort, without the search — those tabs rank by it (rankBySearch).
@@ -1973,7 +1973,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 unit = j.unit ?? unit;
                 via = 'server';
             } else {
-                console.warn('Worlds Apart: /scan-chats returned nothing, falling back to client-side scan', j);
+                console.warn('WorldsApart: /scan-chats returned nothing, falling back to client-side scan', j);
                 onDisk = [];
             }
         } else {
@@ -2037,7 +2037,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     const runChatScan = async (all = false, btn = null) => {
-        if (!scan) { toastr.info(t`Run the audit first.`, 'Worlds Apart'); return; }
+        if (!scan) { toastr.info(t`Run the audit first.`, 'WorldsApart'); return; }
         // The button shows the wait, as the audit button does; a toast for a lookup this short only lingers.
         const finding = () => findBookChats(all);
         const found = btn ? await withBusy(btn, '0.5', finding, '<i class="fa-solid fa-spinner fa-spin"></i>') : await finding();   // a rail square: the spinner alone
@@ -2049,14 +2049,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         if (!found.length) {
             toastr.warning(all ? t`No chats found.` : t`No chat is bound to “${selected}”. Shift-click to pick any chat.`,
-                'Worlds Apart', { timeOut: 9000 });
+                'WorldsApart', { timeOut: 9000 });
             return;
         }
 
         const picked = await pickChats(found);
         if (!picked?.length) return;
         const got = await scanChats(picked);
-        if (!got) { toastr.warning(t`Those chats returned no messages.`, 'Worlds Apart'); return; }
+        if (!got) { toastr.warning(t`Those chats returned no messages.`, 'WorldsApart'); return; }
         afterChatScan(got.keys);
     };
 
@@ -2070,12 +2070,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
         }
         rebuildScan();
-        console.log('Worlds Apart: audit evidence —', {
+        console.log('WorldsApart: audit evidence —', {
             book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, matching: got?.live ?? 0,
         });
         // Only the absence is worth saying: the bulk bar carries the counts when there are any.
-        if (!got && !chatHits) toastr.info(t`No chat is bound; scanned the book only.`, 'Worlds Apart', { timeOut: 6000 });
+        if (!got && !chatHits) toastr.info(t`No chat is bound; scanned the book only.`, 'WorldsApart', { timeOut: 6000 });
     };
 
     const cleanupGroups = () => {
@@ -2106,10 +2106,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 cleanupChecks.delete(id);
             }
         }
-        if (!removed.length) { toastr.info(t`Nothing selected.`, 'Worlds Apart'); return; }
+        if (!removed.length) { toastr.info(t`Nothing selected.`, 'WorldsApart'); return; }
         cleanupUndo = removed;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(removed.length === 1 ? t`Deleted ${removed.length} key.` : t`Deleted ${removed.length} keys.`, 'Worlds Apart');
+        toastr.success(removed.length === 1 ? t`Deleted ${removed.length} key.` : t`Deleted ${removed.length} keys.`, 'WorldsApart');
     };
     const undoPrune = () => {
         if (!cleanupUndo?.length) return;
@@ -2121,7 +2121,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         cleanupUndo = null;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'Worlds Apart');
+        toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'WorldsApart');
     };
     // Whitelists the ticked terms — persistent, where unticking spares a term for this run only.
     const ignoreChecked = () => {
@@ -2129,9 +2129,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         for (const g of cleanupGroups()) for (const r of g.rows) {
             if (cleanupChecks.get(rowId(g.entry.uid, r.term)) && !ignoreSet.has(r.term)) { ignoreSet.add(r.term); n++; }
         }
-        if (!n) { toastr.info(t`Nothing selected to ignore.`, 'Worlds Apart'); return; }
+        if (!n) { toastr.info(t`Nothing selected to ignore.`, 'WorldsApart'); return; }
         persistIgnore(); rebuildScan(); renderExplorer();
-        toastr.success(n === 1 ? t`Ignoring ${n} key in “${selected}”.` : t`Ignoring ${n} keys in “${selected}”.`, 'Worlds Apart');
+        toastr.success(n === 1 ? t`Ignoring ${n} key in “${selected}”.` : t`Ignoring ${n} keys in “${selected}”.`, 'WorldsApart');
     };
     // Both term tabs paint a working note, yield a frame, then run the synchronous pre-pass.
 
@@ -2166,7 +2166,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const showAllBtn = railBtn(cleanupShowAll ? 'fa-eye-slash' : 'fa-eye', showAllTitle(),
             () => { cleanupShowAll = !cleanupShowAll; showAllBtn.innerHTML = `<i class="fa-solid ${cleanupShowAll ? 'fa-eye-slash' : 'fa-eye'}"></i>`; showAllBtn.title = showAllTitle(); repaint(); });
         const chatsBtn = railBtn('fa-comments', t`Choose chats: pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.`,
-            ev => runChatScan(ev?.shiftKey, chatsBtn).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
+            ev => runChatScan(ev?.shiftKey, chatsBtn).catch(e => { console.error('WorldsApart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'WorldsApart'); }));
         const selectAllBtn = railBtn('fa-square-check', t`Select all visible`, () => { for (const id of allIds) cleanupChecks.set(id, true); sync(); });
         const deselectBtn = railBtn('fa-xmark', t`Deselect`, () => { for (const id of allIds) cleanupChecks.set(id, false); sync(); });
         const cog = trayBtn(); cog.style.width = ''; cog.style.padding = '';
@@ -2235,7 +2235,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
             // runAudit, not rebuildScan: an audit that gathered no chat evidence is a different audit from the Explorer's.
             try { await runAudit(); }
-            catch (error) { console.error('Worlds Apart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'Worlds Apart'); }
+            catch (error) { console.error('WorldsApart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'WorldsApart'); }
             auditBtn.title = auditTitle();   // a rail square: the word rides the tooltip
             refreshTabStatus();
         }
@@ -2490,7 +2490,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const applyToBook = async (world, mutate) => {
         const isOpen = world === selected;
         const book = isOpen ? data : await loadWorldInfo(world);
-        if (!book?.entries) { toastr.warning(t`Could not load “${world}”.`, 'Worlds Apart'); return 0; }
+        if (!book?.entries) { toastr.warning(t`Could not load “${world}”.`, 'WorldsApart'); return 0; }
         const touched = mutate(Object.values(book.entries), book);
         if (!touched) return 0;
         // Not while the Lab is up: renderExplorer rebuilds the tab, discarding the Lab's panes and run.
@@ -2525,7 +2525,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const n = await apply(es => deleteKey(es, key));
                 toastr[n ? 'success' : 'info'](n
                     ? (n === 1 ? t`Deleted “${key}” from ${n} entry.` : t`Deleted “${key}” from ${n} entries.`)
-                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'Worlds Apart');
+                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'WorldsApart');
             },
         },
         {
@@ -2536,7 +2536,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const n = await apply(es => replaceKey(es, key, next));
                 toastr[n ? 'success' : 'info'](n
                     ? (n === 1 ? t`Replaced “${key}” → “${next}” in ${n} entry.` : t`Replaced “${key}” → “${next}” in ${n} entries.`)
-                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'Worlds Apart');
+                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'WorldsApart');
             },
         },
         {
@@ -2548,7 +2548,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const n = await apply(es => addVariant(es, key, term));
                 toastr[n ? 'success' : 'info'](n
                     ? (n === 1 ? t`“${term}” added to ${n} entry keyed “${key}”.` : t`“${term}” added to ${n} entries keyed “${key}”.`)
-                    : t`Every entry in ${scopeLabel} keyed “${key}” already has “${term}”.`, 'Worlds Apart');
+                    : t`Every entry in ${scopeLabel} keyed “${key}” already has “${term}”.`, 'WorldsApart');
             },
         },
     ];
@@ -2568,7 +2568,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                         const held = e?.key?.find(k => kwNorm(k) === kwNorm(key));
                         return held && renameKeyOn(e, held, next) ? 1 : 0;
                     });
-                    if (n) toastr.success(t`“${key}” → “${next}”.`, 'Worlds Apart');
+                    if (n) toastr.success(t`“${key}” → “${next}”.`, 'WorldsApart');
                 },
             },
             {
@@ -2998,8 +2998,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const go = btn(g.cards.length === 1 ? t`Re-point card` : t`Re-point ${g.cards.length} cards`, async () => {
                     const target = sel.value; if (!target) return;
                     const r = await repointCards(g.name, target);
-                    if (r.moved.length) toastr.success(t`Re-pointed ${r.moved.join(', ')} to “${target}”.`, 'Worlds Apart');
-                    if (r.failed.length) toastr.warning(t`Could not re-point: ${r.failed.join(', ')}`, 'Worlds Apart', { timeOut: 12000 });
+                    if (r.moved.length) toastr.success(t`Re-pointed ${r.moved.join(', ')} to “${target}”.`, 'WorldsApart');
+                    if (r.failed.length) toastr.warning(t`Could not re-point: ${r.failed.join(', ')}`, 'WorldsApart', { timeOut: 12000 });
                     await refreshOrphans();
                 });
                 go.title = (g.cards.length === 1 ? t`Set the primary lorebook on this card to the chosen book.` : t`Set the primary lorebook on these cards to the chosen book.`)
@@ -3056,8 +3056,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                         if (c.file.replace(/\.jsonl$/, '') === open) { bad.push(t`${c.file} (open — switch away first)`); continue; }
                         (await repointOne(c, target)) ? ok++ : bad.push(c.file);
                     }
-                    if (ok) toastr.success(ok === 1 ? t`Re-pointed ${ok} chat to “${target}”.` : t`Re-pointed ${ok} chats to “${target}”.`, 'Worlds Apart');
-                    if (bad.length) toastr.warning(t`Could not re-point: ${bad.join(', ')}`, 'Worlds Apart', { timeOut: 12000 });
+                    if (ok) toastr.success(ok === 1 ? t`Re-pointed ${ok} chat to “${target}”.` : t`Re-pointed ${ok} chats to “${target}”.`, 'WorldsApart');
+                    if (bad.length) toastr.warning(t`Could not re-point: ${bad.join(', ')}`, 'WorldsApart', { timeOut: 12000 });
                     await refreshOrphans();
                 }));
                 box.append(bar);
@@ -3111,7 +3111,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scanBtn.title = (scan ? t`Re-audit: flag dead, common and short keys.` : t`Key audit: flag dead, common and short keys.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
         scanBtn.addEventListener('click', async () => {
             try { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); }
-            catch (error) { console.error('Worlds Apart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'Worlds Apart'); }
+            catch (error) { console.error('WorldsApart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'WorldsApart'); }
             renderExplorer();
         });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
@@ -3202,7 +3202,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         renderBooks();
         data = await loadWorldInfo(name);
         if (selected !== name) return;   // a faster second click won this race
-        if (!data?.entries) { toastr.warning(t`Could not load “${name}”.`, 'Worlds Apart'); return; }
+        if (!data?.entries) { toastr.warning(t`Could not load “${name}”.`, 'WorldsApart'); return; }
         const s = settings(); if (!s.keywordIgnore) s.keywordIgnore = {};
         ignoreSet = new Set(s.keywordIgnore[name] ?? []);
         renderExplorer();

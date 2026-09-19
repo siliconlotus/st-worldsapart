@@ -55,7 +55,7 @@ let store = null;
 
 /** The live WA settings object; throws if read before ensureSettings. */
 export function settings() {
-    if (!store) throw new Error('Worlds Apart: settings() read before ensureSettings() bound ST\'s store');
+    if (!store) throw new Error('WorldsApart: settings() read before ensureSettings() bound ST\'s store');
     return store[MODULE_NAME];
 }
 

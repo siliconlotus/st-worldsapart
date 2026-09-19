@@ -555,10 +555,10 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 /** A plugin route failed, or answered without a field the extension reads: the caller takes the no-plugin path for that call.
  *  The route and cause go to the console every time; the toast fires once per load, and the delivery panel shows the state. */
 export function pluginFallback(route, cause) {
-    console.warn(`Worlds Apart: plugin ${route} failed (${String(cause?.message ?? cause)}), taking the no-plugin path`);
+    console.warn(`WorldsApart: plugin ${route} failed (${String(cause?.message ?? cause)}), taking the no-plugin path`);
     if (runState.pluginFailures.has(route)) return;
     const first = !runState.pluginFailures.size;
     runState.pluginFailures.add(route);
-    if (first) toastr.warning(t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Redeploy the plugin and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+    if (first) toastr.warning(t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Redeploy the plugin and restart SillyTavern.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
     document.dispatchEvent(new CustomEvent('wa-plugin-fallback'));   // a new route repaints the settings bar's list
 }

@@ -1,4 +1,4 @@
-// server.js — Worlds Apart server plugin (source); /plugins/worlds-apart/ is the generated copy, so edit here and
+// server.js — WorldsApart server plugin (source); /plugins/worlds-apart/ is the generated copy, so edit here and
 // `node deploy-plugin.mjs`. Mounts at /api/plugins/worlds-apart; imports ST internals (src/vectors/*) by relative path.
 
 import path from 'node:path';
@@ -39,7 +39,7 @@ const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => read
 
 export const info = {
     id: 'worlds-apart',
-    name: 'Worlds Apart',
+    name: 'WorldsApart',
     description: 'Mean-centered vector search for World Info retrieval.',
 };
 
@@ -74,11 +74,11 @@ async function embed(source, s, text, directories, request) {
         }
         case 'webllm': case 'koboldcpp':
             // Vector Storage embeds these in the browser; thrown so the client falls back.
-            throw new Error(`Worlds Apart: source "${source}" embeds in the browser — the plugin cannot embed a query for it.`);
+            throw new Error(`WorldsApart: source "${source}" embeds in the browser — the plugin cannot embed a query for it.`);
         case 'openai': case 'togetherai': case 'mistral': case 'chutes': case 'electronhub': case 'nanogpt': case 'openrouter':
             return await openAiish();
         default:
-            throw new Error(`Worlds Apart: no embedding route for source "${source}" — `
+            throw new Error(`WorldsApart: no embedding route for source "${source}" — `
                 + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
     }
 }
@@ -119,7 +119,7 @@ function centroidFor(loaded, uids) {
     const subset = loaded.items.filter(it => wanted.has(Number(it.metadata?.index)));
     const mean = subset.length ? corpusMean(subset) : loaded.mean;
     loaded.subsetMeans.set(key, mean);
-    console.log(`[Worlds Apart] centroid over ${subset.length}/${loaded.items.length} chunks (${wanted.size} entries define the corpus)`);
+    console.log(`[WorldsApart] centroid over ${subset.length}/${loaded.items.length} chunks (${wanted.size} entries define the corpus)`);
     return mean;
 }
 
@@ -150,12 +150,12 @@ async function loadCentered(indexPath) {
 
     const mean = corpusMean(items);
     const unusable = items.length - items.filter(it => rowDim(it?.vector)).length;
-    if (unusable) console.warn(`[Worlds Apart] skipped ${unusable} of ${items.length} chunks with a missing or foreign-dimension vector — re-sync the book, or delete the collection if it was embedded under another model`);
+    if (unusable) console.warn(`[WorldsApart] skipped ${unusable} of ${items.length} chunks with a missing or foreign-dimension vector — re-sync the book, or delete the collection if it was embedded under another model`);
     const loaded = { items, mean, mtimeMs, size };
 
     meanCache.set(indexPath, loaded);
     while (meanCache.size > MEAN_CACHE_MAX) meanCache.delete(meanCache.keys().next().value);
-    console.log(`[Worlds Apart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}`);
+    console.log(`[WorldsApart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}`);
 
     return loaded;
 }
@@ -211,7 +211,7 @@ export async function init(router) {
             // Pool to entries FIRST, then cut, so topK counts entries.
             return response.send(selectTopK(poolEntries(results), topK));
         } catch (error) {
-            console.error('[Worlds Apart] query failed:', error);
+            console.error('[WorldsApart] query failed:', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     });
@@ -282,7 +282,7 @@ export async function init(router) {
             }
             return response.send({ counts, typed, messages, unit, scanned, missing, partial });
         } catch (error) {
-            console.error('Worlds Apart: /scan-chats failed', error);
+            console.error('WorldsApart: /scan-chats failed', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     }
@@ -325,7 +325,7 @@ export async function init(router) {
             }
             return response.send({ bindings, chats });
         } catch (error) {
-            console.error('Worlds Apart: /chat-bindings failed', error);
+            console.error('WorldsApart: /chat-bindings failed', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     });
@@ -352,7 +352,7 @@ export async function init(router) {
             }
             return response.send(out);
         } catch (error) {
-            console.error('[Worlds Apart] collections failed:', error);
+            console.error('[WorldsApart] collections failed:', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     });
@@ -392,10 +392,10 @@ export async function init(router) {
                 for (const it of found.values()) await target.insertItem({ vector: it.vector, metadata: it.metadata });
                 await target.endUpdate();
             }
-            console.log(`[Worlds Apart] ${collectionId}: adopted ${found.size}/${wanted.size} chunks from sibling collections`);
+            console.log(`[WorldsApart] ${collectionId}: adopted ${found.size}/${wanted.size} chunks from sibling collections`);
             return response.send({ adopted: [...found.keys()] });
         } catch (error) {
-            console.error('[Worlds Apart] adopt failed:', error);
+            console.error('[WorldsApart] adopt failed:', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     });
@@ -404,7 +404,7 @@ export async function init(router) {
         response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT });
     });
 
-    console.log('[Worlds Apart] server plugin ready at /api/plugins/worlds-apart');
+    console.log('[WorldsApart] server plugin ready at /api/plugins/worlds-apart');
 }
 
 export async function exit() {

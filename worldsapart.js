@@ -129,7 +129,7 @@ async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
     });
 
     if (!response.ok) {
-        throw new Error(`Worlds Apart: /api/vector/${route} failed with ${response.status}`);
+        throw new Error(`WorldsApart: /api/vector/${route} failed with ${response.status}`);
     }
 
     return response.status === 200 && response.headers.get('content-type')?.includes('json')
@@ -154,7 +154,7 @@ async function hasPlugin() {
         runState.pluginAvailable = false;
     }
 
-    console.log(`Worlds Apart: server plugin ${runState.pluginAvailable ? 'detected — mean-centered search available' : 'not found, using stock vector search'}`);
+    console.log(`WorldsApart: server plugin ${runState.pluginAvailable ? 'detected — mean-centered search available' : 'not found, using stock vector search'}`);
     return runState.pluginAvailable;
 }
 
@@ -169,7 +169,7 @@ async function computeSourceFingerprint() {
                 .then(r => { if (!r.ok) throw new Error(`${src}: ${r.status}`); return r.text(); })),
         );
         runState.sourceFP = pluginFingerprint(...texts);
-    } catch (error) { console.warn('Worlds Apart: could not fingerprint the plugin source, drift unknown —', error); runState.sourceFP = null; }
+    } catch (error) { console.warn('WorldsApart: could not fingerprint the plugin source, drift unknown —', error); runState.sourceFP = null; }
     return runState.sourceFP;
 }
 
@@ -317,7 +317,7 @@ async function syncWorld(world, entries) {
             const adopted = new Set(j.adopted);
             if (adopted.size) {
                 newItems = newItems.filter(x => !adopted.has(x.hash));
-                console.log(`Worlds Apart: adopted ${adopted.size} chunks for "${world}" from another collection under the same model`);
+                console.log(`WorldsApart: adopted ${adopted.size} chunks for "${world}" from another collection under the same model`);
             }
         } catch (error) {
             pluginFallback('adopt', error);
@@ -325,11 +325,11 @@ async function syncWorld(world, entries) {
     }
 
     if (newItems.length) {
-        console.log(`Worlds Apart: embedding ${newItems.length} new chunks for "${world}"`);
+        console.log(`WorldsApart: embedding ${newItems.length} new chunks for "${world}"`);
         let announced = false;
         const slow = setTimeout(() => {
             announced = true;
-            toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'Worlds Apart', { timeOut: 15000 });
+            toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'WorldsApart', { timeOut: 15000 });
         }, 3000);
         const started = Date.now();
         try {
@@ -338,11 +338,11 @@ async function syncWorld(world, entries) {
             clearTimeout(slow);
         }
         const secs = Math.round((Date.now() - started) / 1000);
-        if (announced) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'Worlds Apart', { timeOut: 5000 });
+        if (announced) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'WorldsApart', { timeOut: 5000 });
     }
 
     if (staleHashes.length) {
-        console.log(`Worlds Apart: dropping ${staleHashes.length} stale chunks for "${world}"`);
+        console.log(`WorldsApart: dropping ${staleHashes.length} stale chunks for "${world}"`);
         await vectorPost('delete', { collectionId, hashes: staleHashes });
     }
 
@@ -365,10 +365,10 @@ function bookIndexes(world, entries, { names = false } = {}) {
     const fresh = { fingerprint, index, nameDf };
     contentIndexes.set(world, fresh);
     if (hit?.fingerprint !== fingerprint) {
-        console.log(`Worlds Apart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
+        console.log(`WorldsApart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
     }
     if (names && nameDf && nameDf !== hit?.nameDf) {
-        console.log(`Worlds Apart: name index for "${world}" — ${nameDf.ndoc} entries, ${nameDf.df.size} distinct names`);
+        console.log(`WorldsApart: name index for "${world}" — ${nameDf.ndoc} entries, ${nameDf.df.size} distinct names`);
     }
     return fresh;
 }
@@ -411,7 +411,7 @@ async function reportOrphanCollections() {
     if (!found) return t`Needs the server plugin.`;
     const { unclaimed, staleConfig, live, bytes } = found;
     const table = rows => rows.map(c => ({ collection: c.collectionId, source: c.source, model: c.model, size: mib(c.bytes), lastWritten: new Date(c.mtimeMs).toISOString().slice(0, 10) }));
-    console.log(`%cWorlds Apart · vector collections — ${mib(bytes)} total`, 'font-weight: bold');
+    console.log(`%cWorldsApart · vector collections — ${mib(bytes)} total`, 'font-weight: bold');
     if (live.length) { console.log(`in use by a book you still have, at the current source/model (${live.length}):`); console.table(table(live)); }
     if (staleConfig.length) { console.log(`the book still exists, but these were built under another source or model (${staleConfig.length}) — switching back would use them again:`); console.table(table(staleConfig)); }
     if (unclaimed.length) { console.log(`NO lorebook hashes to these (${unclaimed.length}) — renamed or deleted books. Nothing will ever read them again:`); console.table(table(unclaimed)); }
@@ -443,21 +443,21 @@ function loadRelevanceModel() {
                 const m = file?.byModel?.[key] ?? file?.byModel?.[UNFITTED_FALLBACK] ?? file?.noCosine ?? null;
                 if (m) m.noCosine = file?.noCosine ?? null;
                 if (m && !file?.byModel?.[key]) {
-                    console.warn(`Worlds Apart: no ${tier} relevance fit for embedding model "${key}" — `
+                    console.warn(`WorldsApart: no ${tier} relevance fit for embedding model "${key}" — `
                         + `scoring through "${UNFITTED_FALLBACK}"'s (have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}). `
                         + 'Fit this one with eval/relevance-regress.mjs --emit-model.');
                 }
                 if (!m) {
-                    console.warn(`Worlds Apart: no ${tier} relevance model for embedding model "${key}" `
+                    console.warn(`WorldsApart: no ${tier} relevance model for embedding model "${key}" `
                         + `(have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}) — that tier's E[credit] will not be scored, `
                         + `so nothing is cut on relevance. Fit one with eval/relevance-regress.mjs --emit-model.`);
                     return [tier, null];
                 }
-                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, fitted under ${m.embedModel} (its own best cutoff was ${m.cutoff}; the cut runs at the relevanceCutoff setting)`);
+                console.log(`WorldsApart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, fitted under ${m.embedModel} (its own best cutoff was ${m.cutoff}; the cut runs at the relevanceCutoff setting)`);
                 return [tier, m];
             })
             .catch((e) => {
-                console.warn(`Worlds Apart: no ${tier} relevance model, that tier's E[credit] will not be scored —`, e.message);
+                console.warn(`WorldsApart: no ${tier} relevance model, that tier's E[credit] will not be scored —`, e.message);
                 return [tier, null];
             })))
         .then((pairs) => {
@@ -514,7 +514,7 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
     if (runState.verboseRun) {
         const scored = items.filter(it => Number.isFinite(it.eCredit));
         const cuts = Object.entries(models).filter(([, m]) => m).map(([t]) => `${t} >= ${settings().relevanceCutoff}`).join(', ');
-        console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
+        console.log(`%cWorldsApart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
         console.table([...scored]
             .sort((a, b) => b.eCredit - a.eCredit)
             .map(it => ({
@@ -567,11 +567,11 @@ async function queryTermWeights(searchText, { log = true, entries = null } = {})
     const termWeights = buildTermWeights(searchText, gazetteer);
 
     if (log) {
-        console.log(`Worlds Apart: entity filter kept ${Object.keys(termWeights).length} terms (gazetteer has ${gazetteer.size})`);
+        console.log(`WorldsApart: entity filter kept ${Object.keys(termWeights).length} terms (gazetteer has ${gazetteer.size})`);
 
         if (runState.verboseRun) {
             const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-            console.log(`%cWorlds Apart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
+            console.log(`%cWorldsApart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
             console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
         }
     }
@@ -661,7 +661,7 @@ async function scoreEntriesUnsafe(searchText) {
     }
 
     if (rankOnly) {
-        console.warn(`Worlds Apart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
+        console.warn(`WorldsApart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
             + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
             + 'Check that the server plugin is loaded and that its query is not failing.');
     }
@@ -675,9 +675,9 @@ function reportVectorCandidates(scores, targets, searchText) {
     const rows = [...scores.entries()].sort((a, b) => b[1].score - a[1].score);
     const spread = rows[0][1].score - rows[Math.min(4, rows.length - 1)][1].score;
 
-    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '\u2026' : ''}" (${searchText.length} chars)`);
-    console.log(`Worlds Apart: ${rows.length} entries scored, cosine order, top-5 spread ${spread.toFixed(5)}`);
-    console.log('%cWorlds Apart \u00b7 /wa-query \u2014 every scored entry by cosine, best first', 'font-weight: bold');
+    console.log(`WorldsApart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '\u2026' : ''}" (${searchText.length} chars)`);
+    console.log(`WorldsApart: ${rows.length} entries scored, cosine order, top-5 spread ${spread.toFixed(5)}`);
+    console.log('%cWorldsApart \u00b7 /wa-query \u2014 every scored entry by cosine, best first', 'font-weight: bold');
     console.table(rows.map(([key, value], index) => ({
         gap: index > 0 ? Number((rows[index - 1][1].score - value.score).toFixed(6)) : null,
         title: byKey.get(key)?.comment,
@@ -700,12 +700,12 @@ async function retrieve(chat) {
     const rawText = query.joinQueryMessages(queryChat);
 
     if (!rawText) {
-        console.log('Worlds Apart: no query text, skipping retrieval');
+        console.log('WorldsApart: no query text, skipping retrieval');
         return [];
     }
 
     const searchText = rawText;
-    console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
+    console.log(`WorldsApart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
 
     // Before the empties below: a keyword-only scene is still gradeable against the query.
     runState.lastQuery = searchText;
@@ -716,11 +716,11 @@ async function retrieve(chat) {
     const { targets, scores, retrieved } = await scoreEntries(searchText);
 
     if (!targets.length) {
-        console.log('Worlds Apart: no entries with content in the active books, so retrieval has nothing to score');
+        console.log('WorldsApart: no entries with content in the active books, so retrieval has nothing to score');
         return [];
     }
     if (!retrieved.size) {
-        console.log('Worlds Apart: the query matched no chunk in any collection');
+        console.log('WorldsApart: the query matched no chunk in any collection');
         return [];
     }
 
@@ -764,7 +764,7 @@ const reportedFailures = new Set();
  * @param {'error'|'warning'} [severity]
  */
 function reportFailure(stage, consequence, error, severity = 'error', loud = false) {
-    console.error(`Worlds Apart: ${stage} — ${consequence}`, error);
+    console.error(`WorldsApart: ${stage} — ${consequence}`, error);
     const cause = String(error?.message ?? error);
     const key = `${stage}␟${cause}`;
     if (!loud && reportedFailures.has(key)) return;
@@ -775,7 +775,7 @@ function reportFailure(stage, consequence, error, severity = 'error', loud = fal
         [escapeHtml(consequence),
             escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
             t`See the browser console for the full trace.`].join('<br><br>'),
-        `Worlds Apart: ${stage}`,
+        `WorldsApart: ${stage}`,
         { timeOut: loud ? 0 : 20000, extendedTimeOut: loud ? 0 : 15000, escapeHtml: false, closeButton: true, tapToDismiss: !loud },
     );
 }
@@ -826,7 +826,7 @@ async function selectAndActivate(chat, token) {
 
     const activated = [...winners, ...union];
     if (activated.length) {
-        console.log(`Worlds Apart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
+        console.log(`WorldsApart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
     if (superseded()) return;
@@ -1206,7 +1206,7 @@ async function feedScanLoop(args) {
             runState.waMatched.add(`${e.world}.${e.uid}`);
             e.waTriggerDepth = runState.waRecursionDepth;
         }
-        console.log(`Worlds Apart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
+        console.log(`WorldsApart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
     }
 }
@@ -1241,7 +1241,7 @@ async function coreSelection() {
         // A copy: an interceptor may rearrange what it is handed.
         if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
             try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
-            catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
+            catch (error) { console.warn('WorldsApart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
         }
         // Strings, as `checkWorldInfo` takes them; `vectors_rearrangeChat` above wanted message objects.
         core = await checkWorldInfo(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
@@ -1263,7 +1263,7 @@ async function onScanDone(args) {
     const activated = args?.activated?.entries;
 
     // Silent except under /wa-dry, which otherwise could not tell an empty selection from a declined scan.
-    const skip = reason => { if (runState.dryRunInProgress) console.warn(`Worlds Apart: did not rank this scan — ${reason}.`); };
+    const skip = reason => { if (runState.dryRunInProgress) console.warn(`WorldsApart: did not rank this scan — ${reason}.`); };
 
     if (!(activated instanceof Map)) {
         skip('the scan carried no activation map');
@@ -1334,7 +1334,7 @@ async function rankOwnedScan(activated, args, skip) {
         if (postDates(entry, at)) { activated.delete(key); postDated++; }
     }
     if (postDated) {
-        console.log(`Worlds Apart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
+        console.log(`WorldsApart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
     }
 
     const items = [...activated.entries()].map(([key, entry]) => {
@@ -1415,9 +1415,9 @@ async function rankOwnedScan(activated, args, skip) {
             .map(x => ({ name: String(x?.name ?? ''), mes: String(x?.mes ?? '') }));
 
         if (runState.verboseRun) {
-            console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
+            console.log('%cWorldsApart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
             console.log(Object.fromEntries([...windowFor.windows]));
-            console.log('%cWorlds Apart · recursion buffer — the entry contents stage 3 appended to every window', 'font-weight: bold');
+            console.log('%cWorldsApart · recursion buffer — the entry contents stage 3 appended to every window', 'font-weight: bold');
             console.log(runState.waRecursionTexts);
         }
     }
@@ -1458,7 +1458,7 @@ async function rankOwnedScan(activated, args, skip) {
         activated.delete(it.key);
     }
     if (relevanceCutRows.length) {
-        console.log(`Worlds Apart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
+        console.log(`WorldsApart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
             + (promoted.length ? ` (${promoted.length} promoted entr${promoted.length === 1 ? 'y was' : 'ies were'} exempt)` : ''));
     }
 
@@ -1505,7 +1505,7 @@ async function rankOwnedScan(activated, args, skip) {
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
             ].filter(Boolean).join(', ');
             const exempt = survivors.size - counted;
-            console.log(`Worlds Apart: budget dropped ${dropped} entries — ${caps}${exempt ? `, plus ${exempt} ignoreBudget (uncapped)` : ''}, ${survivors.size} in prompt`);
+            console.log(`WorldsApart: budget dropped ${dropped} entries — ${caps}${exempt ? `, plus ${exempt} ignoreBudget (uncapped)` : ''}, ${survivors.size} in prompt`);
         }
 
         runState.lastSkipped = skipped;
@@ -1583,7 +1583,7 @@ async function rankOwnedScan(activated, args, skip) {
         runState.lastCandidates = rows.map((row, i) => ({ ...row, book: population[i].entry.world, why: population[i].keywordWhy }));
         runState.lastCandidateEntries = population.map(x => x.entry);
 
-        console.log('%cWorlds Apart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit]; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
+        console.log('%cWorldsApart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit]; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
         console.table(rows);
     }
 
@@ -1604,20 +1604,20 @@ async function dryRun(verbose = false) {
 
     // The only gate on this path: with WA off a dry run would half-run, force-activating into a scan WA does not own.
     if (!settings().enabled) {
-        toastr.warning(t`Worlds Apart is disabled — turn it on to run a dry run.`, 'Worlds Apart');
+        toastr.warning(t`WorldsApart is disabled — turn it on to run a dry run.`, 'WorldsApart');
         return '';
     }
 
     if (!chat.length) {
-        toastr.warning(rawChat.length ? t`Every message in this chat is hidden.` : t`No chat to scan.`, 'Worlds Apart');
+        toastr.warning(rawChat.length ? t`Every message in this chat is hidden.` : t`No chat to scan.`, 'WorldsApart');
         return '';
     }
 
-    console.log(`%cWorlds Apart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
+    console.log(`%cWorldsApart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
     // Version and fingerprints stay out of paramSnapshot: a bundle carries them in SHARED_FIELDS, and recording them twice would let the two disagree.
-    console.log(`Worlds Apart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
+    console.log(`WorldsApart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
     const identity = await extensionIdentity();
-    if (identity) console.log(`Worlds Apart: ${identity}`);
+    if (identity) console.log(`WorldsApart: ${identity}`);
 
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
@@ -1760,7 +1760,7 @@ const POSITION_NAMES = ['before char', 'after char', 'AN top', 'AN bottom', '@de
 /** Prints the last scan's selection in prompt order, grouped by `position` first: core assembles each position into its own block. */
 async function reportLayout(verbose = false, countTokens = true) {
     if (!runState.lastPromptOrder.length) {
-        console.log('Worlds Apart: nothing activated.');
+        console.log('WorldsApart: nothing activated.');
         return;
     }
 
@@ -1807,7 +1807,7 @@ async function reportLayout(verbose = false, countTokens = true) {
     rows.sort((a, b) => a._pos - b._pos || a.waOrder - b.waOrder);
     rows.forEach(row => delete row._pos);
 
-    console.log(`%cWorlds Apart · selected — what reaches the prompt, in prompt order (grouped by position, then order): ${rows.length} entries${countTokens ? `, ${total} World Info tokens` : ''}`, 'font-weight: bold');
+    console.log(`%cWorldsApart · selected — what reaches the prompt, in prompt order (grouped by position, then order): ${rows.length} entries${countTokens ? `, ${total} World Info tokens` : ''}`, 'font-weight: bold');
     console.table(rows);
 
     if (runState.lastSkipped.length) {
@@ -1815,7 +1815,7 @@ async function reportLayout(verbose = false, countTokens = true) {
         const tail = runState.lastSkipped.filter(x => x.tail);
 
         if (nearMiss.length) {
-            console.log(`%cWorlds Apart · skipped (fixable) — budget was still available, so an edit or a bigger cap changes the outcome: ${nearMiss.length} entries`, 'font-weight: bold');
+            console.log(`%cWorldsApart · skipped (fixable) — budget was still available, so an edit or a bigger cap changes the outcome: ${nearMiss.length} entries`, 'font-weight: bold');
             console.table(nearMiss.map(({ item, tokens, blockedBy }) => ({
                 blockedBy: blockedBy.map(x => x.cap).join(' + '),
                 tokens,
@@ -1836,7 +1836,7 @@ async function reportLayout(verbose = false, countTokens = true) {
                 ?.blockedBy.find(y => y.cap === 'tokens')?.remaining;
             const toFitAll = remaining === undefined ? null : Math.max(0, sum - remaining);
 
-            console.log(`%cWorlds Apart · cut (exhausted) — ${caps} used up, nothing here fits: ${tail.length} entries, smallest is ${smallest} tokens, ${sum.toLocaleString()} in total${toFitAll === null ? '' : ` (raise the budget by ${toFitAll.toLocaleString()} to fit them all)`}`, 'font-weight: bold');
+            console.log(`%cWorldsApart · cut (exhausted) — ${caps} used up, nothing here fits: ${tail.length} entries, smallest is ${smallest} tokens, ${sum.toLocaleString()} in total${toFitAll === null ? '' : ` (raise the budget by ${toFitAll.toLocaleString()} to fit them all)`}`, 'font-weight: bold');
             console.table(tail.map(({ item, tokens }) => ({
                 tokens,
                 eCredit: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
@@ -1852,7 +1852,7 @@ async function probeQuery(_named, text) {
     const searchText = String(text ?? '').trim();
 
     if (!searchText) {
-        toastr.warning(t`Provide query text: /wa-query your text here`, 'Worlds Apart');
+        toastr.warning(t`Provide query text: /wa-query your text here`, 'WorldsApart');
         return '';
     }
 
@@ -1860,8 +1860,8 @@ async function probeQuery(_named, text) {
 
     if (!scores.size) {
         console.log(retrieved.size
-            ? `Worlds Apart: ${retrieved.size} entr(ies) came back with no cosine for "${searchText.slice(0, 60)}…" — the no-plugin path answered, so there is no table to print`
-            : `Worlds Apart: the query matched no chunk for "${searchText.slice(0, 60)}…"`);
+            ? `WorldsApart: ${retrieved.size} entr(ies) came back with no cosine for "${searchText.slice(0, 60)}…" — the no-plugin path answered, so there is no table to print`
+            : `WorldsApart: the query matched no chunk for "${searchText.slice(0, 60)}…"`);
         return '';
     }
 
@@ -1886,7 +1886,7 @@ function effectiveTokenBudget() {
 
 const SETTINGS_HTML = `
 <style>
-/* Nested WA sub-sections read as subordinate to the top "Worlds Apart" header: indented, lighter,
+/* Nested WA sub-sections read as subordinate to the top "WorldsApart" header: indented, lighter,
    smaller, with a left rule — so they don't look like their own top-level drawers. */
 .worlds-apart-settings .wa-section { margin-left: 12px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-left: 8px; }
 /* Every item under the top header is indented the same as a section is, so top-level and section items read as one level each. */
@@ -1913,7 +1913,7 @@ const SETTINGS_HTML = `
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b data-i18n="Worlds Apart">Worlds Apart</b>
+            <b data-i18n="WorldsApart">WorldsApart</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -2090,12 +2090,12 @@ function populateProfiles(notify = false) {
     $('#wa_llm_profile').val(stillExists ? selected : '');
 
     if (!stillExists) {
-        console.warn(`Worlds Apart: saved LLM profile "${selected}" no longer exists, falling back to the current API`);
-        toastr.warning(t`Saved LLM profile no longer exists.`, 'Worlds Apart');
+        console.warn(`WorldsApart: saved LLM profile "${selected}" no longer exists, falling back to the current API`);
+        toastr.warning(t`Saved LLM profile no longer exists.`, 'WorldsApart');
     }
 
     if (notify) {
-        toastr.info(t`${profiles.length} profile(s) loaded.`, 'Worlds Apart');
+        toastr.info(t`${profiles.length} profile(s) loaded.`, 'WorldsApart');
     }
 }
 
@@ -2157,7 +2157,7 @@ function ensureDeliveryPanel() {
 
     deliveryTrigger = document.createElement('div');
     deliveryTrigger.className = 'wa-delivery-trigger fa-solid fa-fw fa-book-atlas';
-    deliveryTrigger.title = t`Worlds Apart — delivered this turn`;
+    deliveryTrigger.title = t`WorldsApart — delivered this turn`;
     deliveryTrigger.dataset.count = '0';
     deliveryPanel = document.createElement('div');
     deliveryPanel.className = 'wa-delivery-panel';
@@ -2247,8 +2247,8 @@ export async function init() {
     try {
         await initBody();
     } catch (error) {
-        console.error('Worlds Apart: init failed — the extension is partially active', error);
-        toastr.error(t`Worlds Apart failed to initialize — see the browser console.`, 'Worlds Apart');
+        console.error('WorldsApart: init failed — the extension is partially active', error);
+        toastr.error(t`WorldsApart failed to initialize — see the browser console.`, 'WorldsApart');
     }
 }
 
@@ -2275,7 +2275,7 @@ async function initBody() {
     updateEmbedInfo();   // refresh on drawer open so it tracks Vector Storage changes made mid-session
     $('#wa_embed_info').closest('.inline-drawer').children('.inline-drawer-toggle').on('click', updateEmbedInfo);
 
-    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="Worlds Apart — Lorebook Studio: manage all lorebooks and entries" data-i18n="[title]Worlds Apart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
+    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="WorldsApart — Lorebook Studio: manage all lorebooks and entries" data-i18n="[title]WorldsApart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
@@ -2308,7 +2308,7 @@ async function initBody() {
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();
         // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
-        if (pluginDrifted()) toastr.warning(t`Server plugin is out of date. Redeploy it and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+        if (pluginDrifted()) toastr.warning(t`Server plugin is out of date. Redeploy it and restart SillyTavern.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
     });
     bind('#wa_debug_log', 'debugLog', 'checked');
     document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
@@ -2422,7 +2422,7 @@ async function initBody() {
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many of WA\u2019s ranked entries to carry beyond the two delivered sets, for grading depth', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
         ],
-        helpString: 'Worlds Apart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Runs /wa-debug first, prints the difference, and downloads an ordinary two-arm capture bundle \u2014 grade it with Review bundles, apply with eval/synthetic-data/apply-review.mjs, then score with eval/versus-score.mjs.',
+        helpString: 'WorldsApart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Runs /wa-debug first, prints the difference, and downloads an ordinary two-arm capture bundle \u2014 grade it with Review bundles, apply with eval/synthetic-data/apply-review.mjs, then score with eval/versus-score.mjs.',
         returns: 'nothing',
     });
 
@@ -2430,28 +2430,28 @@ async function initBody() {
         name: 'wa-core',
         callback: () => {
             const c = runState.lastCoreSet;
-            if (!c) { toastr.info(t`No core selection recorded yet — it is captured on ST’s own dry runs, so send or receive a message first.`, 'Worlds Apart'); return ''; }
-            console.log(`%cWorlds Apart \u00b7 ST core's own selection at message ${c.at} \u2014 ${c.entries.length} entries, core budget ${c.budget ?? 'unknown'}`, 'font-weight: bold');
+            if (!c) { toastr.info(t`No core selection recorded yet — it is captured on ST’s own dry runs, so send or receive a message first.`, 'WorldsApart'); return ''; }
+            console.log(`%cWorldsApart \u00b7 ST core's own selection at message ${c.at} \u2014 ${c.entries.length} entries, core budget ${c.budget ?? 'unknown'}`, 'font-weight: bold');
             console.table(c.entries.map(e => ({ uid: e.uid, order: e.order, constant: e.constant, book: e.world, entry: e.title })));
             console.log(`uids for eval/core-compare.mjs --core-uids:\n${c.entries.map(e => e.uid).join(',')}`);
             toastr.success(t`${c.entries.length} entries — see console`, t`ST core selection`);
             return '';
         },
-        helpString: 'Worlds Apart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
+        helpString: 'WorldsApart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-dry',
         callback: () => dryRun(false),
-        helpString: 'Worlds Apart: run retrieval and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
+        helpString: 'WorldsApart: run retrieval and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-debug',
         callback: () => dryRun(true),
-        helpString: 'Worlds Apart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
+        helpString: 'WorldsApart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
         returns: 'nothing',
     });
 
@@ -2463,7 +2463,7 @@ async function initBody() {
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in the sample', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
-        helpString: 'Worlds Apart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
+        helpString: 'WorldsApart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
         returns: 'nothing',
     });
 
@@ -2476,14 +2476,14 @@ async function initBody() {
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cliff is switched off for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in every sample written', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
-        helpString: 'Worlds Apart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
+        helpString: 'WorldsApart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-super-eval',
         callback: superEvalScene,
-        helpString: 'Worlds Apart: review graded samples/bundles from their FILES, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Pick several and each becomes a section with its own query text; stored grades arrive pre-filled and editable, entry text comes from the embedded books. Save downloads ONE review file for the whole run; apply it with node eval/synthetic-data/apply-review.mjs <file> --write.',
+        helpString: 'WorldsApart: review graded samples/bundles from their FILES, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Pick several and each becomes a section with its own query text; stored grades arrive pre-filled and editable, entry text comes from the embedded books. Save downloads ONE review file for the whole run; apply it with node eval/synthetic-data/apply-review.mjs <file> --write.',
         returns: 'nothing',
     });
 
@@ -2491,14 +2491,14 @@ async function initBody() {
         name: 'wa-studio',
         // Wrapped: ST hands callbacks (namedArgs, unnamedArgs), which would land in preferredBook.
         callback: () => lorebookStudio(chatBook()),
-        helpString: 'Worlds Apart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
+        helpString: 'WorldsApart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-query',
         callback: probeQuery,
-        helpString: 'Worlds Apart: score entries against arbitrary text without activating anything. Usage: /wa-query your query text here',
+        helpString: 'WorldsApart: score entries against arbitrary text without activating anything. Usage: /wa-query your query text here',
         returns: 'nothing',
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
@@ -2509,7 +2509,7 @@ async function initBody() {
         ],
     });
 
-    console.log('Worlds Apart: ready');
+    console.log('WorldsApart: ready');
 }
 
 globalThis.worldsApart_intercept = intercept;

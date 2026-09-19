@@ -200,7 +200,7 @@ export async function versusCore(named) {
     }
 
     const population = runState.lastLayoutOrder;
-    if (!runState.lastCandidates?.length || !population?.length) { toastr.info(t`Nothing ranked — the scan activated no entries.`, 'Worlds Apart'); return; }
+    if (!runState.lastCandidates?.length || !population?.length) { toastr.info(t`Nothing ranked — the scan activated no entries.`, 'WorldsApart'); return; }
 
     const { entries: coreEntries, viaVectors, vectorsRan } = await host.coreSelection();
 
@@ -229,7 +229,7 @@ export async function versusCore(named) {
     const spend = keys => [...byKey.entries()].filter(([k]) => keys.has(k)).reduce((sum, [, x]) => sum + (x.tokens || 0), 0);
     const both = [...coreKeys].filter(k => waKeys.has(k)).length;
 
-    console.log(`%cWorlds Apart \u00b7 WA vs ST core, message ${(getContext().chat ?? []).length}`, 'font-weight: bold');
+    console.log(`%cWorldsApart \u00b7 WA vs ST core, message ${(getContext().chat ?? []).length}`, 'font-weight: bold');
     console.log(`  core: ${coreKeys.size} entries, ${spend(coreKeys)} tokens (its own budget: world_info_budget ${world_info_budget}%${Number(world_info_budget_cap) > 0 ? `, cap ${world_info_budget_cap}` : ''})`);
     console.log(`  WA:   ${waKeys.size} entries, ${spend(waKeys)} tokens (budget ${host.effectiveTokenBudget()})`);
     console.log(`  shared ${both}, core only ${coreKeys.size - both}, WA only ${waKeys.size - both}`);
@@ -329,7 +329,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
     const bundle = await bundleSamples(arms, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
-    toastr.info(t`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'Worlds Apart', { timeOut: 8000 });
+    toastr.info(t`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'WorldsApart', { timeOut: 8000 });
 }
 
 /** Default sample name: chat slug + the message the scene ends on — distinct across scenes, stable on a re-grade. */
@@ -372,10 +372,10 @@ const fillZerosButton = root => ({
     tooltip: t`Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.`,
     action: () => {
         const { filled, undo } = fillReadZeros(root);
-        if (!filled) { toastr.info(t`No blank rows to fill.`, 'Worlds Apart'); return; }
-        toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
+        if (!filled) { toastr.info(t`No blank rows to fill.`, 'WorldsApart'); return; }
+        toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'WorldsApart', {
             timeOut: 10000, extendedTimeOut: 10000,
-            onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
+            onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'WorldsApart'); },
         });
     },
 });
@@ -428,13 +428,13 @@ export async function gradeScene(named) {
     }
 
     if (!rows.length) {
-        toastr.warning(t`Nothing was activated — nothing to grade.`, 'Worlds Apart');
+        toastr.warning(t`Nothing was activated — nothing to grade.`, 'WorldsApart');
         return '';
     }
 
     // An empty lastQuery means no query text could be built at all; keyword-only scenes pass, their query frozen.
     if (!runState.lastQuery) {
-        toastr.warning(t`No query text could be built from this chat — the sample would have nothing to score offline.`, 'Worlds Apart');
+        toastr.warning(t`No query text could be built from this chat — the sample would have nothing to score offline.`, 'WorldsApart');
         return '';
     }
 
@@ -514,8 +514,8 @@ export async function gradeScene(named) {
     const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
     const graded = grades.filter(g => gradeValue(g) > 0).length;
-    toastr.success(t`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
-    console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) embedded`, sample);
+    toastr.success(t`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'WorldsApart', { timeOut: 8000 });
+    console.log(`WorldsApart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) embedded`, sample);
 
     return '';
 }
@@ -727,17 +727,17 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                     // Scene guard: prior grades pool by rowKey (book + uid), so a bundle from another scene would attach its verdicts to this one (G9). Any arm, since arms can differ in `query`; skipped, not thrown.
                     const off = captures.map(c => sceneDiff(c, priorSample)).sort((x, y) => x.length - y.length)[0] ?? ['query'];
                     if (off.length) {
-                        toastr.warning(t`${file.name} was graded against a different scene (${off.join(', ')} differ) — ignored, or its verdicts would be attached to this one`, 'Worlds Apart', { timeOut: 8000 });
+                        toastr.warning(t`${file.name} was graded against a different scene (${off.join(', ')} differ) — ignored, or its verdicts would be attached to this one`, 'WorldsApart', { timeOut: 8000 });
                         continue;
                     }
                     loaded.push(...(priorSample.entries ?? []));
                 } else {
-                    toastr.warning(t`${file.name} has neither graded scenes nor "pending" — ignored`, 'Worlds Apart');
+                    toastr.warning(t`${file.name} has neither graded scenes nor "pending" — ignored`, 'WorldsApart');
                     continue;
                 }
                 names.push(file.name);
             } catch {
-                toastr.warning(t`Could not parse ${file.name} — ignored`, 'Worlds Apart');
+                toastr.warning(t`Could not parse ${file.name} — ignored`, 'WorldsApart');
             }
         }
         prior = mergeGrades(prior, loaded, { user: raterId(), now: today() });
@@ -746,7 +746,7 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
         const priorTxt = added ? `${gradeTxt} ${added === 1 ? t`1 entry requested offline.` : t`${added} entries requested offline.`}` : gradeTxt;
         const loadedTxt = names.length === 1 ? t`1 file: ${priorTxt}` : t`${names.length} files: ${priorTxt}`;
         head.querySelector('.wa-sg-loaded').textContent = names.length ? loadedTxt : t`no usable files — nothing loaded`;
-        toastr.info(priorTxt, 'Worlds Apart', { timeOut: 3000 });
+        toastr.info(priorTxt, 'WorldsApart', { timeOut: 3000 });
         paint();
     });
 
@@ -790,21 +790,21 @@ export async function superGradeScene(named) {
         : Object.keys(POOL_ARMS);
     const unknown = picked.filter(a => !POOL_ARMS[a]);
     if (unknown.length) {
-        toastr.warning(t`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'Worlds Apart');
+        toastr.warning(t`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'WorldsApart');
         return '';
     }
 
     const captures = [];
     for (const [n, arm] of picked.entries()) {
-        toastr.info(t`Arm ${n + 1}/${picked.length}: ${arm}`, 'Worlds Apart', { timeOut: 2500 });
+        toastr.info(t`Arm ${n + 1}/${picked.length}: ${arm}`, 'WorldsApart', { timeOut: 2500 });
         // Sequential, not Promise.all: the arms share one live settings object and one retrieval pipeline.
         const cap = await captureArm(POOL_ARMS[arm], wanted);
         if (!cap.rows.length) {
-            console.warn(`Worlds Apart: arm "${arm}" activated nothing — skipped`);
+            console.warn(`WorldsApart: arm "${arm}" activated nothing — skipped`);
             continue;
         }
         if (!cap.query) {
-            console.warn(`Worlds Apart: arm "${arm}" retrieved nothing (no query to freeze) — skipped`);
+            console.warn(`WorldsApart: arm "${arm}" retrieved nothing (no query to freeze) — skipped`);
             continue;
         }
         // Converted here so everything downstream reads a candidate; /wa-debug's row keeps its flat signals.
@@ -812,14 +812,14 @@ export async function superGradeScene(named) {
     }
 
     if (!captures.length) {
-        toastr.warning(t`No arm activated anything — nothing to grade.`, 'Worlds Apart');
+        toastr.warning(t`No arm activated anything — nothing to grade.`, 'WorldsApart');
         return '';
     }
 
     const union = unionArms(captures);
     // On the gradeable subset: unionArms keeps durable rows, so an all-constant scene has a non-empty union.
     if (!union.rows.some(r => !isDurable(r))) {
-        toastr.warning(t`Every activated row was constant or a persisting sticky — relevance chose nothing to grade.`, 'Worlds Apart');
+        toastr.warning(t`Every activated row was constant or a persisting sticky — relevance chose nothing to grade.`, 'WorldsApart');
         return '';
     }
 
@@ -864,13 +864,13 @@ export async function superGradeScene(named) {
     const bundle = await bundleSamples(built, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile({ ...bundle, name: base });
     download(content, filename, 'application/json');
-    console.log(`Worlds Apart: ${built.length}-arm bundle -> ${filename}`, bundle);
+    console.log(`WorldsApart: ${built.length}-arm bundle -> ${filename}`, bundle);
 
     const above = grades.filter(g => gradeValue(g) > 0).length;
     toastr.success(
         t`Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0.`
         + ' ' + t`Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.`,
-        'Worlds Apart', { timeOut: 12000 },
+        'WorldsApart', { timeOut: 12000 },
     );
     return '';
 }
@@ -891,7 +891,7 @@ const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
     // ponytail: focus heuristic, 2s; a dialog that opens without taking focus reads as blocked.
     timer = setTimeout(() => {
         if (!document.hasFocus()) return;
-        toastr.warning(t`The browser blocked the file picker — run it again now that the chat is open.`, 'Worlds Apart');
+        toastr.warning(t`The browser blocked the file picker — run it again now that the chat is open.`, 'WorldsApart');
         resolve([]);
     }, 2000);
 });
@@ -909,7 +909,7 @@ export async function superEvalScene() {
         try {
             parsed = JSON.parse(await file.text());
         } catch {
-            toastr.warning(t`Could not parse ${file.name} — skipped`, 'Worlds Apart');
+            toastr.warning(t`Could not parse ${file.name} — skipped`, 'WorldsApart');
             continue;
         }
         for (const m of (Array.isArray(parsed) ? parsed : [parsed])) bundles.push({ name: m?.file ?? file.name, manifest: m });
@@ -920,7 +920,7 @@ export async function superEvalScene() {
         const names = armNames(manifest);
         const arms = (names.length ? names : [null]).map(n => { try { return openBundle(manifest, n); } catch { return null; } }).filter(Boolean);
         if (!arms.length || !arms[0].candidates?.length || !Array.isArray(arms[0].entries)) {
-            toastr.warning(t`${fileName} is not a graded scene — skipped`, 'Worlds Apart');
+            toastr.warning(t`${fileName} is not a graded scene — skipped`, 'WorldsApart');
             continue;
         }
         const entryOf = entryResolver(manifest.books ?? {});
@@ -933,13 +933,13 @@ export async function superEvalScene() {
         }));
         const union = unionArms(captures);
         if (!union.rows.some(r => !isDurable(r))) {
-            toastr.warning(t`${fileName} has no gradeable rows — skipped`, 'Worlds Apart');
+            toastr.warning(t`${fileName} has no gradeable rows — skipped`, 'WorldsApart');
             continue;
         }
         secs.push({ file: fileName, name: manifest.name ?? fileName, manifest, captures, union, entryOf, prior: arms[0].entries });
     }
     if (!secs.length) {
-        toastr.warning(t`No usable graded bundles in that selection.`, 'Worlds Apart');
+        toastr.warning(t`No usable graded bundles in that selection.`, 'WorldsApart');
         return '';
     }
     const manifest = secs[0].manifest;
@@ -1000,6 +1000,6 @@ export async function superEvalScene() {
     const pairs = both.map(g => [Number(g.grade), gradeValue({ grades: g.grades.filter(v => v.kind === 'llm') })]);
     const exact = pairs.filter(([h, j]) => h === j).length, near = pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length;
     const irr = pairs.length ? ' ' + t`LLM agreement: ${exact}/${pairs.length} exact, ${near}/${pairs.length} within 1.` : '';
-    toastr.success(t`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).` + irr + ' ' + t`Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
+    toastr.success(t`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).` + irr + ' ' + t`Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'WorldsApart', { timeOut: 15000 });
     return '';
 }

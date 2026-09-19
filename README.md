@@ -54,7 +54,7 @@ This does two things:
 
 Then restart SillyTavern.
 
-On restart the server console prints `[Worlds Apart] server plugin ready`, and WA settings show
+On restart the server console prints `[WorldsApart] server plugin ready`, and WA settings show
 **✓ Server plugin active** — with a copyable redeploy command that's now a full absolute path (the
 running plugin reports the SillyTavern root, so you can run it from any terminal, not just the ST
 folder).
