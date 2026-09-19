@@ -595,10 +595,12 @@ its `upstream-st.md` number.
 | `maxTokensPercent`, `maxTokens` | 40, 0 | the token budget; the tighter wins, 0 off |
 | `budgetSlackPercent`, `budgetSlackMode` | 0, `once` | how far past the budget an entry may go, and how often |
 | `maxTokensIncludesExempt` | false | `ignoreBudget` entries' tokens come off the budget |
-| `presentationOrder`, `presentationTiered`, `tierCfg` | `order-asc`, false | the prompt order |
+| `presentationOrder`, `presentationTiered` | `order-asc`, false | the prompt order |
+| `tierCfg` | unset | the tier order and on/off switches `presentationTiered` groups by, `[{ id, on }]`; `reconcileTiers` fills an unset or partial list to constant, sticky, keyword, vector, disabled, every tier on |
 | `worldPriorityMode`, `worldPriorityByChar` | `interleaved` | book priority: weight, offset and cap per book, per character |
 | `language` | `en` | the language pack the suggester and audit read |
 | `llmProfile`, `llmTemperature` | `''`, `'1'` | the connection profile for WA's own generation calls |
+| `raterId` | `''` | the UUIDv4 a typed grade is signed as, minted on first use |
 | `debugLog` | false | `console.table` the ranking every scan |
 
 Internal, no UI, reset to their defaults each init: `chunkSize` 1750 characters, `chunkMode`
