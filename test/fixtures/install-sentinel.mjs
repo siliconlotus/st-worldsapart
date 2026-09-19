@@ -59,11 +59,11 @@ const links = [
     ...(chatDir ? [['hardlink', path.join(HERE, 'sentinel-chat.jsonl'), path.join(chatDir, `${WORLD_NAME}.jsonl`)]] : []),
 ];
 
-/** Ours if it is our symlink, or a hard link to the same inode. Anything else is someone's real file. */
+/** Ours if it is our symlink, a dangling symlink (nobody's real file: the fixture moved), or a hard link to the same inode. Anything else is someone's real file. */
 const isOurs = (kind, src, dst) => {
     const st = fs.lstatSync(dst, { throwIfNoEntry: false });
     if (!st) return false;
-    if (kind === 'symlink') return st.isSymbolicLink() && fs.readlinkSync(dst) === src;
+    if (kind === 'symlink') return st.isSymbolicLink() && (fs.readlinkSync(dst) === src || !fs.existsSync(dst));
     return st.ino === fs.statSync(src).ino;
 };
 
