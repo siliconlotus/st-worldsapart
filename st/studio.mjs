@@ -193,8 +193,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); refreshTabStatus(); };
     /** Every key in the book — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
+    // Secondaries too: the audit reads a gate's chat attestation off the same counts.
     const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
-        .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
+        .flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])].map(k => String(k).trim())).filter(Boolean))];
 
     const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatNames = []; };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
@@ -946,8 +947,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         h.append(selBox, chev, mode, titleWrap, ...(open ? [] : [meta]));
         // Collapsed-line badge: flagged-key count tinted by the worst flag; counts problems, not warnings (yellow, green).
         const counted = flagged ? [...flagged.values()].filter(v => scan.severityOf(v) === SEVERE) : [];
-        // Unusable secondaries count too, as severe: the entry gates on fewer keys than written.
-        const secBad = scan ? scan.unusableKeysOf(e).length : 0;
+        // Refused secondaries count too, as severe: the entry gates on fewer keys than written. A dead one is neutral, as a dead primary is.
+        const secBad = scan ? scan.unusableKeysOf(e).filter(r => scan.severityOf(r) === SEVERE).length : 0;
         if (counted.length + secBad) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
             badge.textContent = t`${counted.length + secBad} flagged`;
@@ -1051,8 +1052,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }, { placeholder: t`keyword` }));
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
-        // --- Secondary keys: rendered only when present, and only the `unusable` verdict is painted, a gate not being a trigger.
-        // ponytail: a secondary that matches nowhere is not painted; whether that is a fault depends on the logic.
+        // --- Secondary keys: rendered only when present; a refused or dead one is painted (unusableKeysOf) and nothing else, a gate not being a trigger.
         let secPara = null;
         if (Array.isArray(e.keysecondary) && e.keysecondary.length) {
             const gated = e.selective !== false;
@@ -1090,11 +1090,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const item = document.createElement('span'); item.className = 'wa-kw-item' + (gated ? '' : ' wa-off');
                 const chip = document.createElement('span'); chip.className = 'wa-kw';
                 const text = document.createElement('span'); text.className = 'wa-kw-text'; text.textContent = key;
-                const why = v ? t`unusable — ${v.code}` : '';
-                if (v) { chip.style.borderColor = WA_RED; chip.style.background = `color-mix(in srgb, ${WA_RED} 18%, transparent)`; }
-                // Green means the key is doing its job; a switched-off key takes the dimmed neutral instead.
+                // As a primary chip: a verdict colours by severity, dead is dimmed with no label, green means the key is doing its
+                // job, and a switched-off key takes the dimmed neutral instead.
+                const rc = v ? scan.reasonOf(v) : null;
+                const isDead = v?.flag === 'unattested';
+                if (isDead) chip.classList.add('wa-kw-dead');
+                else if (rc) { const c = SEVERITY_COLOR[rc.severity]; if (c) { chip.style.borderColor = c; chip.style.background = `color-mix(in srgb, ${c} 18%, transparent)`; } }
                 else if (scan && gated) chip.style.borderColor = WA_GREEN;
-                text.title = v ? t`${key} — ${v.message} (click to edit)` : t`${key} (click to edit)`;
+                const why = rc && !isDead ? rc.text : '';
+                const tip = v?.message ?? rc?.text;   // the validator's sentence where there is one; a dead key's says (book) or (book/chat)
+                text.title = v ? t`${key} — ${tip} (click to edit)` : t`${key} (click to edit)`;
                 text.addEventListener('click', () => editKeyInline(e, key, text, 'keysecondary'));
                 chip.append(text);
                 const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = t`Delete this secondary key`;

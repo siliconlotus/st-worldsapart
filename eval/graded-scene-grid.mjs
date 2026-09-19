@@ -147,7 +147,6 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const score = makeCandidateSet({ loaded, byKey, entries, params: P, topK: TOPK });
     const scoreAll = (k1, b, tw = termWeights, qvec = qv, qtext = query, st = scanText) => score(k1, b, tw, qvec, qtext, st);
     // The pool is what was judged (POOL); an unjudged logged row scores as 0 (G10).
-    // ponytail: the pool is the union of the arms actually run, so a param swept far outside them ranks against a pool that never saw its population.
     const ownJudged = [...OWN].filter(k => POOL.has(k)).length;
     console.log(`pool: ${POOL.size} judged entries; this capture logged ${S.candidates.length} rows, ${ownJudged} of them judged`
         + `${POOL.size > ownJudged ? ` (+${POOL.size - ownJudged} judged under a sibling arm)` : ''}`

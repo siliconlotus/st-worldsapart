@@ -162,7 +162,9 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
     }
 
-    const allKeys = [...new Set(allEntries.flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
+    // Secondaries ride in the same pass: unusableKeysOf reads a gate's attestation off these counts.
+    const keysOf = e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])].map(k => String(k).trim()).filter(Boolean);
+    const allKeys = [...new Set(allEntries.flatMap(keysOf))];
     // Its OWN scope: sharing the retrieval scope would leave thousands of keys in the live automaton.
     const scanScope = createScanScope();
     registerKeys(allKeys, scanScope);
@@ -177,7 +179,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const combosOf = new Map();
     for (const e of entries) {
         const cs = e.caseSensitive ?? caseSensitiveDefault, ww = e.matchWholeWords ?? wholeWordsDefault;
-        for (const k of (Array.isArray(e.key) ? e.key : []).map(x => String(x).trim()).filter(Boolean)) {
+        for (const k of keysOf(e)) {
             let list = combosOf.get(k);
             if (!list) combosOf.set(k, list = new Map());
             for (const w of ww ? [true, false] : [false]) list.set(comboId(cs, w), { cs, ww: w });
@@ -316,12 +318,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         return found;
     };
 
-    // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
-    const classify = (key, cs, ww, declared = false) => {
-        const k = String(key).trim();
-        if (!k) return null;
-        // usableKeys, not a validator call, so which codes are fatal here stays a matcher.mjs rule.
-        if (!usableKeys([k]).length) return { flag: 'unusable', code: validateSmartKey(k).find(f => f.severity === 'error')?.code };
+    /** What every verdict reads of a trimmed key: whether it is a literal, its chat rate, and the book pass's counts. */
+    const evidence = (k, cs, ww) => {
         // English-common, fragment and short read the key as a literal; a SmartKey or regex is judged on its terms (smartPaths) or skipped.
         const literal = !k.startsWith('?') && !isRegexKey(k);
         // The rate under the entry's OWN flags where that probe was scanned: countChatHits counts bare keys, so a
@@ -329,7 +327,22 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const flagProbe = literal && ww !== cs && !k.includes('"') ? `? ${ww ? '=' : '^'}"${k}"` : null;
         const chatRate = (flagProbe ? chatRateOf(flagProbe) : undefined) ?? chatRateOf(k);
         const hits = scan(k, cs, ww);
-        const bookContent = hits.df;
+        return { literal, chatRate, hits, bookContent: hits.df };
+    };
+    /** The dead-key verdict a primary and a live secondary share: nothing in the book, and no chat hit where a chat was scanned. */
+    const unattested = (k, cs, ww) => {
+        const { literal, chatRate, bookContent } = evidence(k, cs, ww);
+        if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
+        return null;
+    };
+
+    // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
+    const classify = (key, cs, ww, declared = false) => {
+        const k = String(key).trim();
+        if (!k) return null;
+        // usableKeys, not a validator call, so which codes are fatal here stays a matcher.mjs rule.
+        if (!usableKeys([k]).length) return { flag: 'unusable', code: validateSmartKey(k).find(f => f.severity === 'error')?.code };
+        const { literal, chatRate, hits, bookContent } = evidence(k, cs, ww);
 
         // --- evidence about this chat and this book, in the order the more specific diagnosis wins ---------------
         // Gated on breadth, judged on how the breadth was earned: `authoriz` is what substring matching is for, bare `Eve`
@@ -374,7 +387,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k) && !(bookContent > 0 && namedInBook(k))) return { flag: 'fragment', bookContent };
         // Nothing to judge without a hit: a dead short key is dead, not "0/0 clean".
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort && hits.total > 0) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total, key: k, ww };
-        if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
+        const dead = unattested(k, cs, ww);
+        if (dead) return dead;
         if (literal) {
             const chatAny = chatScan?.messagesWith?.get(k), chatTyped = chatTypedOf(k);
             // Chat first: what the model writes is the stronger claim about which form a key will meet.
@@ -383,14 +397,23 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         return regexOrtho(k, false);
     };
-    /** Secondary keys the matcher will not act on, with the validator's message: a set difference against secondaryKeys, so which codes are fatal here stays a matcher.mjs rule. */
+    /** Secondary keys that do nothing, in the entry's order: refused by the matcher (`unusable`, with the validator's message, by set
+     *  difference against secondaryKeys so which codes are fatal stays a matcher.mjs rule) or live and attested nowhere (`unattested`);
+     *  no other verdict is passed on a gate. */
     const unusableKeysOf = (e) => {
-        // `selective: false` switches the whole list off by declaration; nothing there is malformed.
+        // `selective: false` switches the whole list off by declaration; nothing there is malformed or dead.
         if (e?.selective === false) return [];
         const live = new Set(secondaryKeys(e));
-        return (Array.isArray(e?.keysecondary) ? e.keysecondary : [])
-            .filter(k => String(k ?? '').trim() && !live.has(k))
-            .map(k => ({ uid: e?.uid, key: k, ...(validateSmartKey(k).find(f => f.severity === 'error') ?? {}) }));
+        const cs = effCase(e), ww = effWhole(e);
+        const out = [];
+        for (const key of (Array.isArray(e?.keysecondary) ? e.keysecondary : [])) {
+            const k = String(key ?? '').trim();
+            if (!k) continue;
+            if (!live.has(key)) { out.push({ uid: e?.uid, key, flag: 'unusable', ...(validateSmartKey(key).find(f => f.severity === 'error') ?? {}) }); continue; }
+            const dead = unattested(k, cs, ww);
+            if (dead) out.push({ uid: e?.uid, key, ...dead });
+        }
+        return out;
     };
     const classifyEntry = e => {
         if (!inScope(e)) return [];

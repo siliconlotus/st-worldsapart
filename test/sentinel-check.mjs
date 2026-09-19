@@ -20,10 +20,12 @@ const OPTS = {
 const RED = 'severe';
 const entries = Object.values(data.entries);
 const keys = [...new Set(entries.flatMap(e => e.key.map(k => String(k).trim())))];
+// Secondaries are scanned too, as the Studio's bookKeys sends them: a gate's attestation is read off the same counts.
+const secondaries = [...new Set(entries.flatMap(e => e.keysecondary ?? []))];
 
 /** The chat scan through the function the Studio's client path calls. */
 // The substring probes ride along as the Studio's second pass would send them: a 22-key fixture needs no gate.
-const chatRate = () => countChatHits([...keys, ...keys.flatMap(substringProbes)], msgs);
+const chatRate = () => countChatHits([...keys, ...secondaries, ...keys.flatMap(substringProbes)], msgs);
 
 const verdicts = (chat, matchWindow = 'scan') => {
     const s = buildKeyPruneScan(data, OPTS, new Set(), { chatScan: chat, matchWindow });
@@ -191,10 +193,21 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(gated('Evening rounds, then.'), false, 'the positive secondary is still required');
 }
 
-// --- unusableKeysOf: the Studio's only surface for a secondary
+// --- unusableKeysOf: the Studio's only surface for a secondary — refused by the matcher, or live and attested nowhere
 {
+    const row = r => `${r.key}:${r.flag}${r.code ? `:${r.code}` : ''}`;
     const s = _pruneScan(data, OPTS, new Set());
-    eq(s.unusableKeysOf(data.entries['15']).map(r => `${r.key}:${r.code}`).join(','), '? "moon:stray-quote',
-        'the malformed secondary is reported with the validator\'s code; the negation-only one is not');
+    eq(s.unusableKeysOf(data.entries['15']).map(row).join(','), 'morning:unattested,? "moon:unusable:stray-quote',
+        'without a chat the positive secondary is unattested by the book and the malformed one carries the validator\'s code; the negation-only one is neither');
+    const [dead, bad] = s.unusableKeysOf(data.entries['15']);
+    eq(s.reasonOf(dead).text, 'unattested (book)', 'the words a primary gets');
+    eq(s.severityOf(dead), '', 'and the blank severity a primary gets: a dead key is neutral');
+    eq(s.severityOf(bad), RED, 'a refused secondary is severe');
+    eq(s.unusableKeysOf({ ...data.entries['15'], selective: false }).length, 0, 'a switched-off gate lists nothing');
     eq(s.unusableKeysOf(data.entries['0']).length, 0, 'an entry with no secondaries reports nothing');
+
+    const c = _pruneScan(data, OPTS, new Set(), { chatScan: chatRate() });
+    eq(c.unusableKeysOf(data.entries['15']).map(row).join(','), '? "moon:unusable:stray-quote', 'the chat attests the positive secondary');
+    eq(c.unusableKeysOf(data.entries['25']).map(r => `${r.key}:${c.reasonOf(r).text}`).join(','), 'zzghostgate:unattested (book/chat)',
+        'a secondary in no entry and no message stays unattested once the chat is scanned, and says the chat was checked');
 }

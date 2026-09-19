@@ -213,7 +213,7 @@
                 "? -zzunattested",
                 "? \"moon"
             ],
-            "comment": "SECONDARY GATE under AND_ALL, carrying one of each kind. `morning` is an ordinary positive secondary and is present. `? -zzunattested` is NEGATION-ONLY — fatal as a primary, since it would fire on absence alone, and legitimate here because a secondary never fires by itself: the term appears only in the hidden message, which both matchers drop, so the condition holds. `? \"moon` is UNUSABLE (stray quote) and is dropped before the logic runs — were it evaluated as never-matching, AND_ALL could never be satisfied and this entry would be silently dead. So uid 15 activating is what certifies the drop, and the Studio paints the third chip red while the first two stay green.",
+            "comment": "SECONDARY GATE under AND_ALL, carrying one of each kind. `morning` is an ordinary positive secondary and is present. `? -zzunattested` is NEGATION-ONLY — fatal as a primary, since it would fire on absence alone, and legitimate here because a secondary never fires by itself: the term appears only in the hidden message, which both matchers drop, so the condition holds. `? \"moon` is UNUSABLE (stray quote) and is dropped before the logic runs — were it evaluated as never-matching, AND_ALL could never be satisfied and this entry would be silently dead. So uid 15 activating is what certifies the drop, and the Studio paints the third chip red; `morning` is in no entry's text, so it reads unattested (book) until a chat is scanned and green after, while the negation-only one is green throughout.",
             "content": "Rounds are walked at dawn, before anyone else is awake.",
             "constant": false,
             "vectorized": false,
@@ -339,6 +339,21 @@
             "selectiveLogic": 0,
             "comment": "PHRASE FRAGMENT, control — same shape as uid 23, and nothing in the book capitalises it. Flagged.",
             "content": "It was a piece of cake, she said."
+        },
+        "25": {
+            "uid": 25,
+            "key": [
+                "zzgatehouse"
+            ],
+            "keysecondary": [
+                "zzghostgate"
+            ],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "comment": "SECONDARY GATE under AND_ANY whose one secondary appears nowhere: in no entry and in no message. The primary sits in its own text and is clean, so nothing on the primary row says the gate can never open. The Studio paints the secondary chip unattested, never green.",
+            "content": "The zzgatehouse is shut before dawn."
         }
     }
 }

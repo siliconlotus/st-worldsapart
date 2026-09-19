@@ -170,9 +170,7 @@ and says nothing. The chat-common flag exempts `constant` and sticky entries and
 **Near-duplicates** are entries over 200 characters whose rare vocabulary (z < 3.0) has Jaccard
 >= `KEY_DUPE_MIN` (0.35); an arc and a scene are not compared. Advisory: it colours (K14).
 
-**Secondary keys** the matcher will not act on are listed separately with the validator's message
-(`unusableKeysOf`), by set difference against `secondaryKeys`, so which codes are fatal stays a
-`matcher.mjs` rule. A `selective: false` entry lists none.
+**Secondary keys** that do nothing are listed separately (`unusableKeysOf`), in the entry's order: those the matcher will not act on, with the validator's message, by set difference against `secondaryKeys` so which codes are fatal stays a `matcher.mjs` rule; and live ones nothing attests, through the same `unattested` branch a primary takes, the chat scan counting secondaries for it. No other verdict is passed on a gate. A `selective: false` entry lists none. The Studio paints a refused secondary severe and a dead one dimmed, as it paints a primary, and only the refused ones count on the badge and the severe facet.
 
 **The Explorer and Cleanup read one classifier** over the whole book and differ only in presentation and
 checkbox state. Anything the audit learns reaches `classifyEntry`, `reasonOf` or `severityOf`, or it is

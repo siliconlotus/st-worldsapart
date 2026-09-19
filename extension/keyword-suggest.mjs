@@ -242,7 +242,6 @@ export function buildKeySuggest(data, opts) {
 
     // Frequency gate (lang.mjs table): names z 0; a unigram in the table is cut; a phrase rides its rarest word on a ramp (full at
     // z<=2.5, gone at z>=3.8) and is cut if any non-linker, non-name word is top-500 English. A lowercase -ing word inherits a junk-band pseudo-z.
-    // ponytail: constants eyeballed off one book's junk band; retune there.
     const isGer = w => w.length >= 6 && w.endsWith('ing');
     // Naive de-inflection for the table lookup, consulted on a miss only.
     const stems = w => {
@@ -325,7 +324,6 @@ export function buildKeySuggest(data, opts) {
     };
     // Subsumption at equal frequency: a cohesive long gram swallows contained phrases but never a bare word (S7); a particle form gives way to a
     // distinctive bare name; an incohesive one gives way only to its shoulder.
-    // ponytail: measured on n>=3 only; bigram-over-unigram keeps the old rule.
     const SUBSUME_COHESION = 0.4;
     const subsume = list => list.filter(r => !list.some(o => {
         if (o === r || o.f !== r.f) return false;
