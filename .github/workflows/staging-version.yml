@@ -22,7 +22,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: node .github/scripts/bump-staging-version.mjs
+      # A held cut restarts its counter only once release carries it, so the script is told what release's tip says.
+      - run: |
+          git fetch --depth 1 origin release
+          WA_RELEASE_VERSION=$(git show FETCH_HEAD:manifest.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version') \
+            node .github/scripts/bump-staging-version.mjs
       - run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'

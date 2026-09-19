@@ -20,9 +20,10 @@ git push origin 1.0.0
 ```
 
 CI holds a counterless version as committed, so the release PR carries it plain however long the cut
-sits; the next squash-merge into `staging` restarts the counter from the new number as
+sits; once `release` carries it, the next squash-merge into `staging` restarts the counter as
 `X.Y.Z+build.1`. The pre-push hook refuses a direct `release` push whose version is not plain, or
-whose tip is not the commit the tag names. It runs only where `git config core.hooksPath hooks` has
+whose tip is not the commit the tag names, and a direct `staging` push whose version has no counter,
+so the cut commit lands by web edit or PR. It runs only where `git config core.hooksPath hooks` has
 been run, and a merge button bypasses it — the tag is made by hand.
 
 ## Before you open it

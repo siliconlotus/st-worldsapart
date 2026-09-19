@@ -1,4 +1,5 @@
-// bump-staging-version.mjs — rewrites manifest.json's version to the next build counter and prints it; holds a counterless one.
+// bump-staging-version.mjs — rewrites manifest.json's version to the next build counter and prints it; holds a counterless one
+// until WA_RELEASE_VERSION (release's manifest version) carries it.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -9,8 +10,9 @@ const path = resolve(ROOT, 'manifest.json');
 const text = readFileSync(path, 'utf8');
 const current = JSON.parse(text).version ?? '';
 
-// A counterless version is a release cut parked on staging; the next squash-merge restarts the counter from it.
-if (isCounterless(current)) {
+// A counterless version is a release cut parked on staging: held while the cut is pending, restarted once release carries it.
+// Unset WA_RELEASE_VERSION reads as pending, so a run without the fetch can only hold.
+if (isCounterless(current) && current !== process.env.WA_RELEASE_VERSION) {
     console.log(`${current} — held, not bumped`);
 } else {
     const next = nextBuildVersion(current);
