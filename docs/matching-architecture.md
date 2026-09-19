@@ -182,12 +182,14 @@ that validates values may ignore the whole line: the bare form is the portable o
 per-entry state that survives WA being switched off, so they are not desugared to core's `sticky`/
 `cooldown`: core deletes a stored timed effect the moment the entry's own field is absent, and the
 desugar is gated on `settings().enabled`, so one generation with WA off would destroy the latch
-permanently. WA owns the record instead, in `chat_metadata.worldsApart.fired` (`WA_METADATA_KEY`), an
-array of `latchKey(entry)` — the entry's world and uid joined with US (`CLAUDE.md`), never NUL. Written
-at scan-done for activated entries carrying either decorator (never on a dry run, which arms no timed
-effect and must not arm this either), and read in `activationAdds`: a recorded
-`@@dont_activate_after_match` entry is skipped, a recorded `@@keep_activate_after_match` entry is
-included unconditionally — both present resolves to latches ON, below. Deleting a book prunes its
+permanently. WA owns the record instead, in `chat_metadata.worldsApart.fired` (`WA_METADATA_KEY`): each
+`latchKey(entry)` — the entry's world and uid joined with US (`CLAUDE.md`), never NUL — to the chat length
+when it first fired. Written at scan-done for activated entries carrying either decorator (never on a dry
+run, which arms no timed effect and must not arm this either), and read in `activationAdds` through
+`firedUpTo`, which drops every firing past the current chat length, so a rewind past a firing point
+un-latches as core drops a timed effect: a recorded `@@dont_activate_after_match` entry is skipped, a
+recorded `@@keep_activate_after_match` entry is included unconditionally — both present resolves to
+latches ON, below. Deleting a book prunes its
 entries' latch keys from the current chat's record (`latchBook(key)` recovers the segment before the US;
 `st/studio.mjs` `deleteBooks`), alongside its settings.
 
@@ -245,7 +247,7 @@ the application to disable a UI prompt by type, which is not WA's concern.
 ## Keys
 
 A key is one of three things: a **plain** key, matched as a substring; a **regex** key, `/pattern/flags`
-(`REGEX_KEY_RE`: any body, flags `gimsuy`); or a **SmartKey**, an expression beginning `?`. `splitKeys`
+(`REGEX_KEY_RE`: any body, flags `dgimsuvy`); or a **SmartKey**, an expression beginning `?`. `splitKeys`
 parses a key list on commas and newlines; a `/regex/` and a `"quoted"` term keep their commas, a `/`
 that is not the first character of a token is literal, and a token that opens a regex without closing
 it is re-split on its commas.
@@ -316,6 +318,7 @@ but `AND_ANY`); a `warn` is legal and probably a typo.
 | `unbalanced-parens` | warn | the counts differ; it still parses |
 | `all-zero-weights` | warn | every term weighted 0 |
 | `regex-core-refuses` | warn | a pattern with an unescaped `/` inside, which core reads as literal text; bare key or term |
+| `regex-decomposed` | warn | a pattern holding a decomposed character, a base letter plus a combining mark, which the NFC text can never match; bare key or term |
 
 ### Selective logic (`keysecondary`)
 
@@ -433,8 +436,9 @@ recursion control and prompt assembly; WA replaces one question, *did a key matc
 
 **The seam.** `getExternallyActivated` is checked inside core's loop after `@@dont_activate` and before
 constant, sticky and key matching; disable, triggers, character and tag filters, delay, cooldown,
-`delayUntilRecursion`, `excludeRecursion` and the probability roll all run before it, so a forced entry
-inherits them. The emit is blind: WA emits every entry whose keys match and lets core refuse what it
+`delayUntilRecursion` and `excludeRecursion` all run before it, and the probability roll after the loop
+over everything newly activated, so a forced entry inherits them all. The emit is blind: WA emits every
+entry whose keys match and lets core refuse what it
 refuses — except `delay`, which WA pre-checks against `runState.scanChat.length` itself, since core would
 discard the entry anyway and an unchecked emit would only make WA's own captures list an entry that never
 shipped. With core's matcher blanked, an entry WA declines to emit has no other route in.
@@ -482,15 +486,17 @@ reorder does not.
 recursion buffer appended, minus the entry's own content, and not at all for an `excludeRecursion`
 entry; secondaries gate through the stash. The score is divided by `1 + waTriggerDepth`, so an entry
 reached at recursion pass `d` scores `keys / (1 + d)`; depth 0 is unweighted. Every entry's keys are
-scored, vectorized included. The curve is an assertion.
+scored, vectorized included, and the column is recorded on the row; no shipped fit reads it, so it does
+not reach `E[credit]`. The curve is an assertion.
 
 **The relevance column** (`scoreRelevanceColumn`). `properNouns` is the sum over names the entry shares
 with the window of `log((N+1)/(df+1))`, a name being a token capitalised somewhere not sentence-initial
 (`properNounsOf`) minus the bundled English common list, df counting the book's entries with content,
 disabled included. `density` is names per hundred tokens of the entry, no stoplist. `E[credit]` comes
 from a fitted logistic model per tier, memory or reference by `isMemory` (STMB-marked):
-`extension/relevance-model-<tier>.json`, keyed by embedding model, features `cosine`, `text`, `keys`,
-`properNouns`, `density`. Each feature is standardised over the fit's recorded population — every row
+`extension/relevance-model-<tier>.json`, keyed by embedding model. The feature set is the fit's own
+`features`; every shipped fit reads `cosine`, `text`, `properNouns` and `density`, and none reads `keys`.
+Each feature is standardised over the fit's recorded population — every row
 of the scan minus constants under `pooled` — and `E[credit] = 0.5 P(>=2) + 0.5 P(>=3)`, `P(>=3)`
 clamped to `P(>=2)`. A model with no fit of its own scores through `UNFITTED_FALLBACK`'s; a pass in
 which no row has a cosine scores through the file's `noCosine` fit. A tier with no model is not scored,
@@ -593,7 +599,7 @@ its `upstream-st.md` number.
 | `worldPriorityMode`, `worldPriorityByChar` | `interleaved` | book priority: weight, offset and cap per book, per character |
 | `language` | `en` | the language pack the suggester and audit read |
 | `llmProfile`, `llmTemperature` | `''`, `'1'` | the connection profile for WA's own generation calls |
-| `debugLog` | true | `console.table` the ranking every scan |
+| `debugLog` | false | `console.table` the ranking every scan |
 
 Internal, no UI, reset to their defaults each init: `chunkSize` 1750 characters, `chunkMode`
 `paragraph`, `minChunkSize` 120 (a change re-embeds every collection); `meanCentered` true;
