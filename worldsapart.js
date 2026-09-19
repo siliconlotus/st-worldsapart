@@ -36,7 +36,7 @@ import { textgen_types, textgenerationwebui_settings } from '../../../textgen-se
 import { oai_settings } from '../../../openai.js';
 
 import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './st/ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, makeTierEditor, pluginFallback, showEntryText, wiGlyph, wiTooltip } from './st/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './st/studio.mjs';
 import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './st/capture-ui.mjs';
@@ -197,8 +197,12 @@ function renderPluginSetup() {
     };
     const alert = $('#wa_plugin_alert').empty();
     // Top of the drawer, so neither state needs the setup box open to be seen.
-    const banner = (text, ...rest) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
-        .append($('<div style="color:var(--warning,#d80);"></div>').text(text), ...rest);
+    const bannerOf = (tone, textTone) => (text, ...rest) => $(`<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, ${tone} 15%, transparent);border:1px solid color-mix(in srgb, ${tone} 45%, transparent);"></div>`)
+        .append($(`<div style="color:${textTone};"></div>`).text(text), ...rest);
+    const banner = bannerOf('var(--golden, #e0a86c)', 'var(--warning,#d80)');
+    const alarm = bannerOf('#e06c6c', '#e06c6c');
+    // First, above the stale or absent banner: a route has actually failed this load, which is the case where drift matters.
+    if (runState.pluginIncompatible) alert.append(alarm(t`🛑 Server plugin has demonstrated incompatibility with this extension version: a route failed this session and the no-plugin path stood in. Redeploy and restart:`, row(deployCmd)));
     box.empty();
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     if (runState.pluginAvailable) {
@@ -247,13 +251,13 @@ async function queryCollections(args) {
                 signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
             });
 
-            if (response.ok) {
-                return await response.json();
-            }
-
-            console.warn(`Worlds Apart: plugin query failed (${response.status}), taking the no-plugin path`, await response.text());
+            if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+            const results = await response.json();
+            // Only what stage 1 reads: a scored metadata array per collection answered. Anything more is fine.
+            if (!results || typeof results !== 'object' || !Object.values(results).every(g => Array.isArray(g?.metadata) && g.metadata.every(x => typeof x?.score === 'number'))) throw new Error('unscored or missing metadata');
+            return results;
         } catch (error) {
-            console.warn('Worlds Apart: plugin query threw, taking the no-plugin path', error);
+            pluginFallback('query-multi', error);
         }
     }
 
@@ -305,13 +309,16 @@ async function syncWorld(world, entries) {
                 body: JSON.stringify({ collectionId, hashes: newItems.map(x => x.hash), source: sourceSettings.source, sourceSettings }),
                 signal: AbortSignal.timeout(SYNC_TIMEOUT_MS),
             });
-            const adopted = new Set(response.ok ? (await response.json())?.adopted ?? [] : []);
+            if (!response.ok) throw new Error(`${response.status}`);
+            const j = await response.json();
+            if (!Array.isArray(j?.adopted)) throw new Error('no adopted list');
+            const adopted = new Set(j.adopted);
             if (adopted.size) {
                 newItems = newItems.filter(x => !adopted.has(x.hash));
                 console.log(`Worlds Apart: adopted ${adopted.size} chunks for "${world}" from another collection under the same model`);
             }
         } catch (error) {
-            console.warn('Worlds Apart: adopt failed, embedding instead', error);
+            pluginFallback('adopt', error);
         }
     }
 
@@ -369,9 +376,17 @@ function bookIndexes(world, entries, { names = false } = {}) {
  *  @returns {Promise<{unclaimed: object[], staleConfig: object[], live: object[], bytes: number}|null>} */
 async function findOrphanCollections() {
     if (!await hasPlugin()) return null;
-    const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders() });
-    if (!response.ok) return null;
-    const all = await response.json();
+    let all;
+    try {
+        const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders() });
+        if (!response.ok) throw new Error(`${response.status}`);
+        all = await response.json();
+        // Every field the report reads, on every row.
+        if (!Array.isArray(all) || !all.every(c => typeof c?.collectionId === 'string' && typeof c?.source === 'string' && typeof c?.model === 'string' && typeof c?.bytes === 'number' && typeof c?.mtimeMs === 'number')) throw new Error('rows missing fields');
+    } catch (error) {
+        pluginFallback('collections', error);
+        return null;
+    }
     const claimed = new Set((world_names ?? []).map(n => `wa_${getStringHash(n)}`));
     const v = extension_settings.vectors ?? {};
     const source = v.source || 'transformers';
@@ -2134,7 +2149,8 @@ function ensureDeliveryPanel() {
 .wa-delivery-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wa-delivery-tokens { flex: 0 0 auto; margin-left: auto; opacity: 0.55; font-variant-numeric: tabular-nums; }
 .wa-delivery-budget { padding: 4px 5px; opacity: 0.7; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
-.wa-delivery-empty { opacity: 0.6; padding: 4px; }`;
+.wa-delivery-empty { opacity: 0.6; padding: 4px; }
+.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }`;
     document.head.append(style);
 
     deliveryTrigger = document.createElement('div');
@@ -2159,11 +2175,19 @@ function renderDeliveryPanel(layout) {
     lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
         + `<span class="wa-delivery-title">${escapeHtml(t`Open the Key Lab`)}</span>`;
     lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
+    // While a plugin route has fallen back this load; the route and cause are on the console.
+    const warnRow = () => {
+        if (!runState.pluginIncompatible) return [];
+        const w = document.createElement('div');
+        w.className = 'wa-delivery-warning';
+        w.textContent = t`Server plugin incompatible with this extension version: the no-plugin path stood in. Redeploy the plugin and restart SillyTavern.`;
+        return [w];
+    };
     if (!layout.length) {
         const empty = document.createElement('div');
         empty.className = 'wa-delivery-empty';
         empty.textContent = t`Nothing delivered yet`;
-        deliveryPanel.append(empty, lab);
+        deliveryPanel.append(empty, ...warnRow(), lab);
         return;
     }
     for (const row of layout) {
@@ -2203,7 +2227,7 @@ function renderDeliveryPanel(layout) {
         if (n) foot.textContent += ' ' + (n === 1 ? t`${n} entry skipped, ${missed} tokens not delivered.` : t`${n} entries skipped, ${missed} tokens not delivered.`);
         deliveryPanel.append(foot);
     }
-    deliveryPanel.append(lab);
+    deliveryPanel.append(...warnRow(), lab);
 }
 
 let initialized = false;
@@ -2275,6 +2299,7 @@ async function initBody() {
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] }));
     tierState();
     renderPluginSetup();                     // paints "checking…" then the detected/install state
+    document.addEventListener('wa-plugin-fallback', () => renderPluginSetup());   // the first fallback of the load repaints the alert
     waVersion().then(v => { if (v) document.querySelector('#wa_version').textContent = v; });
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();

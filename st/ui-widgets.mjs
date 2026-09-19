@@ -6,6 +6,7 @@ import { DOMPurify } from '../../../../../lib.js';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from '../extension/sort.mjs';
+import { runState } from '../extension/state.mjs';
 
 export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢');
 
@@ -549,4 +550,14 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
 .wa-adv-warn i { color: var(--golden, #e0a86c); }`;
     document.head.append(style);
+}
+
+/** A plugin route failed, or answered without a field the extension reads: the caller takes the no-plugin path for that call.
+ *  The route and cause go to the console every time; the toast fires once per load, and the delivery panel shows the state. */
+export function pluginFallback(route, cause) {
+    console.warn(`Worlds Apart: plugin ${route} failed (${String(cause?.message ?? cause)}), taking the no-plugin path`);
+    if (runState.pluginIncompatible) return;
+    runState.pluginIncompatible = route;
+    toastr.warning(t`Extension and server plugin versions are incompatible; falling back to the no-plugin path. Redeploy the plugin and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+    document.dispatchEvent(new CustomEvent('wa-plugin-fallback'));
 }

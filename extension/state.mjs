@@ -102,6 +102,7 @@ export const runState = {
     pluginRoot: null,             // absolute ST root from /ping
     pluginFP: null,               // fingerprint the deployed plugin reports
     sourceFP: null,               // fingerprint of this extension's source plugin files
+    pluginIncompatible: null,     // the first plugin route this load that failed or answered without a field the extension reads
     lastLayoutOrder: [],          // the last scan's LAYOUT order, pre-cut — what the caps take a prefix of; the capture's population
     lastInjects: [],              // the Author's Note and depth prompts the scan read, when allowWIScan is on
     lastSources: {},              // the card/persona fields an entry opted into, by source name

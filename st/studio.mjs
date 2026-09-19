@@ -8,7 +8,7 @@ import { escapeHtml, getCharaFilename } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
@@ -136,8 +136,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (runState.pluginAvailable) {
             try {
                 const r = await fetch('/api/plugins/worlds-apart/chat-bindings', { method: 'POST', headers: getRequestHeaders() });
-                if (r.ok) {
+                if (!r.ok) throw new Error(String(r.status));
+                {
                     const { bindings } = await r.json();
+                    // Every field the index reads, on every row.
+                    if (!Array.isArray(bindings) || !bindings.every(b => typeof b?.dir === 'string' && typeof b?.file === 'string')) throw new Error('no bindings list');
                     const byDir = new Map();
                     for (const c of characters ?? []) {
                         if (c?.avatar) byDir.set(String(c.avatar).replace(/\.png$/, ''), c);
@@ -156,7 +159,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, file_size: humanSize(b.size), chat_metadata: { world_info: b.world_info } });
                     return [...out.values()];
                 }
-            } catch (err) { console.warn('[WA] chat-bindings route unavailable, falling back', err); }
+            } catch (err) { pluginFallback('chat-bindings', err); }
         }
         return loadChatIndex();
     };
@@ -1950,10 +1953,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     method: 'POST', headers: getRequestHeaders(),
                     body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
                 });
-                j = r.ok ? await r.json() : null;
+                if (!r.ok) throw new Error(String(r.status));
+                j = await r.json();
+                // Every field the audit reads: the message count and both count tables. `unit` is optional.
+                if (!Number.isFinite(Number(j?.messages)) || !j?.counts || typeof j.counts !== 'object' || !j?.typed || typeof j.typed !== 'object') throw new Error('counts missing');
             } catch (error) {
                 // A plugin mid-redeploy or gone is not an audit failure: the browser scans the same chats below.
-                console.warn('Worlds Apart: /scan-chats threw, falling back to the client-side scan', error);
+                pluginFallback('scan-chats', error);
+                j = null;
             }
             // 0 messages means the route resolved no files; taking it would zero every key's share, so the browser retries them.
             if (Number(j?.messages)) {

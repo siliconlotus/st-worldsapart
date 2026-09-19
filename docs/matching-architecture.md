@@ -428,6 +428,8 @@ column differs. Every scored entry keeps its cosine in `runState.lastScores`; on
 are retrieval winners. Retrieval is serialised so a query never reads a half-built index. A retrieval
 failure is reported and costs every entry its cosine; keyword matching and constants are unaffected.
 
+A plugin route that errors, or that answers without a field the extension reads, takes the no-plugin path for that call, and the extension announces it once per load (`pluginFallback`): a toast, a line in the delivery panel and a red bar at the top of the settings drawer while the state holds; the route and the cause go to the console every time. Only the fields a reader consumes are checked, so a plugin that returns more is never refused, and each check sits beside the read it protects.
+
 Plugin side (`plugin/server.js`, `scoring.mjs`, `vector.mjs`): an index's items and corpus mean are cached on the index file's mtime and size; `centroidFor` averages the named uids' chunks; `scoreCollection` is mean-centred cosine; `poolEntries` keeps the best chunk per entry; `selectTopK` sorts and cuts; `/adopt` copies rows by chunk hash from sibling collections under the same source and model into a new collection, vector and metadata intact, a hash being (text, uid) and the directory the model. The plugin is a generated copy: edits need `node deploy-plugin.mjs` and a restart, and the settings panel shows a drift banner until the fingerprints match.
 
 ## Stage 2 — Activation
