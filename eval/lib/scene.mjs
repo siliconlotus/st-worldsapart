@@ -744,9 +744,10 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
             unjudgedRows: un.map(r => ({ uid: Number(r.uid), book: r.entry?.world, title: r.title })),
         };
     };
-    // Relevant rows per tier, for the tier-restricted windows below.
-    const relevantIn = tier => layoutOrder(rankable.filter(r => scene.POOL.has(entryKey(r.entry))))
-        .filter(r => (isMemory(r.entry) ? 'memory' : 'reference') === tier && (gradeOf(r) ?? 0) >= 3).length;
+    // Relevant rows per tier, for the tier-restricted windows below. A count, so it needs no ordering — and layoutOrder
+    // would restandardise eCredit over the POOL subset, on the same row objects `ranked` holds.
+    const relevantIn = tier => rankable.filter(r => scene.POOL.has(entryKey(r.entry))
+        && (isMemory(r.entry) ? 'memory' : 'reference') === tier && (gradeOf(r) ?? 0) >= 3).length;
     const ranked = layoutOrder(rankable);
     const atR = scoreWindow(ranked.slice(0, relevant));
 
