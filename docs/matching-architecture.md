@@ -612,7 +612,7 @@ its `upstream-st.md` number.
 | `language` | `en` | the language pack the suggester and audit read |
 | `llmProfile`, `llmTemperature` | `''`, `'1'` | the connection profile for WA's own generation calls |
 | `raterId` | `''` | the UUIDv4 a typed grade is signed as, minted on first use |
-| `debugLog` | false | `console.table` the ranking every scan |
+| `debugLog` | false | narrate each turn's run to the console and `console.table` the ranking; off, only load-time lines and warnings are printed |
 
 Internal, no UI, reset to their defaults each init: `chunkSize` 1750 characters, `chunkMode`
 `paragraph`, `minChunkSize` 120 (a change re-embeds every collection); `meanCentered` true;

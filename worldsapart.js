@@ -51,6 +51,10 @@ import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, 
 /** Base of the rewritten `order` sequence, parked above any authored value and ST's default of 100. */
 const ORDER_BASE = 99000;
 
+/** A line narrating one turn's own run: off by default, on under `debugLog` and during either slash-command run.
+ *  ST's own dry runs fire on every chat load, so they stay silent unless the setting is on. */
+const dbg = (...args) => { if (settings().debugLog || runState.dryRunInProgress) console.log(...args); };
+
 // Vector backend — Vector Storage's provider config and ST's own endpoints.
 
 /** Request body for /api/vector/*, from Vector Storage's provider settings.
@@ -539,7 +543,7 @@ async function contentTextScores(query, entries = null) {
     if (!byWorld.size) return new Map();
 
     const s = settings();
-    const termWeights = await queryTermWeights(query, { log: false, entries });
+    const termWeights = await queryTermWeights(query, { entries });
     const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq };
     const out = new Map();
     for (const [world, entries] of byWorld) {
@@ -552,9 +556,8 @@ async function contentTextScores(query, entries = null) {
 }
 
 /** The entity-filter term weights for a query, or null when the filter is off. Nothing else derives them (R19).
- *  @param {boolean} [opts.log] Log the kept-term count and, in a verbose run, the surviving terms
  *  @returns {Promise<Record<string, number>|null>} */
-async function queryTermWeights(searchText, { log = true, entries = null } = {}) {
+async function queryTermWeights(searchText, { entries = null } = {}) {
     if (!settings().entityFilter) {
         return null;
     }
@@ -566,14 +569,11 @@ async function queryTermWeights(searchText, { log = true, entries = null } = {})
     const gazetteer = entity.buildGazetteer((entries ?? await getSortedEntries()).map(authored));
     const termWeights = buildTermWeights(searchText, gazetteer);
 
-    if (log) {
-        console.log(`WorldsApart: entity filter kept ${Object.keys(termWeights).length} terms (gazetteer has ${gazetteer.size})`);
-
-        if (runState.verboseRun) {
-            const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-            console.log(`%cWorldsApart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
-            console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
-        }
+    if (runState.verboseRun) {
+        const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        console.log(`WorldsApart: entity filter kept ${byWeight.length} terms (gazetteer has ${gazetteer.size})`);
+        console.log(`%cWorldsApart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
+        console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
     }
 
     return termWeights;
@@ -660,7 +660,9 @@ async function scoreEntriesUnsafe(searchText) {
         });
     }
 
-    if (rankOnly) {
+    // Once per load: running without the plugin is a supported configuration, not a per-turn fault.
+    if (rankOnly && !runState.noCosineWarned) {
+        runState.noCosineWarned = true;
         console.warn(`WorldsApart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
             + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
             + 'Check that the server plugin is loaded and that its query is not failing.');
@@ -700,12 +702,12 @@ async function retrieve(chat) {
     const rawText = query.joinQueryMessages(queryChat);
 
     if (!rawText) {
-        console.log('WorldsApart: no query text, skipping retrieval');
+        dbg('WorldsApart: no query text, skipping retrieval');
         return [];
     }
 
     const searchText = rawText;
-    console.log(`WorldsApart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
+    dbg(`WorldsApart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
 
     // Before the empties below: a keyword-only scene is still gradeable against the query.
     runState.lastQuery = searchText;
@@ -720,7 +722,7 @@ async function retrieve(chat) {
         return [];
     }
     if (!retrieved.size) {
-        console.log('WorldsApart: the query matched no chunk in any collection');
+        dbg('WorldsApart: the query matched no chunk in any collection');
         return [];
     }
 
@@ -834,7 +836,7 @@ async function selectAndActivate(chat, token) {
 
     const activated = [...winners, ...union];
     if (activated.length) {
-        console.log(`WorldsApart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
+        dbg(`WorldsApart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
     if (superseded()) return;
@@ -1214,7 +1216,7 @@ async function feedScanLoop(args) {
             runState.waMatched.add(`${e.world}.${e.uid}`);
             e.waTriggerDepth = runState.waRecursionDepth;
         }
-        console.log(`WorldsApart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
+        dbg(`WorldsApart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
     }
 }
@@ -1342,7 +1344,7 @@ async function rankOwnedScan(activated, args, skip) {
         if (postDates(entry, at)) { activated.delete(key); postDated++; }
     }
     if (postDated) {
-        console.log(`WorldsApart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
+        dbg(`WorldsApart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
     }
 
     const items = [...activated.entries()].map(([key, entry]) => {
@@ -1467,7 +1469,7 @@ async function rankOwnedScan(activated, args, skip) {
         activated.delete(it.key);
     }
     if (relevanceCutRows.length) {
-        console.log(`WorldsApart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
+        dbg(`WorldsApart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
             + (promoted.length ? ` (${promoted.length} promoted entr${promoted.length === 1 ? 'y was' : 'ies were'} exempt)` : ''));
     }
 
@@ -1514,7 +1516,7 @@ async function rankOwnedScan(activated, args, skip) {
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
             ].filter(Boolean).join(', ');
             const exempt = survivors.size - counted;
-            console.log(`WorldsApart: budget dropped ${dropped} entries — ${caps}${exempt ? `, plus ${exempt} ignoreBudget (uncapped)` : ''}, ${survivors.size} in prompt`);
+            dbg(`WorldsApart: budget dropped ${dropped} entries — ${caps}${exempt ? `, plus ${exempt} ignoreBudget (uncapped)` : ''}, ${survivors.size} in prompt`);
         }
 
         runState.lastSkipped = skipped;
@@ -2068,7 +2070,7 @@ const SETTINGS_HTML = `
 
 
                     <label class="checkbox_label" for="wa_debug_log">
-                        <input id="wa_debug_log" type="checkbox"><span data-i18n="Log the selection table on every generation">Log the selection table on every generation</span>
+                        <input id="wa_debug_log" type="checkbox"><span data-i18n="Log what WorldsApart does on every generation">Log what WorldsApart does on every generation</span>
                     </label>
 
                     <label for="wa_rater_id"><span data-i18n="Rater id">Rater id</span> <span class="fa-solid fa-circle-question note-link-span" title="A random anonymous ID your grades are signed with." data-i18n="[title]A random anonymous ID your grades are signed with."></span></label>

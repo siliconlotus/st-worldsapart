@@ -40,7 +40,7 @@ export const defaultSettings = {
     worldPriorityMode: 'interleaved', // 'interleaved' (one list; weight scales score, offset shifts prompt position) | 'sequential' (strict book tiers)
     /** @type {Record<string, Array<{ world: string, weight: number, offset: number, cap: number }>>} keyed by character/group id; the chat's own book is the sentinel `'chat'` */
     worldPriorityByChar: {},
-    debugLog: false, // console.table the ranking every scan; per-generation token counting when a budget is set
+    debugLog: false, // narrate each turn's run and console.table the ranking; per-generation token counting when a budget is set
 };
 
 /** Settings with no UI; ensureSettings resets them to defaults each init, so a value here is never user-tuned. */
@@ -104,6 +104,7 @@ export const runState = {
     pluginFP: null,               // fingerprint the deployed plugin reports
     sourceFP: null,               // fingerprint of this extension's source plugin files
     pluginFailures: new Set(),    // plugin routes that failed this load, or answered without a field the extension reads
+    noCosineWarned: false,        // has the cosine-free retrieval warning been printed this load
     lastLayoutOrder: [],          // the last scan's LAYOUT order, pre-cut — what the caps take a prefix of; the capture's population
     lastInjects: [],              // the Author's Note and depth prompts the scan read, when allowWIScan is on
     lastSources: {},              // the card/persona fields an entry opted into, by source name
