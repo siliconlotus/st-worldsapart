@@ -303,6 +303,7 @@ export const KEY_ALERTS = Object.freeze({
     'no-terms': { severity: 'error', label: 'No terms' },
     'negation-only': { severity: 'error', label: 'Negation only' },
     'no-required-term': { severity: 'error', label: 'No required term' },
+    'optional-negated': { severity: 'warn', label: 'Optional under negation' },
     'too-deep': { severity: 'error', label: 'Nested too deep' },
     'stray-weight': { severity: 'error', label: 'Stray weight' },
     'stray-proximity': { severity: 'error', label: 'Stray proximity' },
@@ -314,6 +315,7 @@ export const KEY_ALERTS = Object.freeze({
     'all-zero-weights': { severity: 'warn', label: 'All weights zero' },
     'regex-decomposed': { severity: 'warn', label: 'Decomposed accent' },
     'flag-on-pattern': { severity: 'warn', label: 'Literal regex' },
+    'optional-inert': { severity: 'info', label: 'Null term' },
     'regex-core-refuses': { severity: 'info', label: 'WA-only regex' },
 });
 
@@ -368,11 +370,23 @@ export function validateSmartKey(raw) {
         out.push(new KeyAlert('too-deep', `The key nests deeper than ${MAX_DEPTH} groups or negations, which is past what a keyword needs. Flatten some of the “(” levels — or split it into two keys.`));
         return out;   // a key refused at parse needs no second opinion
     }
+    const hasOptional = n => !!n && (n.optional || hasOptional(n.operand) || hasOptional(n.left) || hasOptional(n.right));
     if (matchesEmpty(ast)) {
-        const hasOptional = n => !!n && (n.optional || hasOptional(n.operand) || hasOptional(n.left) || hasOptional(n.right));
         out.push(hasOptional(ast)
             ? new KeyAlert('no-required-term', 'Nothing here is required, so this matches a message with none of its terms. Make one term required — or, for any of several, write them with OR.')
             : new KeyAlert('negation-only', 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.'));
+    }
+    // evaluate() reports an unmatched optional node as matched, so under a negation the mark is never what the author meant.
+    // Not matchesEmpty, which asks about the empty text: XOR against an always-true side is false there and not always true.
+    const alwaysTrue = n => !!n && (n.optional
+        || (n.type === 'AND' && alwaysTrue(n.left) && alwaysTrue(n.right))
+        || (n.type === 'OR' && (alwaysTrue(n.left) || alwaysTrue(n.right))));
+    const notNodes = n => (!n ? [] : [...(n.type === 'NOT' ? [n] : []), ...notNodes(n.operand), ...notNodes(n.left), ...notNodes(n.right)]);
+    const negations = notNodes(ast);
+    if (negations.some(n => alwaysTrue(n.operand))) {
+        out.push(new KeyAlert('optional-negated', 'A “?” inside a negation makes it false for every message, since an optional term counts as present even where it is absent — so this key, or the conjunction holding it, can never match. Drop the “?”, or move that term out of the negation.'));
+    } else if (negations.some(n => hasOptional(n.operand))) {
+        out.push(new KeyAlert('optional-inert', 'The “?” inside this negation does nothing — an optional term counts as present even where it is absent, so the negation reads the same with the mark or without it.'));
     }
 
     // A weight lexes as a term only when it followed neither a term nor a group, so it cannot be anything but misplaced.
