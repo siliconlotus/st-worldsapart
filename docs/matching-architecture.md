@@ -506,7 +506,9 @@ from a fitted logistic model per tier, memory or reference by `isMemory` (STMB-m
 `features`; every shipped fit reads `cosine`, `text`, `properNouns` and `density`, and none reads `keys`.
 Each feature is standardised over the fit's recorded population — every row
 of the scan minus constants under `pooled` — and `E[credit] = 0.5 P(>=2) + 0.5 P(>=3)`, `P(>=3)`
-clamped to `P(>=2)`. A model with no fit of its own scores through `UNFITTED_FALLBACK`'s; a pass in
+clamped to `P(>=2)`.
+Standardised within the turn because no feature has a fixed scale: cosine moves with the embedder and the centering, text with the query and the book's chunking, properNouns with the book's document frequencies and the window. One fit per tier therefore serves every book and embedder, and `E[credit]` is a probability conditional on the turn's pool, so a turn's delivered share follows the pool's size rather than need (F24).
+A model with no fit of its own scores through `UNFITTED_FALLBACK`'s; a pass in
 which no row has a cosine scores through the file's `noCosine` fit. A tier with no model is not scored,
 and an unscored row is kept.
 
