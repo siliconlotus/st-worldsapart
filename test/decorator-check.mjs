@@ -139,8 +139,8 @@ console.log('ok   the gates read the stash on a parsed entry');
 
 // --- @@additional_keys and @@exclude_keys: alone each maps to keysecondary + selectiveLogic, together
 // ST cannot express both so WA compiles one SmartKey.
-const keys = (content, entry = {}, smartKeys = true) =>
-    decoratorFields({ key: ['villa'], content, ...entry }, { chatLength: 0, smartKeys });
+const keys = (content, entry = {}) =>
+    decoratorFields({ key: ['villa'], content, ...entry }, { chatLength: 0 });
 
 // --- alone, each maps to the core-compatible fields
 eqDeep(keys('@@additional_keys storm,rain\nx'),

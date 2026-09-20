@@ -981,7 +981,6 @@ const decoratorCount = (entry, name) => {
     return arg === null ? null : wholeNumber(arg);
 };
 
-/** Whether the entry carries either latch decorator, regardless of which. */
 /** Each CCv3 activation gate against the `opts` field its verdict needs. All four quantities describe the
  *  chat's SHAPE, which a graded scene cannot re-derive from its own window, so a capture records them
  *  (eval/bundle-schema.md) and a bundle without them leaves those gates off. */
@@ -1027,6 +1026,7 @@ export function gateVerdict(entry, opts = {}) {
     return null;
 }
 
+/** Whether the entry carries either latch decorator, regardless of which. */
 export const hasLatch = entry =>
     decoratorFor(entry, '@@dont_activate_after_match') !== null
     || decoratorFor(entry, '@@keep_activate_after_match') !== null;
@@ -1122,7 +1122,7 @@ const wholeNumber = arg => (/^\d+$/.test(String(arg ?? '').trim()) ? Number(arg)
 
 
 /** The ST field patch an entry's decorators ask for; `{}` when none apply. Pure: mutates nothing.
- *  `ctx` is `{ chatLength, smartKeys }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
+ *  `ctx` is `{ chatLength }`. First write to a field wins, so a later decorator never overwrites an earlier one. */
 export function decoratorFields(entry, ctx = {}) {
     const lines = entryDecorators(entry);
     if (!lines.length) return {};
