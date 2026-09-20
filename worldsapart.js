@@ -1576,8 +1576,8 @@ async function rankOwnedScan(activated, args, skip) {
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
             pn: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
             dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
-            // Gated as cosine is: an entry with no chunks in the collection has no text score, and the scorer's 0 is a default.
-            text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
+            // Gated on eligibility, not on the cosine: the text score is lexical, so it is present whenever the entry has content, plugin or not.
+            text: x.textEligible && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
             // Gated on eligibility, not the value: 0 is both a miss and no scorable keys.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
             tokens: tokens[i],
@@ -1792,8 +1792,8 @@ async function reportLayout(verbose = false, countTokens = true) {
             waOrder: entry.order,
             ...(verbose ? {
                 cosine: item.score !== undefined ? Number(item.score.toFixed(5)) : null,
-                text: item.textScore ? Number(item.textScore.toFixed(2)) : null,
-                keys: item.keywordScore ? Number(item.keywordScore.toFixed(2)) : null,
+                text: item.textEligible && Number.isFinite(item.textScore) ? Number(item.textScore.toFixed(2)) : null,
+                keys: item.keysEligible === false ? null : (Number.isFinite(item.keywordScore) ? Number(item.keywordScore.toFixed(2)) : null),
                 // Full precision: a harness run is compared against these to show the runtime and the fit agree.
                 properNouns: Number.isFinite(item.properNouns) ? item.properNouns : null,
                 density: Number.isFinite(item.density) ? item.density : null,
