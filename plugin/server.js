@@ -261,13 +261,16 @@ export async function init(router) {
                         try { m = JSON.parse(line); } catch { return; }   // line 0 is metadata
                         // Hidden messages are not scanned live (C3), so they are not counted here.
                         if (m?.is_system || !String(m?.mes ?? '')) return;
-                        texts.push({ name: m.name, mes: dropChatTags ? dropTags(String(m.mes), dropChatTags) : String(m.mes) });
+                        texts.push({ name: m.name, mes: dropChatTags ? dropTags(String(m.mes), dropChatTags) : String(m.mes), is_user: Boolean(m.is_user) });
                     });
                     rl.on('close', resolve);
                     // An unreadable chat is skipped, not fatal — but counted, or the totals silently under-report.
                     rl.on('error', () => { unreadable = true; resolve(); });
                 });
                 if (unreadable) partial++;
+                // This file under its own values: the caller's {{char}} for it, and {{user}} off its user messages, over the caller's map.
+                const user = [...texts].reverse().find(t => t.is_user && t.name)?.name;
+                setMacros({ ...(request.body?.macros ?? {}), ...(entry?.macros ?? {}), ...(user ? { '{{user}}': user } : {}) });
                 // One file at a time, then merged: a hit is per message, so where the scan is split cannot change the total.
                 const got = countChatHits(keys, texts, unitOpts);
                 for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);

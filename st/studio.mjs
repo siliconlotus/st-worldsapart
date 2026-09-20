@@ -1,6 +1,6 @@
 // studio.mjs — Lorebook Studio (/wa-studio): the two-pane lorebook manager, all books on the left and the
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
-import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters, substituteParams } from '../../../../../script.js';
+import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters, substituteParams, this_chid } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
@@ -17,7 +17,7 @@ import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extens
 import { macroMap, setMacros, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, partitionLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
-import { labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
+import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
 import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
@@ -186,8 +186,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const firstLine = e => { const txt = String(e.content ?? '').trim(); const nl = txt.indexOf('\n'); return (nl < 0 ? txt : txt.slice(0, nl)) || t`(empty)`; };
     const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
+    /** ST's substitution, except that with no character selected a character macro stays unresolved rather than naming the system user or, in a group, nobody. */
+    const stSubstitute = tok => (/^\{\{char(IfNotGroup)?\}\}$/i.test(tok) && this_chid === undefined ? tok : substituteParams(tok));
     /** The book's macro map, every token its keys carry evaluated now: the audit, the chat scan and the Lab all read it. */
-    const macrosOf = () => macroMap(Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])]), substituteParams);
+    const macrosOf = () => macroMap(Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])]), stSubstitute);
     const rebuildScan = () => {
         // Every term is judged below, so an edited row drops the false the edit forced.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
@@ -1809,14 +1811,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
     // --- Cleanup tab ---
     /** Confirms which chats to scan, grouped by card and pre-ticked by binding; global candidates and the open chat start unticked. */
-    /** `verb` is the OK button's word: the Cleanup scans what is picked, the Lab loads it. */
-    const pickChats = async (candidates, verb = 'Scan') => {
+    /** `verb` is the OK button's word: the Cleanup scans what is picked, the Lab loads it. `load`, when given, is `{ depth, end }`: the
+     *  picker shows both as fields and writes the chosen values back, so one dialog settles what to load and how deep. */
+    const pickChats = async (candidates, verb = 'Scan', load = null) => {
         const wrap = document.createElement('div');
         // Scrolls: the shift-click list is every chat on the install, which is hundreds of rows on a real one (P1).
-        wrap.style.cssText = 'text-align:left;max-width:44rem;max-height:60vh;overflow-y:auto;';
-        const h3 = document.createElement('h3'); h3.style.cssText = 'margin:0 0 0.6em;';
+        wrap.style.cssText = 'text-align:left;max-width:44rem;display:flex;flex-direction:column;max-height:70vh;';
+        const h3 = document.createElement('h3'); h3.style.cssText = 'margin:0 0 0.6em;flex:0 0 auto;';
         h3.textContent = verb === 'Load' ? t`Load which chats?` : t`Check keys against which chats?`;
         wrap.append(h3);
+        // Two panes: the chat list scrolls on its own, so the total, the fields and the buttons below never scroll away with it.
+        const list = document.createElement('div');
+        list.style.cssText = 'flex:1 1 auto;min-height:6em;overflow-y:auto;';
+        wrap.append(list);
         // `why` is a binding id the pre-tick compares; the caption is its own string.
         const whyLabel = { 'chat-bound': t`chat-bound`, 'character-bound': t`character-bound`, 'character-bound (additional lorebook)': t`character-bound (additional lorebook)`, 'global (book is always active)': t`global (book is always active)`, 'not bound': t`not bound`, 'currently open': t`currently open` };
         // Grouped by card, keyed on the avatar: two cards can carry the same name, and a chat belongs to the file it lives beside.
@@ -1859,17 +1866,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 return cb;
             });
             // Closed, except a card holding a pre-ticked chat: what the scan is about to read is never hidden behind a twisty.
-            det.open = g.items.some(({ c }) => preTick(c));
+            det.open = !candidates.all;   // the book's own chats open to read; the every-chat listing is hundreds of rows, so it stays folded
             const sync = () => {
                 const on = boxes.filter(b => b.checked).length;
                 const chats = boxes.length === 1 ? t`${boxes.length} chat` : t`${boxes.length} chats`;
                 sum.innerHTML = `${escapeHtml(String(g.char || '—'))} <small style="opacity:0.6;">· ${escapeHtml(chats)}${on ? ` · ${escapeHtml(t`${on} selected`)}` : ''}</small>`;
             };
             syncers.push(sync); sync();
-            wrap.append(det);
+            list.append(det);
         }
         const tot = document.createElement('div');
-        tot.style.cssText = 'margin-top:0.6em;opacity:0.8;font-size:0.9em;';
+        tot.style.cssText = 'margin-top:0.6em;opacity:0.8;font-size:0.9em;flex:0 0 auto;';
         const syncTot = () => {
             const on = rows.filter(cb => cb.checked).length;
             tot.textContent = t`${on} chat(s) selected`;
@@ -1877,6 +1884,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         rows.forEach(cb => cb.addEventListener('change', syncTot));
         wrap.append(tot); syncTot();
+        let depthInp = null, endInp = null;
+        if (load) {
+            const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:12px;align-items:center;margin-top:0.6em;flex-wrap:wrap;flex:0 0 auto;';
+            const field = (label, value, min) => {
+                const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:6px;align-items:center;';
+                const inp = document.createElement('input'); inp.type = 'number'; inp.className = 'text_pole'; inp.style.cssText = 'width:6em;margin:0;'; inp.value = String(value); inp.min = String(min);
+                l.append(document.createTextNode(label), inp); row.append(l);
+                return inp;
+            };
+            depthInp = field(t`How many messages deep, per chat? (0 for all)`, load.depth, 0);
+            endInp = field(t`Last message ID (-1 for the last message)`, load.end, -1);
+            wrap.append(row);
+        }
         if (candidates.isGlobal && !candidates.all) {
             const g = document.createElement('small');
             g.style.cssText = 'display:block;opacity:0.75;margin-top:0.4em;';
@@ -1885,6 +1905,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         const pop = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: verb === 'Load' ? t`Load selected` : t`Scan selected`, cancelButton: t`Cancel`, wide: false });
         if (await pop.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
+        if (load) {
+            const d = Math.floor(Number(depthInp.value)); if (d >= 0) load.depth = d;
+            const e = Math.floor(Number(endInp.value)); load.end = Number.isFinite(e) && e >= -1 ? e : -1;
+        }
         return rows.filter(cb => cb.checked).map(cb => candidates[Number(cb.dataset.i)]);
     };
 
@@ -1956,7 +1980,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             try {
                 const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
                     method: 'POST', headers: getRequestHeaders(),
-                    body: JSON.stringify({ keys, macros, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+                    body: JSON.stringify({ keys, macros, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file, macros: c.char ? { '{{char}}': c.char } : {} })) }),
                 });
                 if (!r.ok) throw new Error(String(r.status));
                 j = await r.json();
@@ -1989,18 +2013,38 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const spec = settings().dropChatTags;
         // The same strip the runtime applies at intake, so the audit counts the text WA actually reads, not the trackers in it.
         const strip = ms => (spec?.trim() ? ms.map(m => ({ ...m, mes: dropTags(String(m.mes ?? ''), spec) })) : ms);
-        const msgs = [];
+        // Each chat under its own values: {{char}} its character, {{user}} the name on its user messages. The open chat of a
+        // group has no one speaker, so it is counted once per member and a unit counts if any member's name makes it match.
+        const base = macrosOf();
+        const members = ctx.groupId
+            ? (ctx.groups?.find(g => String(g.id) === String(ctx.groupId))?.members ?? []).map(a => characters.find(ch => ch?.avatar === a)?.name).filter(Boolean)
+            : [];
         for (const c of picked) {
             if (served.has(c)) continue;
-            const got = c.open
-                ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes) }))
-                : await fetchChatMessages(c);
-            msgs.push(...strip(got));
-        }
-        if (msgs.length) {
-            add(countChatHits(keys, msgs, unitOpts));
+            const got = strip(c.open
+                ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: m.is_user }))
+                : await fetchChatMessages(c));
+            if (!got.length) continue;
+            const user = [...got].reverse().find(m => m?.is_user && m?.name)?.name;
+            const chatMap = { ...base, ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) };
+            if (c.open && members.length > 1) {
+                const by = new Map(), typedBy = new Map();
+                let messages = 0, unit;
+                const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
+                for (const name of members) {
+                    setMacros({ ...chatMap, '{{char}}': name });
+                    const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true });
+                    messages = r.messages; unit = r.unit;
+                    union(by, r.hitsBy); union(typedBy, r.typedBy);
+                }
+                add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
+            } else {
+                setMacros(chatMap);
+                add(countChatHits(keys, got, unitOpts));
+            }
             via = via ? 'server + browser' : 'browser';
         }
+        setMacros(base);
         return { totals, typedTotals, seen, via, unit };
     };
 
@@ -2283,6 +2327,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let labRunSource = null;     // how to re-read what the last run ran over: `{ label, load }`, so a re-run sees the books
                                  // as they are now: a snapshot taken at apply time would still hold a key since deleted   // the source behind the rendering: every tag, entity and delimiter shown at once
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
+    let labMacros = {};   // the Lab's overrides, token -> value; a blank field restores SillyTavern's value
+    let labFlagOverride = {};   // a run's override of the entries' own flags, per flag; a new run clears it, a re-run keeps it
+    let labChatMacros = {};     // what the loaded chats say {{char}} and {{user}} are, where they agree; under the Lab's own overrides, over ST's values
+    let labChatMixed = new Set(); // tokens the loaded chats disagree on: matched per part while the parts stand, the field saying so
+    let labParts = null;          // the loaded chats as parts, each with its own map and offset; null once the text is edited or erased
+    let labRunEntries = [];     // what the last run scanned, for the boxes' as-written state
 
     const LAB_JOIN = `\n\n${'-'.repeat(24)}\n\n`;
     const labChatMessages = (full, depth, end) => labMessages(full, {
@@ -2293,9 +2343,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const chatHaystack = (override, end = -1) => {
         const spec = settings().dropChatTags;
         const depth = Number(override ?? (settings().messageDepth || world_info_depth));
-        const { messages, hidden } = labChatMessages(getContext().chat ?? [], depth, end);
+        // 0 is every message here, where a per-entry scanDepth of 0 means none: the Lab reads a chat, it does not gate one.
+        const { messages, hidden } = labChatMessages(getContext().chat ?? [], depth === 0 ? Infinity : depth, end);
         // Reports depth and the is_system drop: neither is visible in the pane, and both change the count.
-        const bits = [messages.length === 1 ? t`${messages.length} message at depth ${depth}` : t`${messages.length} messages at depth ${depth}`];
+        const n = messages.length;
+        const bits = [depth === 0 ? (n === 1 ? t`${n} message, the whole chat` : t`${n} messages, the whole chat`) : (n === 1 ? t`${n} message at depth ${depth}` : t`${n} messages at depth ${depth}`)];
         if (end >= 0) bits.push(t`ending at #${end}`);
         if (hidden) bits.push(hidden === 1 ? t`${hidden} hidden message skipped` : t`${hidden} hidden messages skipped`);
         // dropChatTags removes the named element WITH its contents, so a tracker block leaves a gap in the pane.
@@ -2310,13 +2362,32 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Fetched together: the chats are independent, and Promise.all keeps `picked` order, which `parts` reads.
         // byId: message ids count hidden messages, so the cut is on the raw chat, as chatHaystack cuts the open one.
         const loaded = await Promise.all(picked.map(c => (c.open ? Promise.resolve(getContext().chat ?? []) : fetchChatMessages(c, { byId: true }))));
+        // The chats say who they are about: a character by name, a persona off the user messages. Where they agree the value
+        // stands; where they differ the token is unresolved, one haystack matching under one map.
+        labChatMacros = {}; labChatMixed = new Set();
+        const agree = (tok, values) => {
+            const set = new Set(values.filter(Boolean));
+            if (set.size === 1) labChatMacros[tok] = [...set][0];
+            else if (set.size > 1) { labChatMacros[tok] = tok; labChatMixed.add(tok); }
+        };
+        agree('{{char}}', picked.map(c => c.char));
+        agree('{{user}}', loaded.map(ms => [...(ms ?? [])].reverse().find(m => m?.is_user && m?.name)?.name));
+        const chatParts = []; let at = 0;
         for (const [i, c] of picked.entries()) {
-            const { messages } = labChatMessages(loaded[i], depth, end);
+            const { messages } = labChatMessages(loaded[i], depth === 0 ? Infinity : depth, end);
             total += messages.length;
-            parts.push(`${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(LAB_JOIN)}`);
+            const block = `${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(LAB_JOIN)}`;
+            parts.push(block);
+            // Each block matches under its own chat's values; `at` is its offset in the text joined below.
+            const user = [...(loaded[i] ?? [])].reverse().find(m => m?.is_user && m?.name)?.name;
+            chatParts.push({ text: block, at, macros: { ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) } });
+            at += block.length + 2;
         }
+        labParts = chatParts;
         const chats = picked.length === 1 ? t`${picked.length} chat` : t`${picked.length} chats`;
-        const line = total === 1 ? t`${total} message from ${chats} at depth ${depth}` : t`${total} messages from ${chats} at depth ${depth}`;
+        const line = depth === 0
+            ? (total === 1 ? t`${total} message from ${chats}, whole chats` : t`${total} messages from ${chats}, whole chats`)
+            : (total === 1 ? t`${total} message from ${chats} at depth ${depth}` : t`${total} messages from ${chats} at depth ${depth}`);
         toastr.info(end >= 0 ? line + ', ' + t`ending at #${end}` : line, t`Key Lab`);
         return parts.join('\n\n');
     };
@@ -2417,11 +2488,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** Runs `entries` against the haystack and shows the result; `label` names what ran, for the header. */
-    const applyFrom = async (label, load) => {
+    const applyFrom = async (label, load, { keep = false } = {}) => {
         labRunSource = { label, load };
-        const run = runBook(await load(), labHay, {
+        if (!keep) labFlagOverride = {};
+        const parts = labPartsFor();
+        if (!parts) setMacros(labMacroMap());
+        labRunEntries = await load();
+        const run = runBook(labRunEntries, labHay, {
             matchWindow: labWindow,
             context: 30,
+            override: labFlagOverride,
+            parts,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
             skipVectorized: labSkipVector,
         });
@@ -2461,8 +2538,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!scanned) return `${head}<div style="opacity:0.6;">${escapeHtml(t`No entry there has a key to match with.`)}</div>`;
         if (!entries.length) return head;
         return head + entries.map(({ entry, rows }) => {
+            const { caseSensitive, wholeWords } = entryFlags(entry, { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words });
             const title = `<b style="overflow-wrap:anywhere;">${escapeHtml(wiTitleOf(entry))}</b>`
-                + `<small style="opacity:0.6;"> ${escapeHtml(rows.length === 1 ? t`${rows.length} key` : t`${rows.length} keys`)}</small>`;
+                + `<small style="opacity:0.6;"> ${escapeHtml(rows.length === 1 ? t`${rows.length} key` : t`${rows.length} keys`)}`
+                + ` · ${escapeHtml(caseSensitive ? t`case-sensitive` : t`case-insensitive`)} · ${escapeHtml(wholeWords ? t`whole words` : t`substring`)}</small>`;
             const bookLine = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
             return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${bookLine}</summary>`
                 + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))), entry)).join('')}</div></details>`;
@@ -2601,7 +2680,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
-    const rerunLab = () => { if (labRunSource) applyFrom(labRunSource.label, labRunSource.load); };
+    const rerunLab = () => { if (labRunSource) applyFrom(labRunSource.label, labRunSource.load, { keep: true }); };
 
     /** Scrolls `el` into view and rings it briefly, opening whatever it is folded inside. */
     const revealIn = el => {
@@ -2627,9 +2706,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         });
     };
 
+    /** Every token the typed keys and the book carry, at SillyTavern's value. */
+    const labBaseMap = () => macroMap([labKeys, labSec, ...Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])])], stSubstitute);
+    /** The map the field shows and a part-less scan matches under: the Lab's overrides, else what the loaded chats agree on, else SillyTavern's value. */
+    const labMacroMap = () => Object.fromEntries(Object.entries(labBaseMap()).map(([tok, v]) => [tok, Object.hasOwn(labMacros, tok) ? labMacros[tok] : Object.hasOwn(labChatMacros, tok) ? labChatMacros[tok] : v]));
+    /** The loaded chats as parts for the model, each under its own values with the Lab's overrides on top; null without a load. */
+    const labPartsFor = () => labParts?.map(p => ({ ...p, macros: { ...labBaseMap(), ...p.macros, ...labMacros } })) ?? null;
+
     /** The Lab's result plus the colour to draw it in, from whatever the panes hold now. */
     const scanLab = () => {
+        const parts = labPartsFor();
+        if (!parts) setMacros(labMacroMap());
         const r = labScan({
+            parts,
             hay: labHay,
             keys: labKeys,
             sec: labSec,
@@ -2639,6 +2728,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             wholeWords: labWhole,
             context: 30,
             run: labRun,
+            override: labFlagOverride,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
         });
         const ink = (sp, a) => labInk(Math.max(0, r.keys.indexOf(sp.key)), a);
@@ -2662,7 +2752,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ta.addEventListener('input', () => { set(ta.value); clearTimeout(timer); timer = setTimeout(repaint, 180); });
             return ta;
         };
-        const hayBox = box(t`Paste any text to match against… a line of dashes separates one message from the next`, () => labHay, v => { labHay = v; });
+        const hayBox = box(t`Paste any text to match against… a line of dashes separates one message from the next`, () => labHay, v => { labHay = v; labParts = null; });   // an edit moves every offset, so the parts stand down
         hayBox.style.flex = '1 1 auto';
         // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had. height and
         // margin beat .text_pole's `fit-content` and `5px 0`, which would let it hug its content and never scroll.
@@ -2708,7 +2798,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         hayErase.title = t`Clear the text`;
         hayErase.style.cssText = 'position:absolute;top:5px;right:59px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
             + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
-        hayErase.addEventListener('click', () => { labHay = ''; hayBox.value = ''; hayBeforeEdit = null; labCommitted = false; repaint(); hayBox.focus(); });
+        hayErase.addEventListener('click', () => { labHay = ''; hayBox.value = ''; hayBeforeEdit = null; labCommitted = false; labChatMacros = {}; labChatMixed = new Set(); labParts = null; repaint(); hayBox.focus(); });
         hayWrap.append(hayBox, hayRead, srcToggle, hayCancel, hayErase, hayToggle);
         const keyBox = box(t`Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey`, () => labKeys, v => { labKeys = v; });
         const gateBox = document.createElement('details');
@@ -2753,11 +2843,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             labRun = null;
             repaint();
         });
-        panes.append(hayWrap, keyWrap, gateBox, bookList);
 
         const opts = document.createElement('div');
-        // One line: the labels shrink, wrapping their own text; the tools group never shrinks.
-        opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
+        // One line above the keys, which is what the flags and the window apply to; the labels shrink, wrapping their own text.
+        opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:2px 0;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
         const flag = (label, get, set) => {
             const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
             const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();
@@ -2765,11 +2854,51 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             l.append(c, document.createTextNode(label));
             return l;
         };
-        opts.append(
-            flag(t`Case sensitive`, () => labCase, v => { labCase = v; }),
-            flag(t`Match whole words`, () => labWhole, v => { labWhole = v; }),
-            flag(t`Skip vector entries`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); }),
-        );
+        const caseFlag = flag(t`Case sensitive`, () => labCase, v => { if (labRun) { labFlagOverride.caseSensitive = v; rerunLab(); } else labCase = v; });
+        const wholeFlag = flag(t`Match whole words`, () => labWhole, v => { if (labRun) { labFlagOverride.wholeWords = v; rerunLab(); } else labWhole = v; });
+        opts.append(caseFlag, wholeFlag, flag(t`Skip vector entries`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); }));
+        // Typed keys: the boxes are the typed flags. A run: each box is the entries' own flag, indeterminate where they differ,
+        // and an override where one is set, marked as drift so a toggle reads as the experiment it is.
+        const renderFlagState = () => {
+            const defaults = { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words };
+            const own = f => { const vals = new Set(labRunEntries.map(e => entryFlags(e, defaults)[f])); return vals.size === 1 ? [...vals][0] : null; };
+            for (const [l, f, typed] of [[caseFlag, 'caseSensitive', labCase], [wholeFlag, 'wholeWords', labWhole]]) {
+                const c = l.querySelector('input');
+                if (!labRun) { c.indeterminate = false; c.checked = typed; l.style.color = ''; l.title = ''; continue; }
+                const as = own(f), forced = labFlagOverride[f];
+                c.indeterminate = as === null && forced === undefined;
+                c.checked = forced ?? as ?? false;
+                const drift = forced !== undefined && forced !== as;
+                l.style.color = drift ? '#d9b74a' : '';
+                l.title = drift
+                    ? (as === null ? t`Forced for every entry in the run; each entry has its own setting.` : (as ? t`Overriding: the entry has this on.` : t`Overriding: the entry has this off.`))
+                    : (as === null ? t`As each entry has it; entries in this run differ. Toggle to force one setting.` : t`As the entry has it. Toggle to test the other setting on this run.`);
+            }
+        };
+        // Its own line above the haystack; redrawn on every repaint, since the typed keys decide which tokens show.
+        const macroRow = document.createElement('div');
+        macroRow.style.cssText = 'flex:0 0 auto;display:none;flex-wrap:wrap;gap:6px 12px;align-items:center;opacity:0.8;font-size:0.9em;padding:2px 0;';
+        const renderMacroRow = () => {
+            const map = labMacroMap();
+            const tokens = Object.keys(map);
+            macroRow.innerHTML = '';
+            macroRow.style.display = tokens.length ? 'flex' : 'none';
+            if (!tokens.length) return;
+            const cap = document.createElement('span'); cap.style.opacity = '0.7'; cap.textContent = t`Macros:`;
+            cap.title = t`What each macro in the keys expands to here. Edit a value to test another persona or speaker; a blank field restores SillyTavern's value.`;
+            macroRow.append(cap);
+            for (const tok of tokens) {
+                const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;';
+                const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.style.cssText = 'width:12em;margin:0;';
+                // A value equal to its token is unresolved: no character is open, or a group has no speaker outside a generation.
+                const unresolved = map[tok] === tok;
+                inp.value = unresolved ? '' : map[tok];
+                inp.placeholder = !unresolved ? tok : labChatMixed.has(tok) ? (labParts ? t`${tok}: per chat` : t`${tok}: the loaded chats differ`) : t`${tok}: no character open`;
+                inp.addEventListener('change', () => { if (inp.value === '') delete labMacros[tok]; else labMacros[tok] = inp.value; rerunLab(); repaint(); });
+                l.append(document.createTextNode(tok), inp);
+                macroRow.append(l);
+            }
+        };
         const winLabel = document.createElement('label');
         winLabel.style.cssText = 'display:flex;gap:6px;align-items:center;';
         winLabel.title = t`Match window, as set in the settings`;
@@ -2789,41 +2918,39 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             return i;
         };
         const tools = document.createElement('span');
-        tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex-shrink:0;margin-left:auto;';
-        opts.append(winLabel, tools);
+        tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex:0 0 auto;align-self:flex-end;padding:6px 0 2px;';
+        opts.append(winLabel);
+        // After every const above it is declared: this runs while the Lab is still being built.
+        panes.append(macroRow, hayWrap, opts, keyWrap, gateBox, bookList);
         tools.append(
             labTool('fa-comment-dots', t`Load current chat to scan depth ${settings().messageDepth || world_info_depth}. Shift-click to select depth.`,
                 async ev => {
                     // No character or group: there is no chat to read, and nothing here may cause ST to make one.
                     if (getContext().characterId === undefined && !getContext().groupId) { toastr.info(t`No chat is open.`, t`Key Lab`); return; }
                     const depth = ev.shiftKey
-                        ? await numberPrompt(t`Load chat`, t`How many messages deep?`, settings().messageDepth || world_info_depth, 1)
+                        ? await numberPrompt(t`Load chat`, t`How many messages deep? (0 for all)`, settings().messageDepth || world_info_depth, 0)
                         : undefined;
                     if (ev.shiftKey && depth == null) return;
                     const end = ev.shiftKey ? await numberPrompt(t`Load chat`, t`Last message ID (-1 for the last message)`, -1, -1) : -1;
                     if (ev.shiftKey && end == null) return;
-                    labHay = chatHaystack(depth, end);
+                    labHay = chatHaystack(depth, end); labParts = null;
                     hayBox.value = labHay;
                     labCommitted = true;   // imported text is for reading, not editing
                     repaint();
                 }),
-            labTool('fa-comments', t`Load chats to scan depth ${settings().messageDepth || world_info_depth}: pick from the chats bound to this book, or from every chat when none is. Shift-click to list every chat and select depth.`,
+            labTool('fa-comments', t`Load chats: pick from the chats bound to this book, or from every chat when none is, and set the depth. Shift-click to list every chat.`,
                 async ev => {
-                    const depth = ev.shiftKey
-                        ? await numberPrompt(t`Load chats`, t`How many messages deep, per chat?`, settings().messageDepth || world_info_depth, 1)
-                        : undefined;
-                    if (ev.shiftKey && depth == null) return;
-                    const end = ev.shiftKey ? await numberPrompt(t`Load chats`, t`Last message ID (-1 for the last message)`, -1, -1) : -1;
-                    if (ev.shiftKey && end == null) return;
                     // Bound chats when there are any; otherwise every chat, nothing pre-ticked. Shift-click lists every chat regardless.
                     let found = ev.shiftKey ? [] : await findBookChats(false);
                     if (!found.length) found = await findBookChats(true);
                     const ctx = getContext(); const openName = String(ctx.chatId ?? '');
                     if (openName && !found.some(f => f.file.startsWith(openName))) found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: t`${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
                     if (!found.length) { toastr.warning(t`No chats found.`, t`Key Lab`); return; }
-                    const picked = await pickChats(found, 'Load');
+                    // Depth and end are fields of the same dialog, so what to load and how deep is one decision.
+                    const load = { depth: settings().messageDepth || world_info_depth, end: -1 };
+                    const picked = await pickChats(found, 'Load', load);
                     if (!picked?.length) return;
-                    labHay = await chatsHaystack(picked, depth, end);
+                    labHay = await chatsHaystack(picked, load.depth, load.end);
                     hayBox.value = labHay;
                     labCommitted = true;
                     repaint();
@@ -2836,7 +2963,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 labLogic = picked.logic;
                 keyBox.value = labKeys; secBox.value = labSec; logicSel.value = labLogic;
                 growKeys();
-                if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
+                gateBox.open = picked.sec.length > 0;   // an imported gate must not land shut and invisible, and an entry without one leaves no stale tray open
                 repaint();
             }),
             labTool('fa-book', t`Apply the books attached to this chat, hits only. Shift-click to pick any book.`,
@@ -2847,8 +2974,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 }),
         );
         const out = document.createElement('div');
-        out.style.cssText = 'flex:2 1 0;overflow:auto;min-width:0;min-height:0;';
+        out.style.cssText = 'flex:1 1 auto;overflow:auto;min-width:0;min-height:0;';
+        const right = document.createElement('div');
+        right.style.cssText = 'flex:2 1 0;display:flex;flex-direction:column;min-width:0;min-height:0;';
+        right.append(tools, out);
         const repaint = () => {
+            renderMacroRow();
+            renderFlagState();
             const { ink, rows, spans } = scanLab();
             const digestTop = out.scrollTop;   // an edit repaints the digest, and the row acted on is wherever it was
             out.innerHTML = labRun
@@ -2903,8 +3035,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
         body.style.cssText = 'flex:1 1 auto;display:flex;gap:10px;padding:0 8px 8px;min-height:0;';
-        body.append(panes, out);
-        pane.append(opts, body);
+        body.append(panes, right);
+        pane.append(body);
     };
 
     const TABS = [['explorer', t`Explorer`], ['cleanup', t`Bulk Cleanup`], ['lab', t`Key Lab`]];

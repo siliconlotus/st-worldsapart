@@ -18,12 +18,25 @@ export function setMacros(map) {
     macros = next;
     macroStamp++;
 }
+/** The map in force, for a caller that sets its own and puts it back. */
+export const getMacros = () => macros;
 /** Every macro token in `texts`, as written, once each. */
 export const macroTokens = texts => [...new Set([].concat(...(texts ?? []).map(t => String(t ?? '').match(MACRO_RE) ?? [])))];
 /** The tokens of `texts` through `substitute`: the map setMacros takes, and the one a capture records. */
 export const macroMap = (texts, substitute) => Object.fromEntries(macroTokens(texts).map(tok => [tok, String(substitute(tok) ?? '')]));
-/** `text` with each known token replaced by its value, an unknown token as written; `escape` is applied to a value, for a pattern body. */
-export const expandMacros = (text, escape = s => s) => String(text ?? '').replace(MACRO_RE, tok => (Object.hasOwn(macros, tok) ? escape(macros[tok]) : tok));
+// A token with a word pick: `{{user}}[2]` is the second word of the value, counting from one, negative from the end.
+const MACRO_PICK_RE = /(\{\{[^{}]+\}\})\[(-?\d+)\]/g;
+/** `text` with each known token replaced by its value, or by one word of it under `[N]`, an unknown token as written; `escape` is
+ *  applied to what is inserted, for a pattern body. A pick the value has no word for inserts nothing. */
+export const expandMacros = (text, escape = s => s) => String(text ?? '')
+    .replace(MACRO_PICK_RE, (m, tok, n) => {
+        if (!Object.hasOwn(macros, tok)) return m;
+        const words = macros[tok].split(/\s+/).filter(Boolean);
+        const i = Number(n);
+        const w = i > 0 ? words[i - 1] : i < 0 ? words[words.length + i] : undefined;
+        return w === undefined ? '' : escape(w);
+    })
+    .replace(MACRO_RE, tok => (Object.hasOwn(macros, tok) ? escape(macros[tok]) : tok));
 /** A `/body/flags` key with each value inserted escaped, so a name is text in the pattern. Diverges from core, which inserts it raw. */
 export const expandRegex = raw => { const m = String(raw).match(REGEX_KEY_RE); return m ? `/${expandMacros(m[1], escapeRegex)}/${m[2]}` : String(raw); };
 /** The cache id of `raw` under the map in force: an AST built under another map is never reused. */
@@ -54,7 +67,7 @@ function regexLiteral(s) {
         else if (c === '/' && !inClass) {
             const body = s.slice(1, i);
             if (!body) continue;
-            const f = s.slice(i + 1).match(new RegExp(`^[${REGEX_FLAGS}]*(?=[\\s()|&]|::|\\^|$)`));
+            const f = s.slice(i + 1).match(new RegExp(`^[${REGEX_FLAGS}]*(?=[\\s()|&?]|::|\\^|$)`));
             if (!f) continue;
             try { new RegExp(body, f[0]); } catch { continue; }
             return { value: `/${body}/${f[0]}`, rest: s.slice(i + 1 + f[0].length) };
@@ -73,13 +86,16 @@ export function tokenize(input) {
         if (src[0] === '(') { tokens.push({ type: 'LPAREN' }); src = src.slice(1); continue; }
         if (src[0] === ')') {
             src = src.slice(1);
-            // `~N` and the weight ride on the RPAREN in either order; lexed as terms of their own they are punctuation that can never match. Digits required: a bare `~` is text.
-            let p = src.match(/^~(\d+)/);
-            if (p) src = src.slice(p[0].length);
-            const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
-            if (w) src = src.slice(w[0].length);
-            if (!p && (p = src.match(/^~(\d+)/))) src = src.slice(p[0].length);
-            tokens.push({ type: 'RPAREN', weight: w ? parseFloat(w[1]) : undefined, near: p ? parseInt(p[1], 10) : undefined });
+            // `~N`, the weight and `?` ride on the RPAREN in any order; lexed as terms of their own they are punctuation that can never match. Digits required: a bare `~` is text.
+            let weight, near, optional = false;
+            // Each kind once: a second `~N` or weight is left in `src` as the stray term the validator names.
+            for (let m2; (m2 = src.match(/^(?:~(\d+)|(?:::|\^)(\d+(?:\.\d+)?)|(\?))/));) {
+                if (m2[1] !== undefined) { if (near !== undefined) break; near = parseInt(m2[1], 10); }
+                else if (m2[2] !== undefined) { if (weight !== undefined) break; weight = parseFloat(m2[2]); }
+                else { if (optional) break; optional = true; }
+                src = src.slice(m2[0].length);
+            }
+            tokens.push({ type: 'RPAREN', weight, near, ...(optional && { optional }) });
             continue;
         }
         m = src.match(/^(&&|\|\||&|\||\+|!|-)/) ?? src.match(/^(AND|OR|NOT|XOR)\b(?=\s|[()]|$)/i);
@@ -93,15 +109,22 @@ export function tokenize(input) {
             // A well-formed but uncompilable `/…/flags` is still a REGEX, as it is as a bare key; only the shape being absent makes a literal.
             const re = regexLiteral(src) ?? (REGEX_KEY_RE.test(src) ? { value: src, rest: '' } : null);
             if (re) {
-                const w = re.rest.match(/^(?:::|\^)(\d+(?:\.\d+)?)/);
-                src = w ? re.rest.slice(w[0].length) : re.rest;
-                tokens.push({ type: 'REGEX', value: re.value, weight: w ? parseFloat(w[1]) : 1.0 });
+                let rest = re.rest, weight = 1.0, optional = false;
+                let sawWeight = false;
+                for (let m2; (m2 = rest.match(/^(?:(?:::|\^)(\d+(?:\.\d+)?)|(\?))/));) {
+                    if (m2[2]) { if (optional) break; optional = true; } else { if (sawWeight) break; sawWeight = true; weight = parseFloat(m2[1]); }
+                    rest = rest.slice(m2[0].length);
+                }
+                src = rest;
+                tokens.push({ type: 'REGEX', value: re.value, weight, ...(optional && { optional }) });
                 continue;
             }
         }
         // A term: optional flags, then a phrase closed by the first mark of its opener's family, or a run of non-syntax characters.
         const fl = src.match(/^[=^]{0,2}/)[0];
         const open = src[fl.length];
+        // Flags in front of a group ride on the LPAREN; the parser stamps every term inside.
+        if (fl && open === '(') { tokens.push({ type: 'LPAREN', isExact: fl.includes('='), isCaseSensitive: fl.includes('^') }); src = src.slice(fl.length + 1); continue; }
         const fam = open === undefined ? undefined : QUOTE_FAMILIES.find(f => f.includes(open));
         let close = -1;
         if (fam) for (let i = fl.length + 1; i < src.length; i++) if (fam.includes(src[i])) { close = i; break; }
@@ -112,23 +135,31 @@ export function tokenize(input) {
             if (!u) { src = src.slice(1); continue; } // lone stray char — drop
             value = u[0]; src = src.slice(fl.length + u[0].length);
         }
-        let weight = 1.0, near;
+        let weight = 1.0, near, optional = false;
+        // A trailing `?` marks the term optional; a lone `?` stays the text it is, for the validator to name.
+        const opt = v => (v.length > 1 && v.endsWith('?') ? (optional = true, v.slice(0, -1)) : v);
         // Weight is `::` or `^N`, never `:`, so `10:30`, `re:code` and URLs need no quoting; a delimiter followed by non-digits stays in the term.
         if (quoted) {
-            // `"…"~N` is taken so the validator can refuse it; left in `src` it would be a term that never matches.
-            const p = src.match(/^~(\d+)/);
-            if (p) { near = parseInt(p[1], 10); src = src.slice(p[0].length); }
-            const w = src.match(/^(?:::|\^)(\d+(?:\.\d+)?)/); // quoted: weight sits after the close quote
-            if (w) { weight = parseFloat(w[1]); src = src.slice(w[0].length); }
+            // `~N`, a weight and `?` sit after the close quote in any order; `~N` is taken so the validator can refuse it.
+            let sawWeight = false;
+            for (let m2; (m2 = src.match(/^(?:~(\d+)|(?:::|\^)(\d+(?:\.\d+)?)|(\?))/));) {
+                if (m2[1] !== undefined) { if (near !== undefined) break; near = parseInt(m2[1], 10); }
+                else if (m2[2] !== undefined) { if (sawWeight) break; sawWeight = true; weight = parseFloat(m2[2]); }
+                else { if (optional) break; optional = true; }
+                src = src.slice(m2[0].length);
+            }
         } else {
+            value = opt(value);
             const w = value.match(/^(.+?)(?:::|\^)(\d+(?:\.\d+)?)$/);
             if (w) { value = w[1]; weight = parseFloat(w[2]); }
+            value = opt(value);
             // A macro term takes `~N` as a group does, its words being one: `{{user}}~0`, in either order with a weight. On any other term `~N` is text.
             if (HAS_MACRO.test(value)) {
                 const p = value.match(/^(.+?)~(\d+)$/);
                 if (p) { value = p[1]; near = parseInt(p[2], 10); }
                 const w2 = value.match(/^(.+?)(?:::|\^)(\d+(?:\.\d+)?)$/);
                 if (w2) { value = w2[1]; weight = parseFloat(w2[2]); }
+                value = opt(value);
             }
         }
         if (!value) continue;
@@ -140,6 +171,7 @@ export function tokenize(input) {
             quoted,
             weight,
             ...(near !== undefined && { near }),
+            ...(optional && { optional }),
         });
     }
     return tokens;
@@ -191,8 +223,19 @@ export function parse(tokens) {
         if (t.type === 'LPAREN') {
             if (d >= MAX_DEPTH) throw tooDeep();
             const node = parseOr(d + 1);
-            let w, near;
-            if (peek()?.type === 'RPAREN') { ({ weight: w, near } = tokens[i]); i++; }
+            let w, near, optional;
+            if (peek()?.type === 'RPAREN') { ({ weight: w, near, optional } = tokens[i]); i++; }
+            if (node && optional) node.optional = true;
+            // A flagged group: every TERM under it takes the flags, a REGEX keeps its own case, as a macro's words take a flag.
+            if (node && (t.isExact || t.isCaseSensitive)) {
+                const stamp = n => {
+                    if (!n) return;
+                    if (n.type === 'TERM') { if (t.isExact) n.isExact = true; if (t.isCaseSensitive) n.isCaseSensitive = true; }
+                    else if (n.type === 'NOT') stamp(n.operand);
+                    else if (n.type !== 'REGEX') { stamp(n.left); stamp(n.right); }
+                };
+                stamp(node);
+            }
             // `groupWeight`, never `weight`: a TERM already multiplies its own into wsum, and `(fire::2)::3` is both.
             if (node && w !== undefined) node.groupWeight = (node.groupWeight ?? 1) * w;
             // `??=`: in `((a b)~2)~3` the inner clusters are the outer's one conjunct, so the inner slack is the one that binds.
@@ -211,7 +254,7 @@ function expandAst(node) {
     if (!node) return null;
     if (node.type === 'TERM') {
         if (!HAS_MACRO.test(node.value)) return node;
-        const { near, groupWeight, weight = 1, ...leaf } = node;
+        const { near, groupWeight, weight = 1, optional, ...leaf } = node;
         const text = expandMacros(node.value);
         const words = node.quoted ? [text] : text.split(/\s+/).filter(Boolean);
         if (!words.length) return null;
@@ -220,6 +263,7 @@ function expandAst(node) {
         if (near !== undefined) out.near = near;
         const gw = (groupWeight ?? 1) * weight;
         if (gw !== 1) out.groupWeight = gw;
+        if (optional) out.optional = true;
         return out;
     }
     if (node.type === 'REGEX') return HAS_MACRO.test(node.value) ? { ...node, value: expandRegex(node.value) } : node;
@@ -231,12 +275,15 @@ function expandAst(node) {
 /** The AST every consumer builds: parsed, then expanded under the map in force. Cache it under astId. */
 export const buildAst = raw => expandAst(parse(tokenize(raw)));
 
-/** Whether any term is reachable without passing through an odd number of NOTs — evaluate() gives NOT no score. */
-const hasPositiveTerm = (node, negated = false) => {
+/** Whether the key matches a text holding none of its terms: an optional node does, a NOT of what does not, an AND of two
+ *  that do, an OR of one, an XOR of exactly one. Such a key fires on almost every message. */
+const matchesEmpty = node => {
     if (!node) return false;
-    if (node.type === 'TERM' || node.type === 'REGEX') return !negated;
-    if (node.type === 'NOT') return hasPositiveTerm(node.operand, !negated);
-    return hasPositiveTerm(node.left, negated) || hasPositiveTerm(node.right, negated);
+    if (node.optional) return true;
+    if (node.type === 'TERM' || node.type === 'REGEX') return false;
+    if (node.type === 'NOT') return !matchesEmpty(node.operand);
+    const l = matchesEmpty(node.left), r = matchesEmpty(node.right);
+    return node.type === 'AND' ? l && r : node.type === 'OR' ? l || r : l !== r;
 };
 
 /** Structural problems in a key: `error` cannot do what the author meant under any text, `warn` is legal and probably a typo. Structure only; whether a term ever occurs is the audit's df question. */
@@ -255,6 +302,7 @@ const decomposedFinding = raw => {
 export const KEY_ALERTS = Object.freeze({
     'no-terms': { severity: 'error', label: 'No terms' },
     'negation-only': { severity: 'error', label: 'Negation only' },
+    'no-required-term': { severity: 'error', label: 'No required term' },
     'too-deep': { severity: 'error', label: 'Nested too deep' },
     'stray-weight': { severity: 'error', label: 'Stray weight' },
     'stray-proximity': { severity: 'error', label: 'Stray proximity' },
@@ -320,8 +368,11 @@ export function validateSmartKey(raw) {
         out.push(new KeyAlert('too-deep', `The key nests deeper than ${MAX_DEPTH} groups or negations, which is past what a keyword needs. Flatten some of the “(” levels — or split it into two keys.`));
         return out;   // a key refused at parse needs no second opinion
     }
-    if (!hasPositiveTerm(ast)) {
-        out.push(new KeyAlert('negation-only', 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.'));
+    if (matchesEmpty(ast)) {
+        const hasOptional = n => !!n && (n.optional || hasOptional(n.operand) || hasOptional(n.left) || hasOptional(n.right));
+        out.push(hasOptional(ast)
+            ? new KeyAlert('no-required-term', 'Nothing here is required, so this matches a message with none of its terms. Make one term required — or, for any of several, write them with OR.')
+            : new KeyAlert('negation-only', 'Every term is negated, so this matches whenever they are absent — which is almost always. Add a term that must be present.'));
     }
 
     // A weight lexes as a term only when it followed neither a term nor a group, so it cannot be anything but misplaced.
@@ -529,13 +580,16 @@ const termRegex = node => {
 /** Evaluates an AST against a text; `acHits` is pass-1 counts for this text, omitted for the pure regex path. An unmatched node
  *  must carry scoreBoost 0: parents sum child boosts without re-checking matched. */
 export function evaluate(node, text, acHits) {
-    const r = node?.near !== undefined ? evaluateNear(node, text, acHits) : evaluateNode(node, text, acHits);
+    let r = node?.near !== undefined ? evaluateNear(node, text, acHits) : evaluateNode(node, text, acHits);
     const w = node?.groupWeight;
     // `undefined`, not falsy: weight 0 is the documented free gate, and `!w` let `(a b)::0` score its full unweighted boost.
-    if (w === undefined || w === 1 || !r.units.length) return r;
-    // wsum only: the weight multiplies the thing, and `n` is what the saturation curve reads.
-    const units = r.units.map(u => ({ ...u, wsum: u.wsum * w }));
-    return { ...r, scoreBoost: boostOf(units), units };
+    if (!(w === undefined || w === 1 || !r.units.length)) {
+        // wsum only: the weight multiplies the thing, and `n` is what the saturation curve reads.
+        const units = r.units.map(u => ({ ...u, wsum: u.wsum * w }));
+        r = { ...r, scoreBoost: boostOf(units), units };
+    }
+    // Optional: never a gate, still whatever it scored.
+    return node?.optional && !r.matched ? { ...r, matched: true } : r;
 }
 
 function evaluateNode(node, text, acHits) {
@@ -609,6 +663,11 @@ function leafSpans(node, text, acHits) {
 /** The ways a group can be satisfied, each `{ reqs, vetoes }`: one span list per conjunct — an alternation of leaves pools into one,
  *  a nested `~N` group is its clusters — and the NOT operands, whose occurrences must be out of reach. */
 function alternatives(node, text, acHits, top = false) {
+    const alts = alternativesOf(node, text, acHits, top);
+    // An optional conjunct: the ways with it, then the way without, which the sweep takes when the former form no cluster.
+    return !top && node?.optional ? [...alts, { reqs: [], vetoes: [] }] : alts;
+}
+function alternativesOf(node, text, acHits, top = false) {
     if (!node) return [];
     if (!top && node.near !== undefined) return [{ reqs: [clusters(node, text, acHits)], vetoes: [] }];
     if (node.type === 'TERM' || node.type === 'REGEX') return [{ reqs: [leafSpans(node, text, acHits)], vetoes: [] }];

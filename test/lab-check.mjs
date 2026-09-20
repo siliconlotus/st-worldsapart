@@ -2,6 +2,7 @@
 
 import { entryFlags, entryGate, labMessages, labScan, runBook, runSpans, windowTip } from '../extension/lab.mjs';
 import { WI_LOGIC } from '../extension/matcher.mjs';
+import { setMacros } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 
@@ -44,6 +45,17 @@ eq(runBook(withVec, text, { ...para, skipVectorized: true }).entries.some(h => h
     'so it cannot appear among the hits either');
 eq(runBook(entries, 'a quiet room', para).entries.length, 0, 'a text no key matches yields no entries...');
 eq(runBook(entries, 'a quiet room', para).scanned, 4, '...and still reports what was scanned');
+
+// --- a run's override: the Lab's boxes, set over every entry's own flags, so on and off can be compared on one run
+{
+    const strict = [{ uid: 8, world: 'B', key: ['Breath'], caseSensitive: true }, { uid: 9, world: 'B', key: ['slow'], matchWholeWords: true }];
+    eq(runBook(strict, text, para).entries.map(h => h.entry.uid).join(), '', 'as written, the case-sensitive key misses lowercase and the whole-word key misses "slowly"');
+    eq(runBook(strict, text, { ...para, override: { caseSensitive: false, wholeWords: false } }).entries.map(h => h.entry.uid).join(), '8,9', 'an override replaces each entry\'s flag for the run');
+    eq(runBook(strict, text, { ...para, override: { caseSensitive: false } }).entries.map(h => h.entry.uid).join(), '8', '...and only the flag it names');
+    const run = runBook(strict, text, { ...para, override: { wholeWords: false } });
+    eq(runSpans(run, text, { ...para, override: { wholeWords: false } }).length > 0, true, 'the spans follow the same override');
+    eq(labScan({ hay: text, run, matchWindow: 'paragraph', override: { wholeWords: false } }).spans.length > 0, true, '...through labScan too');
+}
 
 // --- runSpans: one fold over the union, not one per entry
 const spans = runSpans(run, text, para);
@@ -118,4 +130,24 @@ eq(windowTip(win('short', [{ at: 0, to: 5 }]), { at: 0, to: 5 }), '«short»', '
         'a blank spec drops nothing');
     eq(labMessages([], { depth: 10 }).messages.length, 0, 'an empty chat is empty');
     eq(labMessages(undefined, { depth: 10 }).hidden, 0, 'a missing chat is empty, not a throw');
+}
+
+// --- parts: several chats as one text, each matched under its own macro map, the results merged and offset into the whole
+{
+    setMacros({});
+    const a = 'Alice waved.', b = 'Bob waved.';
+    const hay = `${a}\n\n${b}`;
+    const parts = [{ text: a, at: 0, macros: { '{{char}}': 'Alice' } }, { text: b, at: a.length + 2, macros: { '{{char}}': 'Bob' } }];
+    const r = labScan({ hay, keys: '{{char}}', matchWindow: 'paragraph', parts });
+    eq(r.rows.length, 1, 'one row per key over all the parts');
+    eq(r.rows[0].count, 2, 'each part matches under its own map');
+    eq(r.rows[0].segments.map(sg => sg.at).join(), `0,${a.length + 2}`, 'segments carry their offset into the joined text');
+    eq(r.spans.map(sp => hay.slice(sp.start, sp.end)).join('|'), 'Alice|Bob', 'spans land on the joined text');
+    const entries = [{ uid: 1, world: 'B', key: ['{{char}}'] }, { uid: 2, world: 'B', key: ['nothing'] }];
+    const run = runBook(entries, hay, { matchWindow: 'paragraph', parts });
+    eq(run.entries.map(h => h.entry.uid).join(), '1', 'a run merges per part too');
+    eq(run.entries[0].rows[0].count, 2, '...summing a key\'s count across the parts');
+    eq(run.scanned, 2, '...and counts each entry once');
+    eq(runSpans(run, hay, { matchWindow: 'paragraph', parts }).length, 2, 'a run\'s spans follow the parts');
+    eq(labScan({ hay, keys: '{{char}}', matchWindow: 'paragraph' }).rows[0]?.count ?? 0, 0, 'without parts the map in force is used, and a parts scan left it as it was: nothing');
 }

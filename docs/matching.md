@@ -46,13 +46,10 @@ The "what you meant, not what you wrote" principle extends to hyphens; WA expand
 > **Hyphens are a one-way journey**. If you think the hyphenated form might appear in the text, it's best to draft the key with them; if the text doesn't use them, it will still match, but if you write a non-hyphenated key and the model uses hyphens, it won't.
 
 > [!IMPORTANT]
-> **WA does NOT strip accents like some systems do**; `cafe` does not match `café`. Use an OR group to capture accent variants if they might arise: `? =cafe OR café`
+> **WorldsApart does NOT strip accents like some systems do**; `cafe` does not match `café`. Use an OR group to capture accent variants if they might arise: `? =cafe OR café`
+
 
 ---
-
-## Macros
-
-A key may hold a macro such as `{{user}}` or `{{char}}`, replaced by its value when the scan runs, as SillyTavern does. A plain key is then a substring of the value. In a SmartKey the value's words become a group, so `? {{user}} sword` with the persona Kyle Parsons is `? (Kyle Parsons) sword` and takes a group's modifiers, `? {{user}}~0`, `? {{user}}::2`; `? "{{user}}"` keeps the name whole. A pattern gets the value with its special characters escaped. Macros in entries, yes; macros as keys are not recommended, since chat rarely writes a full name, but this is how they read.
 
 ## Regex keys
 
@@ -113,6 +110,31 @@ Against `/^Dream/`:
 Many pieces of once-popular software have since been shuttered.
 Dreamweaver, Adobe's once-vaunted web development suite, // No match (segment starts at "Many"; /^Dream/m would have matched)
 ```
+
+---
+
+## Macros
+
+A key may hold a macro such as `{{user}}` or `{{char}}`, replaced by its value when the scan runs, as SillyTavern does. Macros are composable; if the user persona is `Sally Ride`, then `{{user}}'s` is expanded and matched as `Sally Ride's`.
+
+### Macro Unpacking
+WorldsApart allows you to use individual words within the macro. `{{user}}[N]` is the Nth word of the evaluated macro (split by spaces), so if the user persona is `Sally Ride`, `{{user}}[1]` is `Sally`, and `{{user}}[2]` is `Ride`. If the user persona is just `Sally`, `{{user}}[2]` is an empty string. You can also work backwards from the end: `{{user}}[-1]` is `Ride`, `{{user}}[-2]` is `Sally`.  
+
+
+### In plain keys
+
+You may use the full expansion, e.g. `{{user}}`, or one or more of its components; the expanded string will be matched against the text. Case sensitivity and whole-word matching are inherited from the entry, so by default, `{{user}}` for persona `Sally Ride` matches `universally riders`. 
+
+### In SmartKeys
+This capability is much more powerful when used as terms in SmartKeys; see the [SmartKeys user guide](smartkeys.md#macros).
+
+### In regular expressions
+Expanded forms are escaped, so `/\b{{user}}('s)?\b/` on persona `Sally Ride (Astronaut)` is expanded to `/\bSally Ride \(Astronaut\)('s)?\b/`
+
+> [!TIP]
+> **It's better to be literal when you can.** Users may rename character cards; the sensible `? {{char}} house` when you name the character `Dirk Gently` won't survive the rename to `Holistic Detective v3`.
+> 
+> **Macros are really meant for entry text and chat turns, not keys.**
 
 ---
 

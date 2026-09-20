@@ -270,7 +270,8 @@ resolves toward the literal: `*` is text, `~` is text except as `~N` on a group,
   and composes with term weights and nested groups. Groups and negations nest at most 100 deep; past
   that the key is refused (`too-deep` in `validateSmartKey`), which keeps parse and evaluate far from
   the stack limit — a refused key counts 0, and never aborts the scan matching it.
-- **Macros are data.** A `{{token}}` in a key is replaced under the map in force (`setMacros`): the ST half builds it once per scan from the tokens the keys in play carry, through `substituteParams`, a capture records it as `macros`, and `scene.mjs` pushes it before scoring. In an unquoted term the value's words become a group, `? {{user}} sword` reading `? (Kyle Parsons) sword`, which takes a group's `~N` and weight; in a phrase the value is inside the phrase; in a pattern it is inserted escaped, where core inserts it raw; in a plain key it is the substring, as core. An unknown token stays as written, an empty value drops the leaf. The map is part of the AST cache id (`astId`), so a changed map, a group chat's speaker, rebuilds.
+- **Macros are data.** A `{{token}}` in a key is replaced under the map in force (`setMacros`): the ST half builds it once per scan from the tokens the keys in play carry, through `substituteParams`, a capture records it as `macros`, and `scene.mjs` pushes it before scoring. The Studio's audit counts each chat under that chat's own values, `{{char}}` its character and `{{user}}` the name on its user messages, on the client and in the plugin route alike; the open chat of a group is counted once per member, a unit counting if any member's name makes it match (`countChatHits`' `hitIndex`). In an unquoted term the value's words become a group, `? {{user}} sword` reading `? (Kyle Parsons) sword`, which takes a group's `~N` and weight, and whose `=` and `^` flags reach every word; in a phrase the value is inside the phrase; in a pattern it is inserted escaped, where core inserts it raw; in a plain key it is the substring, as core. `{{token}}[N]` is the Nth word of the value, one-based, negative from the end, applied wherever the token would be (`MACRO_PICK_RE`); a pick the value has no word for is empty. An unknown token stays as written, an empty value drops the leaf. The map is part of the AST cache id (`astId`), so a changed map, a group chat's speaker, rebuilds.
+- **A trailing `?` makes a term optional**: never a gate, still whatever it scored, so `? Kyle Parsons?` matches on `Kyle` and scores both when both are there. It sits on a term, a phrase, a group or a pattern, once, in any order with a weight and `~N`; a lone `?` stays text. `evaluate` forces `matched` on an optional node; inside a `~N` group an optional conjunct is an extra alternative without it. A key that matches a text holding none of its terms (`matchesEmpty`: an optional node, a NOT of what does not, an AND of two that do, an OR of one, an XOR of exactly one) is `no-required-term` when an optional term is the cause and `negation-only` otherwise.
 - **A regex is a term.** `/pattern/flags` at token start, negatable and weightable, closed at the
   leftmost `/` outside a character class whose body compiles and whose flag run ends at a token
   boundary; `\/` is a literal slash. A term reads exactly as the same string reads as a whole key
@@ -299,6 +300,7 @@ resolves toward the literal: `*` is text, `~` is text except as `~N` on a group,
     span.
   - A group without `~` keeps segment scope. `"…"~N` is refused, quoting being the construct that
     carries order; `? (-x)~N` has no positive to anchor and is `negation-only`.
+- **A flag in front of a group reaches every TERM in it**, nested groups included, as it reaches every word of a macro; a REGEX inside is untouched. The lexer carries the flags on the LPAREN and the parser stamps the leaves.
 - **Entry flags reach plain keys only.** `caseSensitive` and `matchWholeWords` do not reach inside a
   SmartKey or a pattern: `? nasa` in a case-sensitive entry is still insensitive.
 
@@ -310,7 +312,8 @@ but `AND_ANY`); a `warn` is legal and probably a typo, the audit's `warning` fla
 |---|---|---|---|
 | `no-terms` | No terms | error | no term at all |
 | `too-deep` | Nested too deep | error | groups or negations nested past 100 |
-| `negation-only` | Negation only | error | no term reachable without an odd number of NOTs |
+| `negation-only` | Negation only | error | matches a text holding none of its terms, by negation alone |
+| `no-required-term` | No required term | error | matches a text holding none of its terms, an optional term being the cause: `? x?`, `? (A OR B?)`, `? A? -B` |
 | `stray-weight` | Stray weight | error | a `::N` or `^N` attached to nothing |
 | `stray-proximity` | Stray proximity | error | a `~N` term straight after a group, which already took one |
 | `proximity-on-phrase` | Proximity on a phrase | error | `~N` after a quoted phrase |

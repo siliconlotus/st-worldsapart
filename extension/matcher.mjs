@@ -373,7 +373,7 @@ const chatAutomaton = folded => {
     return chatAut;
 };
 
-export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false } = {}) {
+export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false, hitIndex = false } = {}) {
     // Test like we fight: the units are what the matcher matches a conjunction within, so a `?` key whose terms sit in
     // adjacent messages counts under `scan` and not under `message`, as it matches. `messagesWith`/`messages` keep their
     // names and count units; `unit` says which.
@@ -389,25 +389,33 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     const counts = new Map();
     const messagesWith = new Map(rest.map(k => [k, 0]));
     // A key whose forms could both land in one message is counted by union; summing its indices would count it twice.
-    const expanded = literals.map(k => [k, keyVariants(expandMacros(k)).map(v => idxOf.get(fold(v)))]).filter(([, idx]) => idx.length > 1);
+    const varIdx = new Map(literals.map(k => [k, keyVariants(expandMacros(k)).map(v => idxOf.get(fold(v)))]));
+    const typedIdx = new Map(literals.map(k => [k, idxOf.get(fold(expandMacros(k)))]));
+    const expanded = [...varIdx].filter(([, idx]) => idx.length > 1);
     for (const [k] of expanded) messagesWith.set(k, 0);
+    // `hitIndex`: which units each key hit, for a caller scanning one chat under several maps and taking the union.
+    const hitsBy = hitIndex ? new Map(all.map(k => [k, new Set()])) : null;
+    const typedBy = hitIndex ? new Map(literals.map(k => [k, new Set()])) : null;
     // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
     const scope = createScanScope();
     let seen = 0;
     for (const msg of messages) {
-        seen++;
-        const hit = expanded.length ? new Map() : counts;
+        const u = seen++;
+        const hit = new Map();
         // The masked form, as countKey counts: a key inside a tag or an HTML comment matches neither, and `rest` below is masked by countKey.
         addMessageHits(aut, maskedHay(msg), hit);
-        if (hit !== counts) {
-            for (const [i, n] of hit) counts.set(i, (counts.get(i) ?? 0) + n);
-            for (const [k, idx] of expanded) if (idx.some(i => hit.has(i))) messagesWith.set(k, messagesWith.get(k) + 1);
+        for (const [i, n] of hit) counts.set(i, (counts.get(i) ?? 0) + n);
+        for (const [k, idx] of expanded) if (idx.some(i => hit.has(i))) messagesWith.set(k, messagesWith.get(k) + 1);
+        for (const k of rest) if (countKey(k, msg, false, false, scope) > 0) { messagesWith.set(k, messagesWith.get(k) + 1); hitsBy?.get(k).add(u); }
+        if (hitsBy) for (const [k, idx] of varIdx) {
+            if (idx.some(i => hit.has(i))) hitsBy.get(k).add(u);
+            if (hit.has(typedIdx.get(k))) typedBy.get(k).add(u);
         }
-        for (const k of rest) if (countKey(k, msg, false, false, scope) > 0) messagesWith.set(k, messagesWith.get(k) + 1);
     }
-    const typedWith = new Map(literals.map(k => [k, counts.get(idxOf.get(fold(expandMacros(k)))) ?? 0]));
+    const typedWith = new Map(literals.map(k => [k, counts.get(typedIdx.get(k)) ?? 0]));
     for (const k of literals) if (!messagesWith.has(k)) messagesWith.set(k, typedWith.get(k));
-    return { messagesWith, typedWith, messages: seen, unit: matchWindow === 'scan' ? 'window' : matchWindow === 'paragraph' ? 'paragraph' : 'message' };
+    const unit = matchWindow === 'scan' ? 'window' : matchWindow === 'paragraph' ? 'paragraph' : 'message';
+    return hitIndex ? { messagesWith, typedWith, messages: seen, unit, hitsBy, typedBy } : { messagesWith, typedWith, messages: seen, unit };
 }
 
 /** Occurrences of `key` — a keyword, /regex/flags, or a `?` SmartKey, which returns its weight — following core's matchKeys

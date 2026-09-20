@@ -116,7 +116,7 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('? =/re/'), 'warn:flag-on-pattern', 'a flag in front of a pattern makes a literal nobody means');
     // Every finding carries a display name of at most four words beside its sentence; one sample per code.
     const SAMPLES = ['? ()', '? NOT water', '? fire ::3', '? (a b)~2 ~3', '? "a b"~2', '? "moon', '? /(/', '? ?', '? (a', '? a::0',
-        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/'];
+        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/', '? x?'];
     const seen = new Set();
     for (const k of SAMPLES) for (const f of validateSmartKey(k)) {
         seen.add(f.code);
@@ -632,6 +632,8 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(matches('? {{alias}}', 'Nick OR Parsons'), true);
     eq(matches('? ={{user}}', 'Nicky Parsons'), false, 'the flag reaches every word');
     eq(matches('? ={{user}}', 'Nick Parsons'), true);
+    eq(matches('? ^{{user}}[1]', 'nick here'), false, '...and so does the case flag, on a picked word too');
+    eq(matches('? ^{{user}}[1]', 'Nick here'), true);
     eq(matches("? {{user}}'s sword", "Parsons's sword, for Nick"), true, 'a suffix rides on the last word');
     eq(matches('? ({{user}})~0', 'Parsons, Nick'), true, 'inside a proximity group the words are its conjuncts');
     eq(matches('? ({{user}})~0', 'Nick and Parsons'), false);
@@ -646,6 +648,20 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(matches('? {{user}} OR "Warrior of Light"', 'the Warrior of Light'), true, 'the group sits in the tree, so OR binds outside it');
     eq(matches('? {{user}} OR "Warrior of Light"', 'Parsons met Nick'), true);
     eq(matches('? {{user}} OR "Warrior of Light"', 'Nick met the Warrior'), false, '...and neither side matches on half of itself');
+    // `{{token}}[N]` is the Nth word of the value, counting from one, negative from the end; out of range is empty.
+    eq(matches('? {{user}}[1]', 'Nick alone'), true, '[1] is the first word');
+    eq(matches('? {{user}}[1]', 'Parsons alone'), false);
+    eq(matches('? {{user}}[2]', 'Parsons alone'), true, '[2] the second');
+    eq(matches('? {{user}}[-1]', 'Parsons alone'), true, '[-1] the last');
+    eq(matches('? ({{user}} OR {{user}}[-1])', 'Parsons met someone'), true, 'the surname alone, or the whole name as a group');
+    eq(matches('? ({{user}} OR {{user}}[-1])', 'Nick met someone'), false);
+    eq(matches('? {{user}}[3] sword', 'a sword'), true, 'out of range is empty, so the leaf drops');
+    eq(matches('? {{user}}[0] sword', 'a sword'), true, '...and there is no word zero');
+    eq(matches("? {{user}}[1]'s sword", "Nick's sword"), true, 'a suffix rides on the picked word');
+    eq(matches('? "{{user}}[1] the great"', 'Nick the great'), true, 'the pick works inside a phrase');
+    eq(matches('{{user}}[-1]', 'mr parsons'), true, '...and in a plain key');
+    eq(matches('/^{{user}}[1]$/', 'Nick'), true, '...and in a pattern, escaped');
+    eq(matches('? {{nope}}[1] x', '{{nope}}[1] x'), true, 'an unknown token keeps its pick as written');
     eq(matches('? star~2', 'star~2 here'), true, '`~N` on any other term is still text');
     eq(matches('? star~2', 'a star'), false);
     eq(matches('/{{char}}/', 'Dr. (Doc) Brown'), true, 'a pattern takes the value escaped');
@@ -667,8 +683,68 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     const chat = countChatHits(['{{user}}', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody']);
     eq(chat.messagesWith.get('{{user}}'), 1, 'the chat scan counts a plain macro key by its value');
     eq(chat.messagesWith.get('? {{user}}'), 2, '...and a SmartKey by its words');
+    // `hitIndex`: which units each key hit, so a caller scanning the same chat under several maps can union them.
+    const idx = countChatHits(['{{user}}', 'nobody', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody'], { hitIndex: true });
+    eq([...idx.hitsBy.get('{{user}}')].join(), '0', 'a literal key names the unit it hit');
+    eq([...idx.hitsBy.get('nobody')].join(), '2', '...each key its own');
+    eq([...idx.hitsBy.get('? {{user}}')].join(), '0,1', '...a SmartKey too');
+    eq([...idx.typedBy.get('{{user}}')].join(), '0', 'the typed-form hits are indexed alongside');
+    eq(idx.hitsBy.get('{{user}}').size, idx.messagesWith.get('{{user}}'), 'the index agrees with the count');
     eq(macroTokens(['? {{user}} and {{char}}', '{{user}}', 'plain']).join(','), '{{user}},{{char}}', 'the tokens a key list carries, once each');
     eq(JSON.stringify(macroMap(['? {{user}} x'], tok => tok.toUpperCase())), '{"{{user}}":"{{USER}}"}', 'the map is the tokens through the substitution the caller supplies');
     setMacros({});
     eq(matches('? {{user}} sword', 'Nick Parsons sword'), false, 'with no map a token is literal text again');
+}
+
+// --- optional terms: a trailing `?` never gates and scores when present, on a term, a phrase, a group or a pattern ------
+{
+    setMacros({ '{{user}}': 'Kyle Parsons' });
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    const s = (k, x) => countKey(k, x, false, false);
+    eq(matches('? Kyle Parsons?', 'Kyle alone'), true, 'an optional term does not gate');
+    eq(s('? Kyle Parsons?', 'Kyle Parsons'), 2, '...and scores when present');
+    eq(s('? Kyle Parsons?', 'Kyle'), 1);
+    eq(matches('? Kyle Parsons?', 'Parsons alone'), false, 'the required term still gates');
+    eq(matches('? "Kyle Parsons"? sword', 'a sword'), true, 'a phrase can be optional');
+    eq(s('? "Kyle Parsons"? sword', 'Kyle Parsons sword'), 2);
+    eq(matches('? (Kyle OR Nick)? sword', 'a sword'), true, '...and a group');
+    eq(matches('? /Kyle|Nick/? sword', 'a sword'), true, '...and a pattern');
+    eq(s('? /Kyle|Nick/? sword', 'Nick sword'), 2);
+    eq(s('? Kyle?::2 sword', 'Kyle sword'), 3, 'a weight and the mark in either order');
+    eq(s('? Kyle::2? sword', 'Kyle sword'), 3);
+    eq(s('? {{user}}? sword', 'a sword'), 1, 'a macro group can be optional');
+    eq(s('? {{user}}? sword', 'Kyle Parsons sword'), 3);
+    // The idiom: the first name required, the surname a bonus.
+    eq(s('? {{user}}[1] {{user}}[2]?', 'Kyle waved'), 1, 'a first name alone fires');
+    eq(s('? {{user}}[1] {{user}}[2]?', 'Kyle Parsons waved'), 2, '...and the surname adds to it');
+    eq(matches('? {{user}}[1] {{user}}[2]?', 'Parsons waved'), false, '...but never carries it alone');
+    eq(matches('? "seriously?"', 'seriously?'), true, 'quoted, a trailing ? is text');
+    eq(matches('? (fire drill?)~1', 'a fire here'), true, 'in a proximity group an optional conjunct is not required');
+    eq(matches('? (fire drill?)~1', 'a drill here'), false, '...and the required one still is');
+    eq(codes('? Parsons?'), 'error:no-required-term', 'a key of nothing but optional terms would match everything');
+    eq(codes('? Parsons? -x'), 'error:no-required-term', '...and negations do not rescue it');
+    eq(codes('? (Kyle OR Parsons?)'), 'error:no-required-term', '...nor does an OR whose one side is optional');
+    eq(codes('? Kyle XOR Parsons?'), 'error:no-required-term', '...nor an XOR against an optional side');
+    eq(codes('? (Kyle OR Parsons)?'), 'error:no-required-term', '...nor an optional group on its own');
+    eq(codes('? Kyle Parsons?'), '', 'one required term makes it a key');
+    eq(codes('? Kyle? Parsons'), '', '...whichever it is');
+    eq(codes('? (Kyle OR Nick) Parsons?'), '', '...and a required group does too');
+    eq(codes('? NOT water'), 'error:negation-only', 'negation-only keeps its own name');
+    setMacros({});
+}
+
+// --- a flag in front of a group reaches every term in it, as it reaches every word of a macro ------------------------------
+{
+    eq(matches('? ^(A B)', 'a b'), false, '^ on a group makes each term case-sensitive');
+    eq(matches('? ^(A B)', 'A B'), true);
+    eq(matches('? ^(A or B)', 'b'), false, '...under OR too');
+    eq(matches('? ^(A or B)', 'B'), true);
+    eq(matches('? =(A or B)', 'AB'), false, '= on a group makes each term whole-word');
+    eq(matches('? =(A or B)', 'A'), true);
+    eq(matches('? =(A (B or C))', 'A BC'), false, '...into nested groups');
+    eq(matches('? =(A (B or C))', 'A C'), true);
+    eq(matches('? ^(/a/ B)', 'a b'), false, 'a pattern inside keeps its own case; the term beside it takes the flag');
+    eq(matches('? ^(/a/ B)', 'a B'), true);
+    eq(matches('? ^=(A B)', 'AB'), false, 'both flags combine on a group as on a term');
+    eq(matches('? ^=(A B)', 'A B'), true);
 }
