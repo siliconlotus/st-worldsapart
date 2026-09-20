@@ -48,6 +48,7 @@ export const info = {
  *  Map an LRU, and the cap keeps every queried collection's full item list from staying resident until exit.
  *  @type {Map<string, { items: object[], mean: Float64Array, mtimeMs: number, size: number }>} */
 const MEAN_CACHE_MAX = 16;
+const ADOPT_SIBLINGS_MAX = 32;
 const meanCache = new Map();
 
 /** Embeds the QUERY for every source ST can address — a mirror of ST's module-private `getVector` and `getSourceSettings`
@@ -150,13 +151,15 @@ async function loadCentered(indexPath) {
     }
 
     const mean = corpusMean(items);
-    const unusable = items.length - items.filter(it => rowDim(it?.vector)).length;
-    if (unusable) console.warn(`[WorldsApart] skipped ${unusable} of ${items.length} chunks with a missing or foreign-dimension vector — re-sync the book, or delete the collection if it was embedded under another model`);
+    // Against mean.length, not rowDim alone: corpusMean drops a row of another dimension, which still has a length.
+    const usable = mean.length ? items.filter(it => rowDim(it?.vector) === mean.length).length : 0;
+    if (usable < items.length) console.warn(`[WorldsApart] skipped ${items.length - usable} of ${items.length} chunks with a missing or foreign-dimension vector — re-sync the book, or delete the collection if it was embedded under another model`);
     const loaded = { items, mean, mtimeMs, size };
 
+    meanCache.delete(indexPath);   // delete before set: set() on an existing key keeps its old position, so the sweep would evict a just-refreshed path first
     meanCache.set(indexPath, loaded);
     while (meanCache.size > MEAN_CACHE_MAX) meanCache.delete(meanCache.keys().next().value);
-    console.log(`[WorldsApart] indexed ${path.basename(path.dirname(indexPath))}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}`);
+    console.log(`[WorldsApart] indexed ${path.basename(path.dirname(indexPath))}: ${usable} chunks, mean norm ${norm(mean).toFixed(4)}`);
 
     return loaded;
 }
@@ -380,10 +383,16 @@ export async function init(router) {
             const wanted = new Set(hashes.map(Number));
             const found = new Map();
             // getIndexPath per sibling, not a fixed depth: an empty model scope (llamacpp, extras) puts index.json in the collection dir itself.
-            for (const coll of fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : []) {
+            // Newest first and capped: listItems() parses a whole index.json, and a clone's source is the collection written most recently.
+            const siblings = (fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : [])
+                .filter(coll => coll.isDirectory() && coll.name.startsWith('wa_') && coll.name !== sanitize(collectionId))
+                .map(coll => getIndexPath(dirs, coll.name, String(source), model))
+                .map(dir => ({ dir, mtimeMs: fs.statSync(path.join(dir, 'index.json'), { throwIfNoEntry: false })?.mtimeMs ?? 0 }))
+                .sort((a, b) => b.mtimeMs - a.mtimeMs)
+                .slice(0, ADOPT_SIBLINGS_MAX);
+            for (const { dir } of siblings) {
                 if (found.size === wanted.size) break;
-                if (!coll.isDirectory() || !coll.name.startsWith('wa_') || coll.name === sanitize(collectionId)) continue;
-                const sibling = new LocalIndex(getIndexPath(dirs, coll.name, String(source), model));
+                const sibling = new LocalIndex(dir);
                 if (!await sibling.isIndexCreated()) continue;
                 for (const it of await sibling.listItems()) {
                     const h = Number(it.metadata?.hash);

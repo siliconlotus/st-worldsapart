@@ -26,7 +26,7 @@ fs.mkdirSync(DEST, { recursive: true });
 for (const [from, to] of PLUGIN_FILES) {
     const src = path.join(SRC, 'plugin', from);
     const dst = path.join(DEST, to);
-    // Copy-then-swap: a failure mid-copy leaves the previously deployed copy intact, not half a plugin.
+    // tmp then rename, not a copy onto dst: ST may be loading it, and a torn file throws. Per file only, so a mid-loop failure leaves a mixed set.
     const tmp = `${dst}.deploying`;
     fs.copyFileSync(src, tmp);
     fs.renameSync(tmp, dst);
