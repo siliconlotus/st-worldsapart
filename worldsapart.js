@@ -776,7 +776,7 @@ const reportedFailures = new Set();
 function reportFailure(stage, consequence, error, severity = 'error', loud = false) {
     console.error(`WorldsApart: ${stage} — ${consequence}`, error);
     const cause = String(error?.message ?? error);
-    const key = `${stage}␟${cause}`;
+    const key = `${stage}${US}${cause}`;
     if (!loud && reportedFailures.has(key)) return;
     reportedFailures.add(key);
     const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');

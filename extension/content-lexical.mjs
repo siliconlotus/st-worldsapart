@@ -53,7 +53,7 @@ export const indexFingerprint = (entries, { chunkMode, chunkSize, minChunkSize }
         if (e.disable || typeof e.content !== 'string' || !e.content.trim()) continue;
         n++; chars += e.content.length;
         // Sum, not XOR, with the uid folded in: a delete-and-grow edit and a book rename both move it, a reorder does not.
-        hash = (hash + fnv1a(`${e.world}␟${e.uid}␟${e.content}`)) >>> 0;
+        hash = (hash + fnv1a(`${e.world}\u001f${e.uid}\u001f${e.content}`)) >>> 0;
     }
     return `${n}:${chars}:${hash.toString(16)}:${chunkMode}:${chunkSize}:${minChunkSize}`;
 };
