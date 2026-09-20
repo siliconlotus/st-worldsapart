@@ -2019,32 +2019,37 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const members = ctx.groupId
             ? (ctx.groups?.find(g => String(g.id) === String(ctx.groupId))?.members ?? []).map(a => characters.find(ch => ch?.avatar === a)?.name).filter(Boolean)
             : [];
-        for (const c of picked) {
-            if (served.has(c)) continue;
-            const got = strip(c.open
-                ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: m.is_user }))
-                : await fetchChatMessages(c));
-            if (!got.length) continue;
-            const user = [...got].reverse().find(m => m?.is_user && m?.name)?.name;
-            const chatMap = { ...base, ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) };
-            if (c.open && members.length > 1) {
-                const by = new Map(), typedBy = new Map();
-                let messages = 0, unit;
-                const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
-                for (const name of members) {
-                    setMacros({ ...chatMap, '{{char}}': name });
-                    const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true });
-                    messages = r.messages; unit = r.unit;
-                    union(by, r.hitsBy); union(typedBy, r.typedBy);
+        // finally, not a trailing restore: setMacros is module-global, and a throw here would leave one chat's
+        // {{char}} in force for the next caller — the audit's lazy verdicts then memoise the wrong answer.
+        try {
+            for (const c of picked) {
+                if (served.has(c)) continue;
+                const got = strip(c.open
+                    ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: m.is_user }))
+                    : await fetchChatMessages(c));
+                if (!got.length) continue;
+                const user = [...got].reverse().find(m => m?.is_user && m?.name)?.name;
+                const chatMap = { ...base, ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) };
+                if (c.open && members.length > 1) {
+                    const by = new Map(), typedBy = new Map();
+                    let messages = 0, unit;
+                    const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
+                    for (const name of members) {
+                        setMacros({ ...chatMap, '{{char}}': name });
+                        const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true });
+                        messages = r.messages; unit = r.unit;
+                        union(by, r.hitsBy); union(typedBy, r.typedBy);
+                    }
+                    add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
+                } else {
+                    setMacros(chatMap);
+                    add(countChatHits(keys, got, unitOpts));
                 }
-                add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
-            } else {
-                setMacros(chatMap);
-                add(countChatHits(keys, got, unitOpts));
+                via = via ? 'server + browser' : 'browser';
             }
-            via = via ? 'server + browser' : 'browser';
+        } finally {
+            setMacros(base);
         }
-        setMacros(base);
         return { totals, typedTotals, seen, via, unit };
     };
 
