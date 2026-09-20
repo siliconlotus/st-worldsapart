@@ -134,10 +134,12 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
 export function wiTooltip({ item, block }) {
     const e = item.entry;
     const lines = [`[${e.world}] ${wiTitleOf(e)}`, block];
-    if (Number.isFinite(item.eCredit)) lines.push(`E[credit] ${item.eCredit.toFixed(4)}`);
-    if (item.score !== undefined) lines.push(`vector ${item.score.toFixed(3)}`);
+    // Every column the fit reads, under the doc's feature names, so a rank can be read off the tooltip alone.
+    if (Number.isFinite(item.eCredit)) lines.push(`E[credit] ${item.eCredit.toFixed(4)}${item.eCreditTier ? ` (${item.eCreditTier})` : ''}`);
+    if (item.score !== undefined) lines.push(`cosine ${item.score.toFixed(3)}`);
     if (item.textScore) lines.push(`text ${item.textScore.toFixed(2)}`);
-    if (item.keywordScore) lines.push(`keys ${item.keywordScore.toFixed(2)}`);
+    if (Number.isFinite(item.properNouns)) lines.push(`properNouns ${item.properNouns.toFixed(3)}`);
+    if (Number.isFinite(item.density)) lines.push(`density ${item.density.toFixed(2)}`);
     if (item.keywordHits?.length) { const hits = item.keywordHits.map(h => `${h.key} ×${h.count}`).join(', '); lines.push(t`hits: ${hits}`); }
     return lines.join('\n');
 }
