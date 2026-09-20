@@ -174,11 +174,11 @@ Where a check needs something from the ST-coupled half, the fix is to move that 
 first, as `planUidReindex` was moved into `keyedit.mjs` for `bulk-reorder-check.mjs`. A check that reads
 shipped code as text rather than importing it is not testing the shipped code, and it fails silently.
 
-## Composite keys use US (``), never NUL
+## Composite keys use US (U+001F), never NUL
 
-Cache keys and row ids that join fields into one string (the `rowId` helpers in `studio.mjs` and
-`keyword-tools.mjs`) separate with Unit Separator. NUL makes git treat the file as binary and truncates
-lines in BSD `awk`; a printable delimiter can collide with content.
+Cache keys and row ids that join fields into one string (`studio.mjs`'s `rowId`, `grading.mjs`'s `rowKey`)
+separate with Unit Separator. NUL makes git treat the file as binary and truncates lines in BSD `awk`; a
+printable delimiter can collide with content, so U+241F is not it either.
 
 Defects in ST core itself go in `upstream-st.md`, in the SillyTavern root — not in this repo.
 
