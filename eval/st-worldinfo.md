@@ -186,6 +186,8 @@ is charged to later passes and pushed into the recurse buffer despite never bein
 `activated.text`, `recursionDelay.currentLevel` and both budget fields from the event args, so a
 listener can extend, redirect or halt the scan. That is the hook WA's stage 3 runs on.
 
+The step cap is tested at the head of the loop, before `count++`, and leaves by `break`. So on a capped scan the last `WORLDINFO_SCAN_DONE` carries a truthy `state.next` and a `state.loopCount` equal to `world_info_max_recursion_steps`, and nothing fires after it: `next` alone cannot tell a listener which pass was last. WA's `isLastLoop` reads the cap against `loopCount` to find it, which holds only while core tests the cap at the loop head.
+
 ## Assembly: six sinks, not one list
 
 The tail of `checkWorldInfo` walks the survivors once and drops each into a sink by `position`; the
