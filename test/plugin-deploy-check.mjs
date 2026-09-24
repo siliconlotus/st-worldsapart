@@ -59,3 +59,45 @@ try {
 } finally {
     box.cleanup();
 }
+
+// config.yaml: patched only from false, by rename; the original backed up once and never retaken; a failure is its own error.
+{
+    const cfgOf = root => path.join(root, 'config.yaml');
+    const withConfig = text => deploySandbox({ prepare: root => fs.writeFileSync(cfgOf(root), text) });
+
+    const off = withConfig('port: 8000\nenableServerPlugins: false\n');
+    try {
+        eq(off.run.status, 0, 'a deploy over enableServerPlugins: false succeeds');
+        eq(fs.readFileSync(cfgOf(off.root), 'utf8'), 'port: 8000\nenableServerPlugins: true\n', '...turns it on and touches nothing else');
+        eq(fs.readFileSync(`${cfgOf(off.root)}.wa-backup`, 'utf8'), 'port: 8000\nenableServerPlugins: false\n', '...and backs up the original');
+        fs.writeFileSync(cfgOf(off.root), 'enableServerPlugins: false\n');
+        off.deploy();
+        eq(fs.readFileSync(`${cfgOf(off.root)}.wa-backup`, 'utf8'), 'port: 8000\nenableServerPlugins: false\n', 'a second run never retakes the backup');
+        eq(fs.readdirSync(off.root).filter(n => n.endsWith('.deploying')).join(', '), '', 'and neither leaves a temp file beside config.yaml');
+    } finally { off.cleanup(); }
+
+    const on = withConfig('enableServerPlugins: true\n');
+    try {
+        eq(fs.existsSync(`${cfgOf(on.root)}.wa-backup`), false, 'already true: no backup is taken');
+    } finally { on.cleanup(); }
+
+    const none = deploySandbox();
+    try {
+        eq(none.run.status === 0 && /no config\.yaml/.test(none.run.stdout), true, 'no config.yaml: a note, and the deploy still succeeds');
+    } finally { none.cleanup(); }
+
+    // A write that fails must fail the deploy under its own name. Root reads through any permission, so it cannot be staged there.
+    if (process.getuid?.() !== 0) {
+        // The plugin directory exists and stays writable; only the root, where the backup goes, is locked.
+        const locked = deploySandbox({ prepare: root => {
+            fs.mkdirSync(path.join(root, 'plugins', 'worlds-apart'), { recursive: true });
+            fs.writeFileSync(cfgOf(root), 'enableServerPlugins: false\n');
+            fs.chmodSync(root, 0o555);
+        } });
+        try {
+            const r = locked.run;
+            eq(r.status !== 0 && /EACCES/.test(r.stderr) && !/no config\.yaml/.test(r.stdout), true, 'a backup it cannot write fails the deploy as EACCES, not as a missing file');
+            eq(fs.readFileSync(cfgOf(locked.root), 'utf8'), 'enableServerPlugins: false\n', '...and leaves config.yaml as it was');
+        } finally { fs.chmodSync(locked.root, 0o755); locked.cleanup(); }
+    }
+}

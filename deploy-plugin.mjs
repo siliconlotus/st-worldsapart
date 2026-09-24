@@ -58,23 +58,26 @@ for (const name of fs.readdirSync(DEST)) {
 }
 
 const configPath = path.join(ST.root, 'config.yaml');
-try {
-    const cfg = fs.readFileSync(configPath, 'utf8');
-    if (/^enableServerPlugins:\s*false\b/m.test(cfg)) {
-        // Re-taking it would back up the patched file.
-        const backup = `${configPath}.wa-backup`;
-        if (!fs.existsSync(backup)) fs.copyFileSync(configPath, backup);
-        const tmp = `${configPath}.deploying`;
-        fs.writeFileSync(tmp, cfg.replace(/^(enableServerPlugins:\s*)false\b/m, '$1true'));
-        fs.renameSync(tmp, configPath);
-        console.log('enabled  enableServerPlugins: true in config.yaml (was false; the original is at config.yaml.wa-backup)');
-    } else if (/^enableServerPlugins:\s*true\b/m.test(cfg)) {
-        console.log('ok       enableServerPlugins already true in config.yaml');
-    } else {
-        console.log('NOTE     enableServerPlugins not found in config.yaml — set it to true manually');
-    }
-} catch {
+let cfg = null;
+// ENOENT only: a failed backup or write below must surface as itself, not as a missing file.
+try { cfg = fs.readFileSync(configPath, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+if (cfg === null) {
     console.log(`NOTE     no config.yaml at ${configPath} — launch ST once, then set enableServerPlugins: true`);
+} else if (/^enableServerPlugins:\s*false\b/m.test(cfg)) {
+    // Taken once and never again, since a later run would back up the patched file; so taken whole, by rename.
+    const backup = `${configPath}.wa-backup`;
+    if (!fs.existsSync(backup)) {
+        fs.copyFileSync(configPath, `${backup}.deploying`);
+        fs.renameSync(`${backup}.deploying`, backup);
+    }
+    const tmp = `${configPath}.deploying`;
+    fs.writeFileSync(tmp, cfg.replace(/^(enableServerPlugins:\s*)false\b/m, '$1true'));
+    fs.renameSync(tmp, configPath);
+    console.log('enabled  enableServerPlugins: true in config.yaml (was false; the original is at config.yaml.wa-backup)');
+} else if (/^enableServerPlugins:\s*true\b/m.test(cfg)) {
+    console.log('ok       enableServerPlugins already true in config.yaml');
+} else {
+    console.log('NOTE     enableServerPlugins not found in config.yaml — set it to true manually');
 }
 
 const fp = pluginFingerprint(...PLUGIN_FILES.map(([from]) => fs.readFileSync(path.join(SRC, 'plugin', from), 'utf8')));
