@@ -51,38 +51,42 @@ const MEAN_CACHE_MAX = 16;
 const ADOPT_SIBLINGS_MAX = 32;
 const meanCache = new Map();
 
-/** Embeds the QUERY for every source ST can address — a mirror of ST's module-private `getVector` and `getSourceSettings`
- *  (src/endpoints/vectors.js); eval/embed-sources-check.mjs fails when ST's SOURCES outgrows this switch. `request` is the
- *  plugin's own Express request, which Google's vectors read credentials off. */
+const openAiish = (q, urlOverride = null) => getOpenAIVector(q.text, q.source, q.directories, String(q.s.model), urlOverride);
+// Vector Storage embeds these in the browser; thrown so the client falls back.
+const inBrowser = q => { throw new Error(`WorldsApart: source "${q.source}" embeds in the browser — the plugin cannot embed a query for it.`); };
+
+/** How the plugin embeds a QUERY per source — a mirror of ST's module-private `getVector` and `getSourceSettings`
+ *  (src/endpoints/vectors.js); test/embed-sources-check.mjs fails when ST's SOURCES outgrows it. A Map, not an object
+ *  literal: the key is request input, and `toString` must not resolve to a route. */
+const EMBED_ROUTES = new Map([
+    ['transformers', q => getTransformersVector(q.text)],
+    ['nomicai',      q => getNomicAIVector(q.text, q.source, q.directories)],
+    ['extras',       q => getExtrasVector(q.text, q.s.extrasUrl, q.s.extrasKey)],
+    ['palm',         q => getMakerSuiteVector(q.text, String(q.s.model), q.request)],
+    ['vertexai',     q => getVertexVector(q.text, String(q.s.model), q.request)],
+    // isQuery is true: this only ever embeds the QUERY.
+    ['cohere',       q => getCohereVector(q.text, true, q.directories, String(q.s.model))],
+    ['llamacpp',     q => getLlamaCppVector(q.text, q.s.apiUrl, q.directories)],
+    ['vllm',         q => getVllmVector(q.text, q.s.apiUrl, String(q.s.model), q.directories)],
+    ['ollama',       q => getOllamaVector(q.text, q.s.apiUrl, String(q.s.model), Boolean(q.s.keep), q.directories)],
+    ['siliconflow',  q => openAiish(q, q.s.siliconflow_endpoint === 'cn' ? 'https://api.siliconflow.cn/v1' : null)],
+    ['workers_ai',   q => {
+        const accountId = String(q.s.workers_ai_account_id || '').trim();
+        return openAiish(q, accountId ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1` : null);
+    }],
+    ...['webllm', 'koboldcpp'].map(name => [name, inBrowser]),
+    ...['openai', 'togetherai', 'mistral', 'chutes', 'electronhub', 'nanogpt', 'openrouter'].map(name => [name, q => openAiish(q)]),
+]);
+export const EMBED_SOURCES = [...EMBED_ROUTES.keys()];
+
+/** Embeds the QUERY for `source`. `request` is the plugin's own Express request, which Google's vectors read credentials off. */
 async function embed(source, s, text, directories, request) {
-    const openAiish = (urlOverride = null) => getOpenAIVector(text, source, directories, String(s.model), urlOverride);
-    switch (source) {
-        case 'transformers': return await getTransformersVector(text);
-        case 'nomicai':      return await getNomicAIVector(text, source, directories);
-        case 'extras':       return await getExtrasVector(text, s.extrasUrl, s.extrasKey);
-        case 'palm':         return await getMakerSuiteVector(text, String(s.model), request);
-        case 'vertexai':     return await getVertexVector(text, String(s.model), request);
-        // isQuery is true: this only ever embeds the QUERY.
-        case 'cohere':       return await getCohereVector(text, true, directories, String(s.model));
-        case 'llamacpp':     return await getLlamaCppVector(text, s.apiUrl, directories);
-        case 'vllm':         return await getVllmVector(text, s.apiUrl, String(s.model), directories);
-        case 'ollama':       return await getOllamaVector(text, s.apiUrl, String(s.model), Boolean(s.keep), directories);
-        case 'siliconflow':  return await openAiish(s.siliconflow_endpoint === 'cn' ? 'https://api.siliconflow.cn/v1' : null);
-        case 'workers_ai': {
-            const accountId = String(s.workers_ai_account_id || '').trim();
-            return await openAiish(accountId
-                ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1`
-                : null);
-        }
-        case 'webllm': case 'koboldcpp':
-            // Vector Storage embeds these in the browser; thrown so the client falls back.
-            throw new Error(`WorldsApart: source "${source}" embeds in the browser — the plugin cannot embed a query for it.`);
-        case 'openai': case 'togetherai': case 'mistral': case 'chutes': case 'electronhub': case 'nanogpt': case 'openrouter':
-            return await openAiish();
-        default:
-            throw new Error(`WorldsApart: no embedding route for source "${source}" — `
-                + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
+    const route = EMBED_ROUTES.get(source);
+    if (!route) {
+        throw new Error(`WorldsApart: no embedding route for source "${source}" — `
+            + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
     }
+    return await route({ source, s, text, directories, request });
 }
 
 /** The model scope ST wrote the collection under (`getSourceSettings(source).model`); several sources resolve it SERVER-SIDE, so the client's field alone names a directory ST never wrote. */
