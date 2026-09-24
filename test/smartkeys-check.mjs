@@ -116,7 +116,7 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('? =/re/'), 'warn:flag-on-pattern', 'a flag in front of a pattern makes a literal nobody means');
     // Every finding carries a display name of at most four words beside its sentence; one sample per code.
     const SAMPLES = ['? ()', '? NOT water', '? fire ::3', '? (a b)~2 ~3', '? "a b"~2', '? "moon', '? /(/', '? ?', '? (a', '? a::0',
-        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/', '? x?', '? a -b?', '? a -(b c?)'];
+        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/', '? x?', '? a -b?', '? a -(b c?)', '? a? XOR b?'];
     const seen = new Set();
     for (const k of SAMPLES) for (const f of validateSmartKey(k)) {
         seen.add(f.code);
@@ -733,6 +733,10 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(matches('? Kyle -(Parsons Ryan?)', 'Kyle was here'), true, '...so that key still matches, exactly as it reads without the mark');
     eq(matches('? Kyle -Parsons?', 'Kyle was here'), false, 'a negated optional matches nothing, whatever the text');
     eq(matches('? Kyle -Parsons', 'Kyle was here'), true, '...where the same key without the mark matches');
+    eq(codes('? Kyle? XOR Ryan?'), 'warn:optional-xor', 'two optional sides of an XOR both read as present, so it never matches');
+    eq(matches('? Kyle? XOR Ryan?', 'Kyle was here'), false, '...not even on one side alone');
+    eq(codes('? Parsons -(Kyle XOR Ryan?)'), 'warn:optional-xor', '...and one optional side turns the XOR into a negation, which is never inert');
+    eq(codes('? Kyle XOR Parsons?'), 'error:no-required-term', 'a refused key gets no second finding');
     eq(codes('? (Kyle OR Parsons)?'), 'error:no-required-term', '...nor an optional group on its own');
     eq(codes('? Kyle Parsons?'), '', 'one required term makes it a key');
     eq(codes('? Kyle? Parsons'), '', '...whichever it is');

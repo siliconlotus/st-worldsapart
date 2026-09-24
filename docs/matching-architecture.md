@@ -323,9 +323,10 @@ but `AND_ANY`); a `warn` is legal and probably a typo, the audit's `warning` fla
 | `unbalanced-parens` | Unbalanced parentheses | warn | the counts differ; it still parses |
 | `all-zero-weights` | All weights zero | warn | every term weighted 0 |
 | `optional-negated` | Optional under negation | warn | an optional mark under a negation whose operand is then true for every text, so the negation is always false: `? -A?`, `? C -(A OR B?)` |
+| `optional-xor` | Optional in XOR | warn | a side of an XOR true for every text through an optional mark, so the XOR reads only the other side; with both such sides it never matches: `? A? XOR B?`, `? C -(A XOR B?)` |
 | `flag-on-pattern` | Literal regex | warn | `=` or `^` in front of an unquoted `/…/flags`, which lexes as a flagged literal; the pattern branch runs after the flag branch |
 | `regex-core-refuses` | WA-only regex | info | a pattern with an unescaped `/` inside, which core reads as literal text; bare key or term |
-| `optional-inert` | Null term | info | an optional mark under a negation that changes nothing there, the operand not being always true: `? C -(A B?)` |
+| `optional-inert` | Null term | info | an optional mark under a negation that changes nothing there, the operand not being always true and no XOR side being so: `? C -(A B?)` |
 | `regex-decomposed` | Decomposed accent | warn | a pattern holding a decomposed character, a base letter plus a combining mark, which the NFC text can never match; bare key or term |
 
 ### Selective logic (`keysecondary`)

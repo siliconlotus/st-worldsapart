@@ -304,6 +304,7 @@ export const KEY_ALERTS = Object.freeze({
     'negation-only': { severity: 'error', label: 'Negation only' },
     'no-required-term': { severity: 'error', label: 'No required term' },
     'optional-negated': { severity: 'warn', label: 'Optional under negation' },
+    'optional-xor': { severity: 'warn', label: 'Optional in XOR' },
     'too-deep': { severity: 'error', label: 'Nested too deep' },
     'stray-weight': { severity: 'error', label: 'Stray weight' },
     'stray-proximity': { severity: 'error', label: 'Stray proximity' },
@@ -381,12 +382,17 @@ export function validateSmartKey(raw) {
     const alwaysTrue = n => !!n && (n.optional
         || (n.type === 'AND' && alwaysTrue(n.left) && alwaysTrue(n.right))
         || (n.type === 'OR' && (alwaysTrue(n.left) || alwaysTrue(n.right))));
-    const notNodes = n => (!n ? [] : [...(n.type === 'NOT' ? [n] : []), ...notNodes(n.operand), ...notNodes(n.left), ...notNodes(n.right)]);
-    const negations = notNodes(ast);
-    if (negations.some(n => alwaysTrue(n.operand))) {
-        out.push(new KeyAlert('optional-negated', 'A “?” inside a negation makes it false for every message, since an optional term counts as present even where it is absent — so this key, or the conjunction holding it, can never match. Drop the “?”, or move that term out of the negation.'));
-    } else if (negations.some(n => hasOptional(n.operand))) {
-        out.push(new KeyAlert('optional-inert', 'The “?” inside this negation does nothing — an optional term counts as present even where it is absent, so the negation reads the same with the mark or without it.'));
+    const nodesOf = (n, type) => (!n ? [] : [...(n.type === type ? [n] : []), ...nodesOf(n.operand, type), ...nodesOf(n.left, type), ...nodesOf(n.right, type)]);
+    const negations = nodesOf(ast, 'NOT');
+    // A key refused above needs no second opinion.
+    if (!out.some(a => a.severity === 'error')) {
+        if (negations.some(n => alwaysTrue(n.operand))) {
+            out.push(new KeyAlert('optional-negated', 'A “?” inside a negation makes it false for every message, since an optional term counts as present even where it is absent — so this key, or the conjunction holding it, can never match. Drop the “?”, or move that term out of the negation.'));
+        } else if (nodesOf(ast, 'XOR').some(n => alwaysTrue(n.left) || alwaysTrue(n.right))) {
+            out.push(new KeyAlert('optional-xor', 'An optional side of an XOR counts as present even where it is absent, so the XOR can no longer ask whether that side is there: with one such side it matches whenever the other is absent, with two it never matches. Drop the “?”.'));
+        } else if (negations.some(n => hasOptional(n.operand))) {
+            out.push(new KeyAlert('optional-inert', 'The “?” inside this negation does nothing — an optional term counts as present even where it is absent, so the negation reads the same with the mark or without it.'));
+        }
     }
 
     // A weight lexes as a term only when it followed neither a term nor a group, so it cannot be anything but misplaced.
