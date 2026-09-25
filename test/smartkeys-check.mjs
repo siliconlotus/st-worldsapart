@@ -116,7 +116,7 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(codes('? =/re/'), 'warn:flag-on-pattern', 'a flag in front of a pattern makes a literal nobody means');
     // Every finding carries a display name of at most four words beside its sentence; one sample per code.
     const SAMPLES = ['? ()', '? NOT water', '? fire ::3', '? (a b)~2 ~3', '? "a b"~2', '? "moon', '? /(/', '? ?', '? (a', '? a::0',
-        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/', '? x?', '? a -b?', '? a -(b c?)', '? a? XOR b?'];
+        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/', '? x?', '? a -b?', '? a -(b c?)'];
     const seen = new Set();
     for (const k of SAMPLES) for (const f of validateSmartKey(k)) {
         seen.add(f.code);
@@ -723,20 +723,21 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(matches('? (fire drill?)~1', 'a drill here'), false, '...and the required one still is');
     eq(codes('? Parsons?'), 'error:no-required-term', 'a key of nothing but optional terms would match everything');
     eq(codes('? Parsons? -x'), 'error:no-required-term', '...and negations do not rescue it');
-    eq(codes('? (Kyle OR Parsons?)'), 'error:no-required-term', '...nor does an OR whose one side is optional');
-    eq(codes('? Kyle XOR Parsons?'), 'error:no-required-term', '...nor an XOR against an optional side');
-    // A negated optional is not rescued by anything: evaluate() forces the operand matched, so the NOT is always false.
-    eq(codes('? -Parsons?'), 'warn:optional-negated', 'an optional term under a negation can never match');
-    eq(codes('? (Kyle -Parsons?)'), 'warn:optional-negated', '...and it takes the conjunction holding it down with it');
-    eq(codes('? Kyle -(Parsons OR Ryan?)'), 'warn:optional-negated', '...an optional OR side under a negation the same way');
+    eq(codes('? (Kyle OR Parsons?)'), 'error:always-true', 'an optional side of an OR is always true, which is not the same as nothing being required');
+    eq(codes('? Kyle XOR Parsons?'), 'error:always-true', '...and of an XOR');
+    // Wherever an operator asks whether its operand holds, a part made only of optional terms always answers yes.
+    eq(codes('? -Parsons?'), 'error:always-true', 'an optional term under a negation is always true, so the negation never is');
+    eq(codes('? (Kyle -Parsons?)'), 'error:always-true', '...wherever the negation sits');
+    eq(codes('? Kyle (Parsons OR Ryan?)'), 'error:always-true', '...as is an optional OR side nested under an AND, though it happens to behave as an optional group');
+    eq(codes('? Kyle (Parsons OR Ryan)?'), '', '...which is the coherent spelling of it');
+    eq(codes('? Kyle -(Parsons? Ryan?)'), 'error:always-true', '...and so is a negated group of optional terms, though each mark sits on a conjunct');
     eq(codes('? Kyle -(Parsons Ryan?)'), 'info:optional-inert', '...but under an AND the mark is inert, not fatal');
     eq(matches('? Kyle -(Parsons Ryan?)', 'Kyle was here'), true, '...so that key still matches, exactly as it reads without the mark');
     eq(matches('? Kyle -Parsons?', 'Kyle was here'), false, 'a negated optional matches nothing, whatever the text');
     eq(matches('? Kyle -Parsons', 'Kyle was here'), true, '...where the same key without the mark matches');
-    eq(codes('? Kyle? XOR Ryan?'), 'warn:optional-xor', 'two optional sides of an XOR both read as present, so it never matches');
+    eq(codes('? Kyle? XOR Ryan?'), 'error:always-true', 'two optional sides of an XOR both read as present, so it never matches');
     eq(matches('? Kyle? XOR Ryan?', 'Kyle was here'), false, '...not even on one side alone');
-    eq(codes('? Parsons -(Kyle XOR Ryan?)'), 'warn:optional-xor', '...and one optional side turns the XOR into a negation, which is never inert');
-    eq(codes('? Kyle XOR Parsons?'), 'error:no-required-term', 'a refused key gets no second finding');
+    eq(codes('? Parsons -(Kyle XOR Ryan?)'), 'error:always-true', '...and one optional side turns the XOR into a negation');
     eq(codes('? (Kyle OR Parsons)?'), 'error:no-required-term', '...nor an optional group on its own');
     eq(codes('? Kyle Parsons?'), '', 'one required term makes it a key');
     eq(codes('? Kyle? Parsons'), '', '...whichever it is');

@@ -67,4 +67,4 @@ for (let i = 0; i < N; i++) {
     else failures.set(keyOf(shrink(tokens, fail)), fail);
 }
 eq([...failures].slice(0, 10).map(([k, why]) => `${k}  (${why})`).join('\n'), '', `${N} generated keys: none fails the oracle`);
-eq(kinds.live > 0 && kinds.flagged > 0, true, `...and the run reached both live keys and flagged dead ones (${JSON.stringify(kinds)})`);
+eq(kinds.live > 0 && kinds.refused > 0, true, `...and the run reached both live keys and refused ones (${JSON.stringify(kinds)})`);

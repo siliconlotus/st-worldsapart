@@ -271,7 +271,7 @@ resolves toward the literal: `*` is text, `~` is text except as `~N` on a group,
   that the key is refused (`too-deep` in `validateSmartKey`), which keeps parse and evaluate far from
   the stack limit — a refused key counts 0, and never aborts the scan matching it.
 - **Macros are data.** A `{{token}}` in a key is replaced under the map in force (`setMacros`): the ST half builds it once per scan from the tokens the keys in play carry, through `substituteParams`, a capture records it as `macros`, and `scene.mjs` pushes it before scoring. The Studio's audit counts each chat under that chat's own values, `{{char}}` its character and `{{user}}` the name on its user messages, on the client and in the plugin route alike; the open chat of a group is counted once per member, a unit counting if any member's name makes it match (`countChatHits`' `hitIndex`). In an unquoted term the value's words become a group, `? {{user}} sword` reading `? (Kyle Parsons) sword`, which takes a group's `~N` and weight, and whose `=` and `^` flags reach every word; in a phrase the value is inside the phrase; in a pattern it is inserted escaped, where core inserts it raw; in a plain key it is the substring, as core. `{{token}}[N]` is the Nth word of the value, one-based, negative from the end, applied wherever the token would be (`MACRO_PICK_RE`); a pick the value has no word for is empty. An unknown token stays as written, an empty value drops the leaf. The map is part of the AST cache id (`astId`), so a changed map, a group chat's speaker, rebuilds.
-- **A trailing `?` makes a term optional**: never a gate, still whatever it scored, so `? Kyle Parsons?` matches on `Kyle` and scores both when both are there. It sits on a term, a phrase, a group or a pattern, once, in any order with a weight and `~N`; a lone `?` stays text. `evaluate` forces `matched` on an optional node; inside a `~N` group an optional conjunct is an extra alternative without it. A key that matches a text holding none of its terms (`matchesEmpty`: an optional node, a NOT of what does not, an AND of two that do, an OR of one, an XOR of exactly one) is `no-required-term` when an optional term is the cause and `negation-only` otherwise.
+- **A trailing `?` makes a term optional**: never a gate, still whatever it scored, so `? Kyle Parsons?` matches on `Kyle` and scores both when both are there. It sits on a term, a phrase, a group or a pattern, once, in any order with a weight and `~N`; a lone `?` stays text. `evaluate` forces `matched` on an optional node; inside a `~N` group an optional conjunct is an extra alternative without it. A key that matches a text holding none of its terms (`matchesEmpty`: an optional node, a NOT of what does not, an AND of two that do, an OR of one, an XOR of exactly one) is `no-required-term` when an optional term is the cause and `negation-only` otherwise. A part that is true for every text through optional marks alone (an optional node, an AND of two such, an OR with one) is always true; as a side of OR or XOR or a NOT's operand, where the key asks whether it holds, it is `always-true`, tested first. One made without an optional mark, such as `A OR -A`, is not looked for.
 - **A regex is a term.** `/pattern/flags` at token start, negatable and weightable, closed at the
   leftmost `/` outside a character class whose body compiles and whose flag run ends at a token
   boundary; `\/` is a literal slash. A term reads exactly as the same string reads as a whole key
@@ -313,7 +313,8 @@ but `AND_ANY`); a `warn` is legal and probably a typo, the audit's `warning` fla
 | `no-terms` | No terms | error | no term at all |
 | `too-deep` | Nested too deep | error | groups or negations nested past 100 |
 | `negation-only` | Negation only | error | matches a text holding none of its terms, by negation alone |
-| `no-required-term` | No required term | error | matches a text holding none of its terms, an optional term being the cause: `? x?`, `? (A OR B?)`, `? A? -B` |
+| `no-required-term` | No required term | error | matches a text holding none of its terms, an optional term being the cause: `? x?`, `? (A OR B)?`, `? A? -B` |
+| `always-true` | Always-true term | error | a part true for every text through optional marks, as a side of OR or XOR or a NOT's operand: `? -A?`, `? C (A OR B?)`, `? A? XOR B?`, `? C -(A? B?)` |
 | `stray-weight` | Stray weight | error | a `::N` or `^N` attached to nothing |
 | `stray-proximity` | Stray proximity | error | a `~N` term straight after a group, which already took one |
 | `proximity-on-phrase` | Proximity on a phrase | error | `~N` after a quoted phrase |
@@ -322,11 +323,9 @@ but `AND_ANY`); a `warn` is legal and probably a typo, the audit's `warning` fla
 | `punctuation-term` | Punctuation only | warn | an unquoted term with no letter or digit, usually a second `?` |
 | `unbalanced-parens` | Unbalanced parentheses | warn | the counts differ; it still parses |
 | `all-zero-weights` | All weights zero | warn | every term weighted 0 |
-| `optional-negated` | Optional under negation | warn | an optional mark under a negation whose operand is then true for every text, so the negation is always false: `? -A?`, `? C -(A OR B?)` |
-| `optional-xor` | Optional in XOR | warn | a side of an XOR true for every text through an optional mark, so the XOR reads only the other side; with both such sides it never matches: `? A? XOR B?`, `? C -(A XOR B?)` |
 | `flag-on-pattern` | Literal regex | warn | `=` or `^` in front of an unquoted `/…/flags`, which lexes as a flagged literal; the pattern branch runs after the flag branch |
 | `regex-core-refuses` | WA-only regex | info | a pattern with an unescaped `/` inside, which core reads as literal text; bare key or term |
-| `optional-inert` | Null term | info | an optional mark under a negation that changes nothing there, the operand not being always true and no XOR side being so: `? C -(A B?)` |
+| `optional-inert` | Null term | info | an optional conjunct under a negation, which it cannot change: `? C -(A B?)` |
 | `regex-decomposed` | Decomposed accent | warn | a pattern holding a decomposed character, a base letter plus a combining mark, which the NFC text can never match; bare key or term |
 
 ### Selective logic (`keysecondary`)
