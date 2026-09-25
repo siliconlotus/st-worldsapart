@@ -15,6 +15,7 @@ usePack(PACK);
 const COMMON_WORDS = table().common;
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './lib/logistic.mjs';
 import * as entity from '../extension/entity.mjs';
+import { weightedCredit } from '../extension/layout.mjs';
 import { mean, sd } from '../extension/relevance.mjs';
 import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-suggest.mjs';
@@ -54,6 +55,8 @@ if (!['scene', 'book', 'pooled'].includes(STD_BY)) { console.error(`--standardis
 // Experiment: the relevant line for the scoring bars; at 2 the cut score is P(>=2), with no half band.
 const RELEVANT_AT = Number(arg(argv, '--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
+// What stage 4 delivers at `cut`: the fold's E[credit] with the row's term weights, as the runtime cut reads it.
+const deliveredAt = (r, cut) => weightedCredit({ eCredit: r.e, logWeight: r.logWeight }) >= cut;
 const AT = arg(argv, '--at') === null ? null : Number(arg(argv, '--at'));
 const DEGREE = Number(arg(argv, '--degree') ?? 1);
 const SQUARE = String(arg(argv, '--square') ?? '').split(',').filter(Boolean);
@@ -535,7 +538,7 @@ const queryVec = async (S, name, value, em) => {
                 let gi = 0;
                 const scenes = perScene.map(({ kept, ungraded, name, query }, si) => {
                     const fold = bookOf[gi];
-                    const idOf = r => ({ uid: r.entry?.uid, book: r.entry?.world, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
+                    const idOf = r => ({ uid: r.entry?.uid, book: r.entry?.world, logWeight: r.logWeight, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
                         feats: Object.fromEntries(FEATURES.map(([n, get]) => [n, get(r)])) });
                     const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g, ...idOf(k.r) }));
                     for (const u of ungraded) {
@@ -558,7 +561,7 @@ const queryVec = async (S, name, value, em) => {
                     meanRelevant: mean(scenes.map(sc => sc.relevant)),
                     grid: grid.map(cut => {
                         const per = scenes.map(sc => {
-                            const got = sc.rows.filter(r => r.e >= cut);
+                            const got = sc.rows.filter(r => deliveredAt(r, cut));
                             const precision = got.length ? mean(got.map(r => creditOf(r.g))) : 0;
                             const recall = (HALF_RECALL ? got.reduce((a, r) => a + creditOf(r.g), 0) : got.filter(r => r.g >= RELEVANT_AT).length) / sc.relevant;
                             return { f: fbeta(precision, recall, BETA), precision, recall, n: got.length };
@@ -696,7 +699,7 @@ const queryVec = async (S, name, value, em) => {
                     scenes: b.sceneRows.map(sc => ({
                         name: sc.name, relevant: sc.relevant, query: sc.query,
                         rows: sc.rows.map(r => ({ uid: r.uid, book: r.book, title: r.title, g: r.g, ungraded: !!r.ungraded,
-                            e: Number(r.e.toFixed(4)), delivered: r.e >= best.cut, feats: r.feats })),
+                            e: Number(r.e.toFixed(4)), delivered: deliveredAt(r, best.cut), feats: r.feats })),
                     })),
                 }, null, 1));
                 console.log(`  per-row delivery written to ${EMIT_ROWS}`);

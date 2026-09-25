@@ -3,7 +3,7 @@
 //   node eval/diff-delivered.mjs <baseline-rows.json> <arm-rows.json> [--limit 40] [--scene <substr>] [--scene-chars 700]
 import fs from 'node:fs';
 import { arg } from './lib/metrics.mjs';
-import { entryKey } from '../extension/content-lexical.mjs';
+import { rowKey } from '../extension/grading.mjs';
 
 const argv = process.argv.slice(2);
 const files = argv.filter((a, i) => a.endsWith('.json') && !['--limit', '--scene', '--scene-chars'].includes(argv[i - 1]));
@@ -19,6 +19,12 @@ const [A, B] = files.map(p => JSON.parse(fs.readFileSync(p, 'utf8')));
 const label = x => (x.with?.length ? x.with.join('+') : 'three signals');
 
 const byScene = x => new Map(x.scenes.map(sc => [sc.name, sc]));
+// By (book, uid): a scene ranks every attached book, and uids repeat across books. A rows file from before --emit-rows
+// wrote `book` has none, so a pair where either side lacks it is joined by uid alone.
+const withBook = x => x.scenes.every(sc => sc.rows.every(r => r.book !== undefined));
+const keyOf = withBook(A) && withBook(B) ? rowKey : r => r.uid;
+if (keyOf !== rowKey) console.error('note: a rows file carries no book, so rows are joined by uid alone and a uid two books share can pair across them');
+const byRow = rows => new Map(rows.map(r => [keyOf(r), r]));
 const [ma, mb] = [byScene(A), byScene(B)];
 const shared = [...ma.keys()].filter(n => mb.has(n) && (!ONLY || n.includes(ONLY)));
 
@@ -31,8 +37,6 @@ const fmt = d => {
 let dropped = [], added = [], sameCount = 0, aCount = 0, bCount = 0;
 for (const name of shared) {
     const sa = ma.get(name), sb = mb.get(name);
-    // By (book, uid): a scene ranks every attached book, and uids repeat across books.
-    const byRow = rows => new Map(rows.map(r => [entryKey({ world: r.book, uid: r.uid }), r]));
     const ra = byRow(sa.rows), rb = byRow(sb.rows);
     aCount += sa.rows.filter(r => r.delivered).length;
     bCount += sb.rows.filter(r => r.delivered).length;

@@ -1,21 +1,26 @@
 // core-compare.mjs — WA against ST core, F2 scored on the set each one ships under a token budget.
 // Core here is its keyword route at --core-depth unioned with top-K by cosine (the threshold is not modelled), walked by --core-order until the budget is gone: an upper bound, with no probability rolls, inclusion groups, delay/cooldown, filters, decorators or recursion. --core-uids takes a real install's answer instead (WA disabled, read what ST inserted).
 // Usage (from SillyTavern root):
-//   node .../core-compare.mjs <sample.json> [...] [--tier memory|reference|all] [--budget 25083,37624] [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3] [--tokenizer gpt-3.5-turbo]
+//   node .../core-compare.mjs <sample.json> [...] --cutoff 0.10 [--tier memory|reference|all] [--budget 25083,37624] [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3] [--tokenizer gpt-3.5-turbo]
 // The defaults are a stock install (max_entries 5, depth 2, order untouched); a tuned install scores measurably higher (R14), so say which is being quoted.
 import fs from 'node:fs';
 import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel } from './lib/scene.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, arg } from './lib/metrics.mjs';
 import { offlineTokenCounter } from './lib/tokens.mjs';
+import { relevanceCut } from '../extension/selection.mjs';
+import { hasPromoteDecorator } from '../extension/matcher.mjs';
 import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 
 const argv = process.argv.slice(2);
-const VALUED = new Set(['--tier', '--budget', '--core-top-k', '--core-order', '--core-depth', '--core-uids', '--tokenizer']);
+const VALUED = new Set(['--cutoff', '--tier', '--budget', '--core-top-k', '--core-order', '--core-depth', '--core-uids', '--tokenizer']);
 const samples = argv.filter((a, i) => a.endsWith('.json') && !a.startsWith('--') && !VALUED.has(argv[i - 1]));
 if (!samples.length) {
     console.error('need at least one sample: node core-compare.mjs <sample.json> [more.json ...] [--budget 25083]');
     process.exit(2);
 }
+// relevanceCutoff is a user setting, so the run is told it rather than given a stand-in.
+const CUTOFF = Number(arg(argv, '--cutoff'));
+if (arg(argv, '--cutoff') === null || !Number.isFinite(CUTOFF)) { console.error('--cutoff <relevanceCutoff> is required: the stage-4 cutoff WA is compared at'); process.exit(2); }
 const TIER = arg(argv, '--tier') ?? 'memory';
 if (!['memory', 'reference', 'all'].includes(TIER)) { console.error(`--tier must be memory|reference|all, got ${TIER}`); process.exit(2); }
 const BUDGETS = String(arg(argv, '--budget') ?? '5000,10000,15000,25000,40000').split(',').map(Number).filter(Number.isFinite);
@@ -95,9 +100,10 @@ const coreNominate = (rows) => {
     for (const r of [...rows].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, TOP_K)) picked.add(r);
     return [...picked].sort(ORDERS[CORE_ORDER]);
 };
-const waNominate = rows => rows.filter(r => Number.isFinite(r.eCredit) && Number.isFinite(r.cutoff) && r.eCredit >= r.cutoff);
+// Stage 4 itself, over rows already in layout order; a promoted row is exempt, as at runtime.
+const waNominate = rows => relevanceCut(rows, { cutoffOf: r => (hasPromoteDecorator(r.entry) ? NaN : CUTOFF) }).kept;
 
-console.log(`${scenes.length} scene(s), ${TIER} tier, ${tk.tokenizer} tokens; core: top-${TOP_K}, scan depth ${CORE_DEPTH}, walked by ${CORE_UIDS ? "a real install's answer" : CORE_ORDER}`);
+console.log(`${scenes.length} scene(s), ${TIER} tier, ${tk.tokenizer} tokens; core: top-${TOP_K}, scan depth ${CORE_DEPTH}, walked by ${CORE_UIDS ? "a real install's answer" : CORE_ORDER}; WA cut at ${CUTOFF}`);
 console.log(`mean ${mean(scenes.map(s => s.rows.length)).toFixed(0)} candidates, ${mean(scenes.map(s => s.relevant)).toFixed(1)} relevant per scene\n`);
 console.log('budget      core F2   core P   core R  core n  core tok |     WA F2     WA P     WA R    WA n   WA tok');
 for (const budget of [...BUDGETS, Infinity]) {
