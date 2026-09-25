@@ -115,6 +115,18 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(sc('? moon AND rocket::0', 'moon rocket'), 1, 'a zero-weight conjunct gates without scoring');
     eq(sc('? (moon OR rocket::0)', 'moon rocket'), 1, '...and does not drag its group\'s mean down');
 
+    // The author's weights as an odds multiplier (keywordScore `logWeight`): intent, so neither counts nor the curve reach it.
+    const odds = (keys, text) => Number(Math.exp(keywordScore({ key: keys }, text, keys).logWeight).toFixed(6));
+    eq(odds(['? (Picard OR Janeway::2) Borg'], 'Janeway fought the Borg'), 2, 'a matched ::2 multiplies the odds by exactly 2');
+    eq(odds(['? (Picard OR Janeway::2) Borg'], 'Picard fought the Borg'), 1, '...and the unweighted alternative leaves them alone');
+    eq(odds(['? (Picard OR Janeway::2) Borg'], 'Picard, Picard, Picard and Janeway fought the Borg'), 2, '...nor dilutes the weighted one it pools with');
+    eq(odds(['? Janeway::2 Borg::3'], 'Janeway fought the Borg'), 6, 'weights on conjuncts multiply');
+    eq(odds(['? (sunglass OR ray-ban::5)::5'], 'new ray-bans'), 25, '...as a group weight does with its member');
+    eq(odds(['? (Picard::0.5 OR Janeway) Borg'], 'Picard fought the Borg'), 0.5, 'a weight below 1 lowers them');
+    eq(odds(['? saturn OR (mercury AND planet::0)'], 'the planet mercury'), 1, '::0 is a gate, so it says nothing about relevance');
+    eq(odds(['? Janeway::2 Borg', '? Janeway::0.5 cube'], 'Janeway at the Borg cube'), 2, 'keys are alternatives: the strongest matched one, not a product');
+    eq(odds(['? moon mission', 'moon'], 'the moon mission'), 1, 'an unweighted key is exactly neutral');
+
     // negation-only is fatal in a primary, so the all-zero-weight key is the reachable case
     eq(sc('? moon::0', 'moon'), 1, 'an all-zero-weight key that matches still counts as one');
 

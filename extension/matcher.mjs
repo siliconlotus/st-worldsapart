@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { addMessageHits, astId, buildAst, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, astId, buildAst, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, synthesizeSecondary, unitWeight, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -827,10 +827,12 @@ export function repeatCurveOf(n, k1, curve = 'presence-log', R = 1) {
     return n / (n + k1);
 }
 
-/** BM25-style keyword score for one entry over one segment or scanSegments() output; the defaults are ST's world_info_case_sensitive and world_info_match_whole_words, the entry overriding. */
+/** BM25-style keyword score for one entry over one segment or scanSegments() output; the defaults are ST's world_info_case_sensitive and world_info_match_whole_words, the entry overriding.
+ *  `logWeight` is the author's term weights as a log-odds offset: per key the sum of ln(weight) over its matched units, an OR's
+ *  being its strongest matched alternative and `::0` left out; the entry takes the strongest matched key's. */
 export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault, repeatCurve = 'presence-log', repeatR = 1 } = {}) {
     if (!Array.isArray(keys) || !keys.length) {
-        return { score: 0, hits: [] };
+        return { score: 0, hits: [], logWeight: 0 };
     }
 
     const caseSensitive = entry.caseSensitive ?? caseSensitiveDefault;
@@ -838,7 +840,7 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
 
     keys = usableKeys(keys);
     if (!keys.length) {
-        return { score: 0, hits: [] };
+        return { score: 0, hits: [], logWeight: 0 };
     }
 
     const segments = Array.isArray(text) ? text : [text];
@@ -861,25 +863,30 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
             if (!pooled) byKey.set(key, pooled = new Map());
             for (const u of units) {
                 const prev = pooled.get(u.id);
-                if (prev) { prev.wsum += u.wsum; prev.n += u.n; }
-                else pooled.set(u.id, { wsum: u.wsum, n: u.n });
+                if (prev) { prev.wsum += u.wsum; prev.n += u.n; prev.wmax = Math.max(prev.wmax, unitWeight(u)); }
+                else pooled.set(u.id, { wsum: u.wsum, n: u.n, wmax: unitWeight(u) });
             }
         }
     }
 
     // A unit saturates once over the window, and its weight (the mean wsum/n) multiplies the curve; `count` is occurrences only, `score` carries weights.
+    // Keys are alternatives, so the entry takes the strongest key's weights rather than multiplying across keys.
+    let logWeight = -Infinity;
     for (const [key, pooled] of byKey) {
-        let count = 0, keyScore = 0;
+        let count = 0, keyScore = 0, keyLog = 0;
         for (const u of pooled.values()) {
-            keyScore += (u.wsum / u.n) * repeatCurveOf(u.n, k1, repeatCurve, repeatR);
+            const weight = u.wsum / u.n;
+            keyScore += weight * repeatCurveOf(u.n, k1, repeatCurve, repeatR);
+            if (u.wmax > 0) keyLog += Math.log(u.wmax);
             count += u.n;
         }
         score += keyScore;
+        logWeight = Math.max(logWeight, keyLog);
         hits.push({ key, count, score: keyScore });
     }
 
     hits.sort((a, b) => b.score - a.score);
-    return { score, hits };
+    return { score, hits, logWeight: byKey.size ? logWeight : 0 };
 }
 
 /** The leading `@@` lines of raw content, by core's parseDecorators, returned raw: withPromote must preserve their spelling. */

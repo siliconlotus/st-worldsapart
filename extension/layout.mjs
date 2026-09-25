@@ -3,8 +3,14 @@
 // (eval/layout-check.mjs).
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
 
-/** Stage 4's E[credit]; an unscored row sorts below every scored one, then by authored order. */
-export const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1);
+/** E[credit] with its odds multiplied by the author's term weights (`logWeight`, matcher `keywordScore`); exactly E[credit] when there are none. What the layout sorts and the cut reads. */
+export const weightedCredit = it => {
+    const e = it.eCredit, w = Math.exp(Number(it.logWeight) || 0);
+    return w === 1 ? e : e * w / (1 - e + e * w);
+};
+
+/** An unscored row sorts below every scored one, then by authored order. */
+export const layoutScore = it => (Number.isFinite(it.eCredit) ? weightedCredit(it) : -1);
 
 /**
  * The four blocks the budget walks, each ordered. Classification is by what an entry is: a constant

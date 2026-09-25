@@ -92,7 +92,7 @@ temperature, so they can confirm a finding transfers but cannot be where it is f
 The stages are `docs/matching-architecture.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
 **2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
 **3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
-per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, the dynamic
+per-tier model; `E[credit]` with its odds scaled by the author's term weights, `weightedCredit`, is the layout order), **4. Selection** (`relevanceCut`, the dynamic
 block only, both tiers at one cutoff for every model), **5. Delivery** (`applyBudget`, every cap a
 prefix of the layout order). Say which stage a claim is about.
 

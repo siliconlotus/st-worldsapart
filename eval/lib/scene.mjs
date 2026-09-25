@@ -15,6 +15,7 @@ import { setMacros } from '../../extension/smartkeys.mjs';
 import { hasPromoteDecorator } from '../../extension/matcher.mjs';
 import { isDurable, openBundle } from '../../extension/grading.mjs';
 import * as selection from '../../extension/selection.mjs';
+import { layoutScore, weightedCredit } from '../../extension/layout.mjs';
 import * as delivery from '../../extension/delivery.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../../extension/content-lexical.mjs';
 import { defaultSettings } from '../../extension/state.mjs';
@@ -481,11 +482,12 @@ export const scoringKeys = (e, P) => {
 };
 
 /** Keyword score via the shared matcher.keywordScore; the boundary mode is pushed per call, since arms hold their scorers across each other's runs. */
-export const makeKeywordScore = P => (e, text, k1) => {
+const makeKeywordResult = P => (e, text, k1) => {
     matcher.setBoundaryMode(P.wordBoundary);
     setMacros(P.macros);
-    return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, repeatCurve: P.repeatCurve, repeatR: P.repeatR }).score;
+    return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, repeatCurve: P.repeatCurve, repeatR: P.repeatR });
 };
+export const makeKeywordScore = P => { const result = makeKeywordResult(P); return (e, text, k1) => result(e, text, k1).score; };
 
 /**
  * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores. `topK` is stage 1's own bound and counts ENTRIES.
@@ -493,6 +495,7 @@ export const makeKeywordScore = P => (e, text, k1) => {
  */
 export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, topK = admitCeiling(true), gates = {} }) {
     const keywordScore = makeKeywordScore(P);
+    const keywordResult = makeKeywordResult(P);
     // The stage-3 text index, one per book as bookIndexes keys it: pooling the books would pool their IDF.
     const { chunkMode, chunkSize, minChunkSize } = defaultSettings;
     const cfg = chunkCfg ?? { chunkMode, chunkSize, minChunkSize };   // the shipped values, never a second copy of them
@@ -602,7 +605,9 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             const others = r.entry.excludeRecursion ? [] : buffer.filter(t => t !== own);
             const hay = others.length ? matcher.withExtraTexts((_d, e) => haystackFor(e), others, P.matchWindow)(0, r.entry) : haystackFor(r.entry);
             r.triggerDepth = depthOf.get(entryKey(r.entry)) ?? 0;
-            r.keywordScore = keywordScore(r.entry, hay, k1) / (1 + r.triggerDepth);
+            const kw = keywordResult(r.entry, hay, k1);
+            r.keywordScore = kw.score / (1 + r.triggerDepth);
+            r.logWeight = kw.logWeight;
         }
         return rows;
     };
@@ -691,7 +696,7 @@ export const makeLayoutOrder = ({ scene, haystack, fit = null, fitDir = null }) 
             // No `cutoff` off the fit, not even as provenance: the cut and its number belong to scoreScene `admits`.
             mine.forEach((r, i) => { r.eCredit = e[i]; });
         }
-        return [...rows].sort((a, b) => (b.eCredit ?? -1) - (a.eCredit ?? -1));
+        return [...rows].sort((a, b) => layoutScore(b) - layoutScore(a));
     };
 };
 
@@ -763,7 +768,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // layout order splits it out before the cut, and NaN as its cutoff is how relevanceCut spells "not cut".
     // No cutoff supplied: nothing is cut, so @budget still reports the whole ranked set — only @cut goes unavailable.
     const keptSet = new Set(selection.relevanceCut(ranked, {
-        scoreOf: r => r.eCredit,
+        scoreOf: weightedCredit,
         cutoffOf: r => (!cutGiven || promotedRow(r) ? NaN : cutFor()),
     }).kept);
     const admits = r => keptSet.has(r);

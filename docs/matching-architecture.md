@@ -397,7 +397,7 @@ close, found by balance, or to the end. Off is core's behaviour.
 
 `evaluate` returns `{ matched, scoreBoost, units }`. A unit is one thing the key is about, `n`
 occurrences at weight `wsum/n`. A TERM or REGEX is one unit at `weight x n`; `AND` yields both sides'
-units; `OR` pools its sides into one unit, the alternation; `XOR` yields the matched side's; `NOT`
+units; `OR` pools its sides into one unit, the alternation, keeping its strongest member's weight as `wmax`; `XOR` yields the matched side's; `NOT`
 yields none. A group weight multiplies every unit's `wsum` and never `n`. `keywordScore` pools units by
 identity across the window, then credits each as `weight x repeatCurveOf(n)`: `presence-log`, `1 + R
 ln(1 + (n-1)/k1)`, `R` 1 and `k1` the `bm25K1` setting. A hit reports `count`, the occurrences, and
@@ -497,7 +497,7 @@ recursion buffer appended, minus the entry's own content, and not at all for an 
 entry; secondaries gate through the stash. The score is divided by `1 + waTriggerDepth`, so an entry
 reached at recursion pass `d` scores `keys / (1 + d)`; depth 0 is unweighted. Every entry's keys are
 scored, vectorized included, and the column is recorded on the row; no shipped fit reads it, so it does
-not reach `E[credit]`. The curve is an assertion.
+not reach `E[credit]`; the weights in it reach the layout through **Term weights**, below. The curve is an assertion.
 
 **The relevance column** (`scoreRelevanceColumn`). `properNouns` is the sum over names the entry shares
 with the window of `log((N+1)/(df+1))`, a name being a token capitalised somewhere not sentence-initial
@@ -514,9 +514,11 @@ A model with no fit of its own scores through `UNFITTED_FALLBACK`'s; a pass in
 which no row has a cosine scores through the file's `noCosine` fit. A tier with no model is not scored,
 and an unscored row is kept.
 
+**Term weights** (`layout.mjs` `weightedCredit`). The fit never reads a term weight: a weight is the author's assertion of what matters, which no corpus predicts. `keywordScore` returns an entry's weights as `logWeight`, per key the sum of `ln(weight)` over its matched units — an OR's unit counting its strongest matched alternative (`unitWeight`), whatever the counts, and `::0` left out as a gate — and across keys the strongest matched key, since keys are alternatives. `weightedCredit` multiplies `E[credit]`'s odds by `exp(logWeight)`, `e·w / (1 − e + e·w)`: exactly `E[credit]` for an entry without weights, and never standardised, so `::2` doubles an entry's odds in every turn. `E[credit]` itself stays the fit's, and a capture records it unweighted.
+
 **Layout** (`layout.mjs` `layoutOrder`). Rows are classified by what the entry is, durable first: armed
 sticky (core's `timedEffects.isEffectActive`), then `constant`, then promoted (`waPromote`), then
-dynamic. The scored blocks sort by `E[credit]`, an unscored row below every scored one, then authored
+dynamic. The scored blocks sort by the weighted credit, an unscored row below every scored one, then authored
 order; `sequential` book priority makes the book tier the primary key, `interleaved` scales the score
 by the book's weight and shifts authored order by its offset. Durable blocks sort by authored order.
 This is the layout order (`runState.lastLayoutOrder`); the prompt order is separate.
@@ -524,7 +526,7 @@ This is the layout order (`runState.lastLayoutOrder`); the prompt order is separ
 ## Stage 4 — Selection
 
 `selection.mjs` `relevanceCut`, over the dynamic block only: a row of
-either tier whose `E[credit]` is below the `relevanceCutoff` setting (0.10) is dropped and deleted from
+either tier whose weighted credit is below the `relevanceCutoff` setting (0.10) is dropped and deleted from
 core's map. The cutoff is one setting for every model and both tiers, never the fit's own `cutoff`,
 because `E[credit]` is calibrated across embedders (E4). A row with no finite score, or whose tier has
 no fit, is kept: an absent verdict is not a negative one. Constants, armed stickies and promoted rows
@@ -601,7 +603,7 @@ its `upstream-st.md` number.
 | `matchWindow` | `paragraph` | `scan` / `message` / `paragraph`, the unit a key must match within |
 | `wordBoundary` | `strict` | the whole-word boundary class |
 | `dropChatTags` | `''` | tag names removed with their content from every message WA reads |
-| `relevanceCutoff` | 0.10 | the stage-4 `E[credit]` cutoff for dynamic rows of both tiers |
+| `relevanceCutoff` | 0.10 | the stage-4 cutoff on the weighted credit, for dynamic rows of both tiers |
 | `dropUnavailable` | true | hide memory entries whose STMB range postdates the current message |
 | `maxVectorEntries` | 20 | stage-5 cap on `vectorized` rows |
 | `maxDynamicEntries`, `maxTotalEntries` | 0 | stage-5 caps, 0 off |

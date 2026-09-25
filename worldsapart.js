@@ -525,7 +525,8 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
                 entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
                 tier: it.eCreditTier,
                 eCredit: Number(it.eCredit.toFixed(4)),
-                clears: it.eCredit >= settings().relevanceCutoff,
+                weight: it.logWeight ? Number(Math.exp(it.logWeight).toFixed(2)) : 1,
+                clears: layout.weightedCredit(it) >= settings().relevanceCutoff,
                 cosine: Number.isFinite(it.score) ? Number(it.score.toFixed(4)) : null,
                 text: Number((it.textScore ?? 0).toFixed(3)),
                 properNouns: Number(it.properNouns.toFixed(3)),
@@ -1409,6 +1410,7 @@ async function rankOwnedScan(activated, args, skip) {
             // An entry reached at recursion pass d did not have the conversation name it (docs/matching-architecture.md, *Stage 3 — Scoring*).
             item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
+            item.logWeight = scored.logWeight;
             // Verbose runs only: where each key matched, for /wa-grade's why column. Flags mirror the keywordScore call above exactly.
             item.keywordWhy = runState.verboseRun
                 ? scored.hits.slice(0, 4).map(h => {
@@ -1459,7 +1461,7 @@ async function rankOwnedScan(activated, args, skip) {
     // independent of recursion depth.
     const cutoffs = relevanceModel.value ?? {};
     const { cut: relevanceCutRows } = selection.relevanceCut(results, {
-        scoreOf: it => it.eCredit,
+        scoreOf: layout.weightedCredit,
         cutoffOf: it => (cutoffs[isMemory(it.entry) ? 'memory' : 'reference'] ? settings().relevanceCutoff : NaN),
     });
     const cutByRelevance = new Set(relevanceCutRows);
@@ -1720,6 +1722,7 @@ function whySelected(item, block) {
         Number.isFinite(item.score) ? `vec ${item.score.toFixed(3)}` : null,
         item.textScore ? `text ${item.textScore.toFixed(2)}` : null,
         item.keywordScore ? `keys ${item.keywordScore.toFixed(2)}` : null,
+        item.logWeight ? `weight ×${Math.exp(item.logWeight).toFixed(2)}` : null,
     ].filter(Boolean);
 
     if (parts.length) {

@@ -1,5 +1,6 @@
 // Guards stage 3's product, the layout order (extension/layout.mjs), on literal rows with no ST and no corpus.
-import { layoutOrder, layoutScore } from '../extension/layout.mjs';
+import { layoutOrder, layoutScore, weightedCredit } from '../extension/layout.mjs';
+import { relevanceCut } from '../extension/selection.mjs';
 import { eqDeep as eq } from '../eval/lib/metrics.mjs';
 
 
@@ -14,6 +15,24 @@ const BASE = { isArmedSticky: () => false, priorityMode: 'interleaved', presenta
 eq(layoutScore({ eCredit: 0.4 }), 0.4, 'the layout score is E[credit]');
 eq(layoutScore({}), -1, 'an unscored row sorts below every scored one, not beside them at 0');
 eq(layoutScore({ eCredit: 0 }), 0, '...and a genuine 0 is not treated as unscored');
+
+// --- term weights: E[credit]'s odds times the author's weight, so an unweighted row is exactly its E[credit]
+{
+    const odds = p => p / (1 - p);
+    eq(weightedCredit({ eCredit: 0.3 }), 0.3, 'no weights: the score is E[credit] itself');
+    eq(Number((odds(weightedCredit({ eCredit: 0.3, logWeight: Math.log(2) })) / odds(0.3)).toFixed(9)), 2, '::2 doubles the odds');
+    eq(Number(weightedCredit({ eCredit: 0.3, logWeight: Math.log(0.5) }).toFixed(9)), Number((0.15 / 0.85).toFixed(9)), '...and ::0.5 halves them');
+    eq(weightedCredit({ eCredit: 1, logWeight: Math.log(9) }), 1, 'a certainty stays one, never past it');
+    eq(Number.isNaN(weightedCredit({ eCredit: NaN, logWeight: Math.log(2) })), true, 'an unscored row stays unscored');
+
+    // Two near-identical entries; the author weighted the detail the second one is about.
+    const picard = row(1, { eCredit: 0.30 }), janeway = { ...row(2, { eCredit: 0.26 }), logWeight: Math.log(2) };
+    eq(uids(layoutOrder([picard, janeway], BASE).results), [2, 1], 'the weighted entry overtakes a higher-credit one in the layout order');
+    eq(uids(layoutOrder([picard, row(2, { eCredit: 0.26 })], BASE).results), [1, 2], '...which the unweighted pair keeps in credit order');
+    const cut = rows => uids(relevanceCut(rows, { scoreOf: weightedCredit, cutoffOf: () => 0.10 }).kept);
+    eq(cut([{ ...row(3, { eCredit: 0.07 }), logWeight: Math.log(2) }]), [3], 'and a weight carries an entry across the cutoff');
+    eq(cut([row(3, { eCredit: 0.07 })]), [], '...that the same entry unweighted does not clear');
+}
 
 // --- classification -------------------------------------------------------------------------------
 {
