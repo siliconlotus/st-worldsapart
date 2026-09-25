@@ -126,8 +126,6 @@ Sometimes, however, different terms are differently specific or relevant. If a l
 
 <sub>(XOR behaves identically to OR in these examples)</sub>
 
-The mirror of `::0` is a trailing `?`, which makes a term optional: `? John Glenn?` matches on `John` alone and scores `Glenn` when it is there too. It goes on a term, a phrase, a group or a pattern, in either order with a weight, and a key that could match a message holding none of its terms, every term optional or negated or an OR with an optional side, is refused, since it would fire on nearly everything; for any of several, write them with OR. Inside a proximity group an optional word joins the cluster when it is within reach and is never required.
-
 It is possible to assign a score of `::0`; in this case, the term is not scored, but only used as a gate. This can be useful for keys that otherwise might overlap: `? saturn OR venus OR (mercury AND planet::0)`, which allows you to specify the planet instead of the singer or the car without it scoring higher than the other planets.
 
 ### What about multiple matches?
@@ -149,7 +147,8 @@ The math is not super important; just know that the scores you're expecting may 
 
 ## Optional Terms
 
-To mark a term or group as optional, use a `?` after it. The term will still match without it, but if it's there, it will count toward the key score. For a literal question mark, use quotes: `? "Guess Who?" game`
+To mark a term or group as optional, use a `?` after it. The term will still match without it, but if it's there, it will count toward the key score. For a literal question mark, use quotes: `? "Guess Who?" game`. 
+
 
 | term | text | match | score |
 | --- | --- | --- | --- |
@@ -159,10 +158,12 @@ To mark a term or group as optional, use a `?` after it. The term will still mat
 | `? (Neil OR Buzz)? astronaut` | `Early astronauts were military test pilots` | true | 1 |
 | `? (Neil OR Buzz)? astronaut` | `Early astronauts were military test pilots; Neil Armstrong was the first civilian, though he was a Navy veteran.` | true | 2 |
 
+
 > [!IMPORTANT]
-> A SmartKey **must have at least one positive anchor term**. `? A? B? C?` would match on every entry and will be rejected by the validator; use `? (A or B or C)` to ensure that at least one of the terms is present. Likewise `? -A B? C?`; use `? -A (B or C)`.
->
-> An optional term **can't be negated or be one side of an OR or XOR**, because it always counts as present: `? cedar -alder?` could never match, and will be rejected by the validator. To make a set of alternatives optional, mark the group: `? cedar (alder OR birch)?`, not `? cedar (alder OR birch?)`.
+> A SmartKey **must have at least one positive anchor term**. `? A? B? C?` would match on every entry and will be rejected by the validator; use `? (A or B or C)` to ensure that at least one of the terms is present. Likewise `? -A B? C?`; use `? -A (B or C)`. 
+
+> [!IMPORTANT]
+> For a similar reason, optionals cannot be used as NOT terms, as the result is always true and therefore means nothing; `? a -b?` is, in all possible cases, equivalent to bare `? a` because NOT terms are not scored. Likewise, you cannot use an optional as a term of an OR or XOR statement, as the result is incoherent: `? a OR b?` will raise an always-true error. The most likely accident is with a group: `? a (b OR c?)` when you most likely meant `? a (b or c)?`
 
 ## Regex Terms
 
@@ -256,5 +257,5 @@ SmartKeys syntax is not meant to be compatible with Lucene. Nonetheless, it has 
 [^1]: Why a question mark? Because it's easy to see at a glance, easy to parse, and fails as a string match. `? (moon OR planet) AND mission` will never appear in a text, so you'll never get a false positive. Leaving them plain would silently change the semantics of existing keys like `Law and Order` or `Florence & the Machine`.
 [^2]: If you don't use parentheses, they're evaluated in this order: NOT, AND, OR/XOR. `? moon AND sun NOT saturn OR jupiter` becomes `? (moon AND (sun NOT saturn)) OR jupiter` when you probably wanted `? (moon AND sun) NOT (saturn OR jupiter)`
 [^3]: Lucene `^` syntax is also supported: `? term^3`. Note that there cannot be a space between the term and the caret; `? term ^3` is invalid, as it's impossible to determine if it should be a weight or a literal.
-[^4]: Any quotation mark: ", “”„‟ (curly — one family, so a phrase opened on any of the four closes on whichever comes first), «», 「」,『』,《》,〈〉. Does not include double-prime ″. Note that quotes can be escaped by quotes from other families: `"《月亮代表我的心》"`, `"«Non, je ne regrette rien»"`.
+[^4]: Any quotation mark: ", “”„‟ (curly, in any combination), «», 「」,『』,《》,〈〉. Does not include double-prime ″. Note that quotes can be escaped by quotes from other families: `"《月亮代表我的心》"`, `"«Non, je ne regrette rien»"`.
 [^5]: The exceptions to this are where ST's behavior is bugged or objectively incorrect (e.g., whole-word matching on keys that contain spaces match as substrings) or where WA aligns with authorial intent in a way that ST does not (e.g., orthography folding).
