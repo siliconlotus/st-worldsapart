@@ -258,7 +258,8 @@ function expandAst(node) {
         const text = expandMacros(node.value);
         const words = node.quoted ? [text] : text.split(/\s+/).filter(Boolean);
         if (!words.length) return null;
-        if (words.length === 1) return { ...node, value: words[0] };
+        // A `~N` term is evaluateNear's, which reads no leaf weight, so one word takes the group path as several do.
+        if (words.length === 1 && near === undefined) return { ...node, value: words[0] };
         const out = words.map(w => ({ ...leaf, value: w, weight: 1 })).reduce((l, r) => ({ type: 'AND', left: l, right: r }));
         if (near !== undefined) out.near = near;
         const gw = (groupWeight ?? 1) * weight;
@@ -569,11 +570,12 @@ function ensureScan(scope, text) {
 
 /** A scoring unit: `n` occurrences carrying `wsum` = weight x count. AND's operands are separate units, OR's pool into one; a condition yields none, as does weight 0. `id` is the interned node. */
 const unit = (id, wsum, n) => (wsum > 0 && n > 0 ? [{ id, wsum, n }] : []);
-/** The largest weight a unit pooled: `wmax` where an OR set it, else its mean `wsum/n`. The offset reads this, the score the mean. */
-export const unitWeight = u => u.wmax ?? u.wsum / u.n;
+/** A weight as a log-odds term; `::0` is a gate, so it adds nothing. */
+const logOf = w => (w > 0 ? Math.log(w) : 0);
+const logWeightOf = r => r.logWeight ?? 0;
 // `parts` is the pooled children, for display only: wsum and n stay the alternation's, so boostOf is unchanged.
 const pool = (id, units) => (units.length
-    ? unit(id, units.reduce((a, u) => a + u.wsum, 0), units.reduce((a, u) => a + u.n, 0)).map(u => ({ ...u, wmax: Math.max(...units.map(unitWeight)), parts: units }))
+    ? unit(id, units.reduce((a, u) => a + u.wsum, 0), units.reduce((a, u) => a + u.n, 0)).map(u => ({ ...u, parts: units }))
     : []);
 /** Σ weighted occurrences — the same scalar under every operator, so countKey's contract is unaffected by the unit split. */
 const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
@@ -594,18 +596,19 @@ const termRegex = node => {
 };
 
 /** Evaluates an AST against a text; `acHits` is pass-1 counts for this text, omitted for the pure regex path. An unmatched node
- *  must carry scoreBoost 0: parents sum child boosts without re-checking matched. */
+ *  must carry scoreBoost 0: parents sum child boosts without re-checking matched. `logWeight` is the matched expression's weights:
+ *  a term's ln(weight), AND adds its sides, OR takes the larger matched side, a group weight adds once. */
 export function evaluate(node, text, acHits) {
     let r = node?.near !== undefined ? evaluateNear(node, text, acHits) : evaluateNode(node, text, acHits);
     const w = node?.groupWeight;
     // `undefined`, not falsy: weight 0 is the documented free gate, and `!w` let `(a b)::0` score its full unweighted boost.
     if (!(w === undefined || w === 1 || !r.units.length)) {
-        // wsum only: the weight multiplies the thing, and `n` is what the saturation curve reads.
-        const units = r.units.map(u => ({ ...u, wsum: u.wsum * w, wmax: unitWeight(u) * w }));
-        r = { ...r, scoreBoost: boostOf(units), units };
+        // Never `n`: the weight multiplies the thing, and `n` is what the saturation curve reads. A unit weighted to 0 goes, as a `::0` term's does.
+        const units = r.units.map(u => ({ ...u, wsum: u.wsum * w })).filter(u => u.wsum > 0);
+        r = { ...r, scoreBoost: boostOf(units), units, logWeight: w > 0 ? logWeightOf(r) + logOf(w) : 0 };
     }
     // Optional: never a gate, still whatever it scored.
-    return node?.optional && !r.matched ? { ...r, matched: true } : r;
+    return node?.optional && !r.matched ? { ...r, matched: true, logWeight: 0 } : r;
 }
 
 function evaluateNode(node, text, acHits) {
@@ -617,17 +620,17 @@ function evaluateNode(node, text, acHits) {
                 let n = 0;
                 for (const i of node.acIndex) n += acHits.get(i) ?? 0;
                 if (!n) return { matched: false, scoreBoost: 0, units: [] };
-                if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
+                if (!node.isExact && !node.isCaseSensitive) return { matched: true, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n), logWeight: logOf(node.weight) };
             }
             // Fold both sides and use the same lookaround as countKey's naive walk — two boundary definitions is two matchers.
             const hay = foldedHay(text, node.isCaseSensitive);
             const n = (hay.match(termRegex(node)) ?? []).length;
-            return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
+            return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n), logWeight: n > 0 ? logOf(node.weight) : 0 };
         }
         // Shares countRegexKey with countKey: case-sensitive, fold-exempt, on raw text; `/i` is how insensitivity is written.
         case 'REGEX': {
             const n = countRegexKey(node.value, text);
-            return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n) };
+            return { matched: n > 0, scoreBoost: node.weight * n, units: unit(node, node.weight * n, n), logWeight: n > 0 ? logOf(node.weight) : 0 };
         }
         // A condition, not a thing: no unit, no boost.
         case 'NOT': {
@@ -640,18 +643,19 @@ function evaluateNode(node, text, acHits) {
             if (!l.matched) return { matched: false, scoreBoost: 0, units: [] };
             const r = evaluate(node.right, text, acHits);
             const units = r.matched ? [...l.units, ...r.units] : [];
-            return { matched: r.matched, scoreBoost: boostOf(units), units };
+            return { matched: r.matched, scoreBoost: boostOf(units), units, logWeight: r.matched ? logWeightOf(l) + logWeightOf(r) : 0 };
         }
         case 'OR': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
             const units = pool(node, [...l.units, ...r.units]);
-            return { matched: l.matched || r.matched, scoreBoost: boostOf(units), units };
+            const logWeight = Math.max(l.matched ? logWeightOf(l) : -Infinity, r.matched ? logWeightOf(r) : -Infinity);
+            return { matched: l.matched || r.matched, scoreBoost: boostOf(units), units, logWeight: Number.isFinite(logWeight) ? logWeight : 0 };
         }
         case 'XOR': {
             const l = evaluate(node.left, text, acHits), r = evaluate(node.right, text, acHits);
             const matched = l.matched !== r.matched;
             const units = matched ? pool(node, l.matched ? l.units : r.units) : [];
-            return { matched, scoreBoost: boostOf(units), units };
+            return { matched, scoreBoost: boostOf(units), units, logWeight: matched ? logWeightOf(l.matched ? l : r) : 0 };
         }
     }
 }

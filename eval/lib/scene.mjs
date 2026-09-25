@@ -15,7 +15,7 @@ import { setMacros } from '../../extension/smartkeys.mjs';
 import { hasPromoteDecorator } from '../../extension/matcher.mjs';
 import { isDurable, openBundle } from '../../extension/grading.mjs';
 import * as selection from '../../extension/selection.mjs';
-import { layoutScore, weightedCredit } from '../../extension/layout.mjs';
+import { layoutScore } from '../../extension/layout.mjs';
 import * as delivery from '../../extension/delivery.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../../extension/content-lexical.mjs';
 import { defaultSettings } from '../../extension/state.mjs';
@@ -482,7 +482,7 @@ export const scoringKeys = (e, P) => {
 };
 
 /** Keyword score via the shared matcher.keywordScore; the boundary mode is pushed per call, since arms hold their scorers across each other's runs. */
-const makeKeywordResult = P => (e, text, k1) => {
+export const makeKeywordResult = P => (e, text, k1) => {
     matcher.setBoundaryMode(P.wordBoundary);
     setMacros(P.macros);
     return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, repeatCurve: P.repeatCurve, repeatR: P.repeatR });
@@ -549,6 +549,9 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // The retrieval winners feed recursion too: WA force-activates them, so core counts them in new.successful.
         const feeds = e => P.recursive && !e.preventRecursion && Boolean(String(e.content ?? '').trim());
         const buffer = rows.map(r => r.entry).filter(feeds).map(e => String(e.content).trim());
+        // Core activates every constant and `@@activate` entry on its first loop, retrieved or not, so their content feeds recursion too.
+        const unconditional = e => !e.disable && (matcher.hasDecorator(e, '@@activate') || (e.constant && !matcher.hasDecorator(e, '@@dont_activate')));
+        for (const e of entries) if (unconditional(e) && !admitted.has(entryKey(e)) && feeds(e)) buffer.push(String(e.content).trim());
         const buffered = matcher.withExtraTexts((_d, e) => haystackFor(e), buffer, P.matchWindow);
         const depthOf = new Map();
         // Termination is the buffer standing still, not a pass admitting nothing: the retrieval winners seed the buffer
@@ -573,7 +576,8 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                 if (verdict === 'skip') continue;
                 if (verdict === 'admit') { found.push(e); continue; }
                 if (depth === 0 ? e.delayUntilRecursion : e.excludeRecursion) continue;
-                if (keywordScore(e, hay(e), k1) > 0) found.push(e);
+                // Hits, not score, as activationAdds decides: a matched `::0` gate scores nothing.
+                if (keywordResult(e, hay(e), k1).hits.length) found.push(e);
             }
             for (const e of found) {
                 const key = entryKey(e);
@@ -768,7 +772,6 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     // layout order splits it out before the cut, and NaN as its cutoff is how relevanceCut spells "not cut".
     // No cutoff supplied: nothing is cut, so @budget still reports the whole ranked set — only @cut goes unavailable.
     const keptSet = new Set(selection.relevanceCut(ranked, {
-        scoreOf: weightedCredit,
         cutoffOf: r => (!cutGiven || promotedRow(r) ? NaN : cutFor()),
     }).kept);
     const admits = r => keptSet.has(r);

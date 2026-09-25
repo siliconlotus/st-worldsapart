@@ -75,6 +75,20 @@ const run = (overrides = {}) => {
     eq(/workshop/.test(S.books.B[1].content), true, 'and its own content really does repeat its key — the premise of that claim');
 }
 
+// --- a constant retrieval never returned still feeds the buffer, as core activates it on its first loop, and a weight it reaches counts.
+{
+    const books = { B: { ...S.books.B,
+        7: entry(7, [], 'The harbour smells of kelpfire.', { constant: true }),
+        8: entry(8, ['? kelpfire::3'], 'Kelpfire burns green.'),
+    } };
+    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+    const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
+        2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
+    const r8 = rows.find(r => r.uid === 8);
+    eq(r8?.triggerDepth, 1, 'the unretrieved constant\'s content reaches uid 8 at recursion depth 1');
+    eq(Number(Math.exp(r8?.logWeight ?? NaN).toFixed(6)), 3, '...and its ::3 weighs as it would from the chat');
+}
+
 // --- the step cap.
 {
     const r = run({ recursive: true, maxRecursionSteps: 1 });

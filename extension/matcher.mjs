@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { addMessageHits, astId, buildAst, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, synthesizeSecondary, unitWeight, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, astId, buildAst, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -801,22 +801,24 @@ function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
     return evaluateAst(id, () => withExclusions(synthesizeSecondary(key, sec, logic, flags), excl, flags), text);
 }
 
-/** One key's scoring units against one segment; a plain key is one unit seen n times, and a matched expression with no units is one unit (countKey's negation-only floor). */
+const NO_UNITS = { units: [], logWeight: 0 };
+/** One key's scoring units against one segment, with the matched expression's `logWeight`; a plain key is one unit seen n times,
+ *  and a matched expression with no units is one unit (countKey's negation-only floor). */
 function keyUnits(entry, key, text, caseSensitive, wholeWords, sec) {
     const raw = String(key ?? '').trim();
-    if (!raw || !text) return [];
+    if (!raw || !text) return NO_UNITS;
 
     const gated = Boolean(sec?.length) || excludeKeys(entry).length > 0;
     if (gated || raw.startsWith('?')) {
-        const { matched, units } = gated
+        const { matched, units, logWeight = 0 } = gated
             ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec ?? [])
             : evaluateSmartKey(raw, text);
-        if (!matched) return [];
-        return units.length ? units : [{ id: raw, wsum: 1, n: 1 }];
+        if (!matched) return NO_UNITS;
+        return { units: units.length ? units : [{ id: raw, wsum: 1, n: 1 }], logWeight };
     }
 
     const n = countKey(raw, text, caseSensitive, wholeWords);
-    return n > 0 ? [{ id: raw, wsum: n, n }] : [];
+    return n > 0 ? { units: [{ id: raw, wsum: n, n }], logWeight: 0 } : NO_UNITS;
 }
 
 /** Occurrences -> a key's contribution: `bm25` is tf/(tf+k1); `presence`/`presence-log` credit presence in full and let the repeats add up to R or without bound. `k1` is how fast repeats accrue, never how far. */
@@ -828,8 +830,7 @@ export function repeatCurveOf(n, k1, curve = 'presence-log', R = 1) {
 }
 
 /** BM25-style keyword score for one entry over one segment or scanSegments() output; the defaults are ST's world_info_case_sensitive and world_info_match_whole_words, the entry overriding.
- *  `logWeight` is the author's term weights as a log-odds offset: per key the sum of ln(weight) over its matched units, an OR's
- *  being its strongest matched alternative and `::0` left out; the entry takes the strongest matched key's. */
+ *  `logWeight` is the author's term weights as a log-odds offset, smartkeys `evaluate`'s, the strongest over every key and segment that matched. */
 export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault, repeatCurve = 'presence-log', repeatR = 1 } = {}) {
     if (!Array.isArray(keys) || !keys.length) {
         return { score: 0, hits: [], logWeight: 0 };
@@ -852,36 +853,33 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
     let score = 0;
     const hits = [];
     const byKey = new Map();
+    let logWeight = -Infinity;
 
     for (const segment of segments) {
         if (!segment) continue;
 
         for (const key of keys) {
-            const units = keyUnits(entry, key, segment, caseSensitive, wholeWords, sec);
+            const { units, logWeight: keyLog } = keyUnits(entry, key, segment, caseSensitive, wholeWords, sec);
             if (!units.length) continue;
+            logWeight = Math.max(logWeight, keyLog);
             let pooled = byKey.get(key);
             if (!pooled) byKey.set(key, pooled = new Map());
             for (const u of units) {
                 const prev = pooled.get(u.id);
-                if (prev) { prev.wsum += u.wsum; prev.n += u.n; prev.wmax = Math.max(prev.wmax, unitWeight(u)); }
-                else pooled.set(u.id, { wsum: u.wsum, n: u.n, wmax: unitWeight(u) });
+                if (prev) { prev.wsum += u.wsum; prev.n += u.n; }
+                else pooled.set(u.id, { wsum: u.wsum, n: u.n });
             }
         }
     }
 
     // A unit saturates once over the window, and its weight (the mean wsum/n) multiplies the curve; `count` is occurrences only, `score` carries weights.
-    // Keys are alternatives, so the entry takes the strongest key's weights rather than multiplying across keys.
-    let logWeight = -Infinity;
     for (const [key, pooled] of byKey) {
-        let count = 0, keyScore = 0, keyLog = 0;
+        let count = 0, keyScore = 0;
         for (const u of pooled.values()) {
-            const weight = u.wsum / u.n;
-            keyScore += weight * repeatCurveOf(u.n, k1, repeatCurve, repeatR);
-            if (u.wmax > 0) keyLog += Math.log(u.wmax);
+            keyScore += (u.wsum / u.n) * repeatCurveOf(u.n, k1, repeatCurve, repeatR);
             count += u.n;
         }
         score += keyScore;
-        logWeight = Math.max(logWeight, keyLog);
         hits.push({ key, count, score: keyScore });
     }
 

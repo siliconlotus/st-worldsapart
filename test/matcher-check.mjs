@@ -1,7 +1,7 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
 import { countKey, dropTags, keyExcerpts, segment, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
-import { keyVariants, validateSmartKey } from '../extension/smartkeys.mjs';
+import { keyVariants, setMacros, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 // keywordScore with the production defaults injected; k1 is 2 here, and passing a cfg to this wrapper does nothing.
@@ -126,9 +126,19 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(odds(['? saturn OR (mercury AND planet::0)'], 'the planet mercury'), 1, '::0 is a gate, so it says nothing about relevance');
     eq(odds(['? Janeway::2 Borg', '? Janeway::0.5 cube'], 'Janeway at the Borg cube'), 2, 'keys are alternatives: the strongest matched one, not a product');
     eq(odds(['? moon mission', 'moon'], 'the moon mission'), 1, 'an unweighted key is exactly neutral');
+    eq(odds(['? (Janeway Borg cube)::2'], 'Janeway at the Borg cube'), 2, 'a group weight counts once, however many conjuncts it holds');
+    eq(odds(['? (Janeway::2 Borg::3) OR Picard'], 'Janeway fought the Borg'), 6, 'an OR takes its matched alternative whole, conjuncts multiplied');
+    eq(odds(['? (Janeway::2 Borg::3) OR Picard::4'], 'Janeway and Picard fought the Borg'), 6, '...the strongest one when both match');
+    eq(odds(['? Janeway (Borg)::0'], 'Janeway fought the Borg'), 1, 'a ::0 group is a gate too');
+    setMacros({ '{{user}}': 'Sally' });
+    eq(odds(['? {{user}}~0::2 astronaut'], 'Sally the astronaut'), 2, 'a one-word macro keeps its weight beside ~N');
+    setMacros({ '{{user}}': 'Neil Armstrong' });
+    eq(odds(['? {{user}}::2 astronaut'], 'Neil Armstrong the astronaut'), 2, '...and a many-word one weighs once, not per word');
+    setMacros({});
 
     // negation-only is fatal in a primary, so the all-zero-weight key is the reachable case
     eq(sc('? moon::0', 'moon'), 1, 'an all-zero-weight key that matches still counts as one');
+    eq(sc('? (moon)::0', 'moon'), 1, '...a zero-weight group as well');
 
     const gated = (logic, sec, text) => Number(keywordScore(
         { key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text).score.toFixed(3));

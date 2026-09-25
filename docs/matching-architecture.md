@@ -395,10 +395,10 @@ close, found by balance, or to the end. Off is core's behaviour.
 
 ### Scoring units
 
-`evaluate` returns `{ matched, scoreBoost, units }`. A unit is one thing the key is about, `n`
+`evaluate` returns `{ matched, scoreBoost, units, logWeight }`. A unit is one thing the key is about, `n`
 occurrences at weight `wsum/n`. A TERM or REGEX is one unit at `weight x n`; `AND` yields both sides'
-units; `OR` pools its sides into one unit, the alternation, keeping its strongest member's weight as `wmax`; `XOR` yields the matched side's; `NOT`
-yields none. A group weight multiplies every unit's `wsum` and never `n`. `keywordScore` pools units by
+units; `OR` pools its sides into one unit, the alternation; `XOR` yields the matched side's; `NOT`
+yields none. A group weight multiplies every unit's `wsum` and never `n`, and a unit it weights to 0 is dropped, as a `::0` term's is. `logWeight` is read off the expression, not the units: a matched TERM or REGEX gives `ln(weight)`, `AND` adds its sides, `OR` takes the larger of its matched sides, `XOR` the matched side's, a group weight adds its `ln` once, and `NOT`, `::0`, a `~N` group's leaves and an unmatched optional give 0. `keywordScore` pools units by
 identity across the window, then credits each as `weight x repeatCurveOf(n)`: `presence-log`, `1 + R
 ln(1 + (n-1)/k1)`, `R` 1 and `k1` the `bm25K1` setting. A hit reports `count`, the occurrences, and
 `score`, the contribution. There is no frequency discount on a key: a ubiquitous key is the audit's
@@ -514,7 +514,7 @@ A model with no fit of its own scores through `UNFITTED_FALLBACK`'s; a pass in
 which no row has a cosine scores through the file's `noCosine` fit. A tier with no model is not scored,
 and an unscored row is kept.
 
-**Term weights** (`layout.mjs` `weightedCredit`). The fit never reads a term weight: a weight is the author's assertion of what matters, which no corpus predicts. `keywordScore` returns an entry's weights as `logWeight`, per key the sum of `ln(weight)` over its matched units — an OR's unit counting its strongest matched alternative (`unitWeight`), whatever the counts, and `::0` left out as a gate — and across keys the strongest matched key, since keys are alternatives. `weightedCredit` multiplies `E[credit]`'s odds by `exp(logWeight)`, `e·w / (1 − e + e·w)`: exactly `E[credit]` for an entry without weights, and never standardised, so `::2` doubles an entry's odds in every turn. `E[credit]` itself stays the fit's, and a capture records it unweighted.
+**Term weights** (`layout.mjs` `weightedCredit`). The fit never reads a term weight: a weight is the author's assertion of what matters, which no corpus predicts. `keywordScore` returns an entry's weights as `logWeight`, `evaluate`'s for the matched expression (**Scoring units**), whatever the counts, and the strongest over every key and segment that matched, since keys are alternatives. It is read over the same window as the keys column, recursion buffer included, and undivided by trigger depth: an entry recursion reached weighs as one the chat named. `weightedCredit` adds `logWeight` to `E[credit]`'s log-odds, `e·w / (1 − e + e·w)` with `w = exp(logWeight)`: exactly `E[credit]` for an entry without weights, never standardised, so `::2` doubles an entry's odds in every turn, and computed in log-odds so no weight overflows. It is `relevanceCut`'s default score. `E[credit]` itself stays the fit's; a capture records it unweighted as `score`, with the multiplier beside it as `weight`.
 
 **Layout** (`layout.mjs` `layoutOrder`). Rows are classified by what the entry is, durable first: armed
 sticky (core's `timedEffects.isEffectActive`), then `constant`, then promoted (`waPromote`), then
@@ -555,7 +555,7 @@ cap is a prefix cut of the layout order. `applyBudget` walks it once:
 Survivors stay in core's map, the rest are deleted. The last loop is a falsy `state.next`, or the loop
 core's `world_info_max_recursion_steps` break ends with `state.next` still set (`isLastLoop`). Then the **prompt order**: one flat sort of the
 survivors by the `presentationOrder` setting (any `SORT_FNS` key, `best-first` or `best-last` on
-`E[credit]`), grouped by tier first under `presentationTiered`, by book tier first under `sequential`;
+the weighted credit), grouped by tier first under `presentationTiered`, by book tier first under `sequential`;
 each survivor's `order` is rewritten to a base plus its index, since assembly sorts by `order`. The
 delivery panel and `/wa-debug` read `runState.lastPromptOrder` and `lastSkipped`. The panel also shows
 what each row cost and what the budget had left, off `runState.lastBudget` — the per-survivor counts and

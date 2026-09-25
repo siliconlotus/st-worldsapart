@@ -33,7 +33,7 @@ import { gradeValue, arg as sharedArg } from './lib/metrics.mjs';
 // One copy of the gazetteer and scorers: scene.mjs.
 import { entryKey } from '../extension/content-lexical.mjs';
 import { resolveModel } from './lib/reindex.mjs';
-import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './lib/scene.mjs';
+import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeKeywordResult, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './lib/scene.mjs';
 
 const arg = k => sharedArg(process.argv, k);
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -129,7 +129,7 @@ if (FREEZE) {
 // The gazetteer is built in loadScene; only the query-dependent term weights are derived here.
 const termWeights = P.entityFilter ? entity.buildTermWeights(query, gaz, P.boost) : null;
 
-const keywordScore = makeKeywordScore(P);
+const keywordResult = makeKeywordResult(P);
 // Two embedders: the self-check re-embeds a stored chunk with the doc prefix; prefixing it as a query drops the cosine.
 const embedOpts = { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url };
 const embed = text => embedWith(EM.query + text, embedOpts);
@@ -228,7 +228,12 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const st = haystackOf(chat, d);
             const tw = P.entityFilter ? entity.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
-            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byKey.get(entryKey(r.entry)) ?? { key: [] }) }));
+            // Keys and weights both at depth d: the layout reads the weights, so neither may stay at the graded depth.
+            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => {
+                const e = byKey.get(entryKey(r.entry)) ?? { key: [] };
+                const kw = keywordResult(e, st(e), DEF.k1);
+                return { ...r, keywordScore: kw.score, logWeight: kw.logWeight };
+            });
             const fused = layoutOrder(layoutOf(rows));
             const gVec = layoutOrder(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)

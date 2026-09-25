@@ -3,10 +3,12 @@
 // (eval/layout-check.mjs).
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
 
-/** E[credit] with its odds multiplied by the author's term weights (`logWeight`, matcher `keywordScore`); exactly E[credit] when there are none. What the layout sorts and the cut reads. */
+/** E[credit] with its odds multiplied by the author's term weights (`logWeight`, matcher `keywordScore`); exactly E[credit] when there are none. */
 export const weightedCredit = it => {
-    const e = it.eCredit, w = Math.exp(Number(it.logWeight) || 0);
-    return w === 1 ? e : e * w / (1 - e + e * w);
+    const e = it.eCredit, lw = Number(it.logWeight) || 0;
+    // In log-odds, so no weight overflows `exp` into NaN; 0 and 1 are fixed points of the odds.
+    if (!lw || !(e > 0 && e < 1)) return e;
+    return 1 / (1 + Math.exp(-(Math.log(e / (1 - e)) + lw)));
 };
 
 /** An unscored row sorts below every scored one, then by authored order. */
