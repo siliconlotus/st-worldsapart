@@ -520,7 +520,7 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
         const cuts = Object.entries(models).filter(([, m]) => m).map(([t]) => `${t} >= ${settings().relevanceCutoff}`).join(', ');
         console.log(`%cWorldsApart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
         console.table([...scored]
-            .sort((a, b) => b.eCredit - a.eCredit)
+            .sort((a, b) => layout.layoutScore(b) - layout.layoutScore(a))
             .map(it => ({
                 entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
                 tier: it.eCreditTier,
@@ -1437,7 +1437,7 @@ async function rankOwnedScan(activated, args, skip) {
 
     await scoreRelevanceColumn(items, windowFor, scanEntries);
 
-    // Ordering the dynamic block by anything but E[credit] breaks the prefix property applyBudget assumes.
+    // Ordering the dynamic block by anything but the weighted credit the cut reads breaks the prefix property applyBudget assumes.
     const priorityList = charPriority() ?? [];
     const priorityMode = settings().worldPriorityMode;
     const { sticky, constant, promoted, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
@@ -1461,7 +1461,6 @@ async function rankOwnedScan(activated, args, skip) {
     // independent of recursion depth.
     const cutoffs = relevanceModel.value ?? {};
     const { cut: relevanceCutRows } = selection.relevanceCut(results, {
-        scoreOf: layout.weightedCredit,
         cutoffOf: it => (cutoffs[isMemory(it.entry) ? 'memory' : 'reference'] ? settings().relevanceCutoff : NaN),
     });
     const cutByRelevance = new Set(relevanceCutRows);
@@ -1575,6 +1574,8 @@ async function rankOwnedScan(activated, args, skip) {
             block: blockOf.get(x) ?? 'dynamic',
             sticky: x.entry.sticky || 0,
             score: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(5)) : null,
+            // The term weights' odds multiplier: the layout and the cut read `score` scaled by it (layout.mjs weightedCredit).
+            weight: x.logWeight ? Number(Math.exp(x.logWeight).toFixed(4)) : 1,
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
@@ -1596,7 +1597,7 @@ async function rankOwnedScan(activated, args, skip) {
         runState.lastCandidates = rows.map((row, i) => ({ ...row, book: population[i].entry.world, why: population[i].keywordWhy }));
         runState.lastCandidateEntries = population.map(x => x.entry);
 
-        console.log('%cWorldsApart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit]; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
+        console.log('%cWorldsApart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit], its odds times `weight` are what the cut reads; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
         console.table(rows);
     }
 

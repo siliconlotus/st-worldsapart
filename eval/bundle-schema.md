@@ -131,7 +131,8 @@ id and a `name`; `captureId` survives a rename and is what a pointer between art
               "title": "262 - Rehearsal…", "block": "dynamic", "sticky": 1, "wiOrder": 1001,
               // NO `why`: the key hits that explain the keyword number are bulk, and live in
               // `candidateWhy` behind the head of the file. `openBundle` puts them back on the row.
-              "score": 0.0456, "vRank": 3, "tRank": 14, "kRank": 3,
+              // `weight` is the term weights' odds multiplier: the layout order and the cut read `score` scaled by it.
+              "score": 0.0456, "weight": 1, "vRank": 3, "tRank": 14, "kRank": 3,
               "scores": { "cosine": 0.1234, "text": 25.1234, "proper": 12, "length": 0.1237 } }
           ]
         }

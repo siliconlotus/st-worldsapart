@@ -13,6 +13,7 @@ import * as matcher from '../extension/matcher.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { entryKey } from '../extension/content-lexical.mjs';
 import { gradeOrder } from '../extension/sort.mjs';
+import { layoutScore } from '../extension/layout.mjs';
 import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
 
 /** The pipeline entry points the capture flows drive, injected once at registration.
@@ -214,7 +215,7 @@ export async function versusCore(named) {
     [...byKey.values()].forEach((x, i) => { x.tokens = tokens[i]; });
 
     const union = [...byKey.entries()].filter(([k]) => coreKeys.has(k) || waKeys.has(k))
-        .sort((a, b) => (b[1].eCredit ?? -1) - (a[1].eCredit ?? -1));
+        .sort((a, b) => layoutScore(b[1]) - layoutScore(a[1]));
     const row = ([k, x]) => ({
         uid: x.entry.uid, entry: String(x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`).slice(0, 44),
         book: x.entry.world,
@@ -454,8 +455,8 @@ export async function gradeScene(named) {
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
         + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
         + `<th style="width:4em;">${esc(t`Grade`)}</th><th>${esc(t`Entry`)}</th><th style="width:4em;">${esc(t`fused`)}</th><th style="width:4em;">${esc(t`cos`)}</th><th style="width:4em;">${esc(t`text`)}</th><th style="width:4em;">${esc(t`keys`)}</th></tr></thead><tbody>`
-        // Block + score order (gradeOrder); `i` stays the capture index, which every data-i indexes.
-        + gradeOrder(rows, r => -(r.score ?? -Infinity)).map(({ row, i }) => {
+        // Block + layout order (gradeOrder, the capture index); `i` stays the capture index, which every data-i indexes.
+        + gradeOrder(rows, r => r.index ?? Infinity).map(({ row, i }) => {
             const scaff = isDurable(row);
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${esc(row.block === 'constant' ? t`const` : t`sticky`)}</span>`
