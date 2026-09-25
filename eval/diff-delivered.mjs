@@ -3,6 +3,7 @@
 //   node eval/diff-delivered.mjs <baseline-rows.json> <arm-rows.json> [--limit 40] [--scene <substr>] [--scene-chars 700]
 import fs from 'node:fs';
 import { arg } from './lib/metrics.mjs';
+import { entryKey } from '../extension/content-lexical.mjs';
 
 const argv = process.argv.slice(2);
 const files = argv.filter((a, i) => a.endsWith('.json') && !['--limit', '--scene', '--scene-chars'].includes(argv[i - 1]));
@@ -30,11 +31,13 @@ const fmt = d => {
 let dropped = [], added = [], sameCount = 0, aCount = 0, bCount = 0;
 for (const name of shared) {
     const sa = ma.get(name), sb = mb.get(name);
-    const ra = new Map(sa.rows.map(r => [r.uid, r])), rb = new Map(sb.rows.map(r => [r.uid, r]));
+    // By (book, uid): a scene ranks every attached book, and uids repeat across books.
+    const byRow = rows => new Map(rows.map(r => [entryKey({ world: r.book, uid: r.uid }), r]));
+    const ra = byRow(sa.rows), rb = byRow(sb.rows);
     aCount += sa.rows.filter(r => r.delivered).length;
     bCount += sb.rows.filter(r => r.delivered).length;
-    for (const [uid, r] of ra) {
-        const o = rb.get(uid);
+    for (const [key, r] of ra) {
+        const o = rb.get(key);
         if (!o) continue;
         const d = { name, row: o, eBase: r.e, eArm: o.e };
         if (r.delivered && !o.delivered) dropped.push(d);

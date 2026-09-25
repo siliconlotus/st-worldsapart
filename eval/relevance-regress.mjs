@@ -535,7 +535,7 @@ const queryVec = async (S, name, value, em) => {
                 let gi = 0;
                 const scenes = perScene.map(({ kept, ungraded, name, query }, si) => {
                     const fold = bookOf[gi];
-                    const idOf = r => ({ uid: r.entry?.uid, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
+                    const idOf = r => ({ uid: r.entry?.uid, book: r.entry?.world, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
                         feats: Object.fromEntries(FEATURES.map(([n, get]) => [n, get(r)])) });
                     const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g, ...idOf(k.r) }));
                     for (const u of ungraded) {
@@ -695,7 +695,7 @@ const queryVec = async (S, name, value, em) => {
                     features: FEATURES.map(([n]) => n),
                     scenes: b.sceneRows.map(sc => ({
                         name: sc.name, relevant: sc.relevant, query: sc.query,
-                        rows: sc.rows.map(r => ({ uid: r.uid, title: r.title, g: r.g, ungraded: !!r.ungraded,
+                        rows: sc.rows.map(r => ({ uid: r.uid, book: r.book, title: r.title, g: r.g, ungraded: !!r.ungraded,
                             e: Number(r.e.toFixed(4)), delivered: r.e >= best.cut, feats: r.feats })),
                     })),
                 }, null, 1));
