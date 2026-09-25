@@ -126,7 +126,7 @@ Sometimes, however, different terms are differently specific or relevant. If a l
 
 <sub>(XOR behaves identically to OR in these examples)</sub>
 
-The mirror of `::0` is a trailing `?`, which makes a term optional: `? John Glenn?` matches on `John` alone and scores `Glenn` when it is there too. It goes on a term, a phrase, a group or a pattern, in either order with a weight, and a key that could match a message holding none of its terms, every term optional or negated, is refused, since it would fire on nearly everything; for any of several, write them with OR. Inside a proximity group an optional word joins the cluster when it is within reach and is never required. An optional word counts as present in every message, so a part made only of optional words is always true, and on a side of an OR or XOR, or under a negation, where the key asks whether that part is there, the key is refused. To make a whole alternative optional, mark the group: `? cedar (alder OR birch)?`.
+The mirror of `::0` is a trailing `?`, which makes a term optional: `? John Glenn?` matches on `John` alone and scores `Glenn` when it is there too. It goes on a term, a phrase, a group or a pattern, in either order with a weight, and a key that could match a message holding none of its terms, every term optional or negated or an OR with an optional side, is refused, since it would fire on nearly everything; for any of several, write them with OR. Inside a proximity group an optional word joins the cluster when it is within reach and is never required.
 
 It is possible to assign a score of `::0`; in this case, the term is not scored, but only used as a gate. This can be useful for keys that otherwise might overlap: `? saturn OR venus OR (mercury AND planet::0)`, which allows you to specify the planet instead of the singer or the car without it scoring higher than the other planets.
 
@@ -161,6 +161,8 @@ To mark a term or group as optional, use a `?` after it. The term will still mat
 
 > [!IMPORTANT]
 > A SmartKey **must have at least one positive anchor term**. `? A? B? C?` would match on every entry and will be rejected by the validator; use `? (A or B or C)` to ensure that at least one of the terms is present. Likewise `? -A B? C?`; use `? -A (B or C)`.
+>
+> An optional term **can't be negated or be one side of an OR or XOR**, because it always counts as present: `? cedar -alder?` could never match, and will be rejected by the validator. To make a set of alternatives optional, mark the group: `? cedar (alder OR birch)?`, not `? cedar (alder OR birch?)`.
 
 ## Regex Terms
 
