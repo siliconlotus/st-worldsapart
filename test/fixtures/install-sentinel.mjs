@@ -139,7 +139,10 @@ console.log('   workshop → duskmoth      mention "workshop": uid 12 activates 
 console.log('                            drags uid 13 in on the RECURSION pass. duskmoth is in no chat');
 console.log('                            message — the INITIAL-only gate is why the prune spares it.');
 console.log('   midnight (delay-until-   never activates on the initial pass even though "midnight" is in');
-console.log('   recursion 1)             chat; appears only when a recursion pass runs.');
+console.log('   recursion 1)             chat; appears only when a recursion pass runs. With recursion OFF');
+console.log('                            it must stay out: disabled uid 27 holds a second delay level, so');
+console.log('                            core forces a RECURSION pass, and WA ends it (no such pass in');
+console.log('                            the [WI] debug log).');
 console.log('   → vellumwing             uid 13\'s content carries it, so it arrives one pass LATER than');
 console.log('                            duskmoth: depth 2, and its keys score is divided by 1 + 2.');
 console.log('   gloamvetch               uid 12\'s content carries it, so the buffer has its key — but the');

@@ -40,6 +40,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
 {
     const v = verdicts(undefined);
     eq(v.quarkspindle, undefined, 'a key in its own entry text is not flagged');
+    eq(v.zzlevelgate, undefined, '...a disabled one\'s as well');
     eq(v.zzunattested?.why, 'unattested (book)', 'dead, and says only that the book was checked');
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.why, 'common word', 'the common list flags a generic word while no chat has been scanned');
@@ -154,6 +155,7 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(adds.includes(12), true, 'recursion source activates from chat');
     eq(adds.includes(13), false, 'recursion target has no chat evidence — only the recursion pass admits it');
     eq(adds.includes(14), true, 'delayUntilRecursion IS emitted; core decides when, or whether, to admit it');
+    eq(adds.includes(27), false, 'the disabled second-level entry is never emitted; it only gives core a second delay level');
 
     // At messageDepth 2 "cold frame" (message 2 of 11) has scrolled out of the window.
     const narrow = { ...opts, messageDepth: 2 };
