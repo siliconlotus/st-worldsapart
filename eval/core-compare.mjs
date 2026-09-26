@@ -76,7 +76,7 @@ for (const file of samples) {
     // Core's keyword route, re-scored at ITS scan depth. Same candidate builder, shallower haystack.
     const coreKeyed = Number.isFinite(CORE_DEPTH) && CORE_DEPTH !== P.depth
         ? new Set(build(P.K1, P.B, null, [], S.query, haystackFor(S, P, { depth: CORE_DEPTH }))
-            .filter(r => (Number(r.keywordScore) || 0) > 0).map(r => Number(r.uid)))
+            .filter(r => r.keywordHits?.length).map(r => Number(r.uid)))
         : null;
     // makeLayoutOrder is what stage 4 orders by, so this reads WA's own layout rather than a second copy of it.
     const ranked = makeLayoutOrder({ scene, haystack: haystackFor(S, P) })(rows);
@@ -86,7 +86,7 @@ for (const file of samples) {
         .map(r => {
             const g = gradeOf(r);
             return { ...r, tokens: tk.count(r.entry?.content), graded: Number.isFinite(g), g: Number.isFinite(g) ? g : 0,
-                coreKeyed: coreKeyed ? coreKeyed.has(Number(r.uid)) : (Number(r.keywordScore) || 0) > 0 };
+                coreKeyed: coreKeyed ? coreKeyed.has(Number(r.uid)) : Boolean(r.keywordHits?.length) };
         });
     const relevant = enriched.filter(r => r.graded && r.g >= 3).length;
     if (!relevant) continue;

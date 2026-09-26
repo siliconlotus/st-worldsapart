@@ -258,8 +258,7 @@ function expandAst(node) {
         const text = expandMacros(node.value);
         const words = node.quoted ? [text] : text.split(/\s+/).filter(Boolean);
         if (!words.length) return null;
-        // A `~N` term is evaluateNear's, which reads no leaf weight, so one word takes the group path as several do.
-        if (words.length === 1 && near === undefined) return { ...node, value: words[0] };
+        if (words.length === 1) return { ...node, value: words[0] };
         const out = words.map(w => ({ ...leaf, value: w, weight: 1 })).reduce((l, r) => ({ type: 'AND', left: l, right: r }));
         if (near !== undefined) out.near = near;
         const gw = (groupWeight ?? 1) * weight;
@@ -766,13 +765,14 @@ function clusters(node, text, acHits) {
     return sweep(alternatives(node, text, acHits, true), node.near, src, (vetoes, c) => vetoes.some(v => inReach(v, c)));
 }
 
-/** A `~N` group is one thing, seen once per cluster: leaf weights are not read, the group's own applies in evaluate(). `parts` carries
- *  the leaves' units so an excerpt has a term to show. */
+/** A `~N` group is one thing, seen once per cluster: leaf weights are not read, the group's own applies in evaluate(), and a lone
+ *  term's own weight is the group's. `parts` carries the leaves' units so an excerpt has a term to show. */
 function evaluateNear(node, text, acHits) {
     const n = clusters(node, text, acHits).length;
     if (!n) return { matched: false, scoreBoost: 0, units: [] };
     const parts = leaves(node).flatMap(l => evaluateNode(l, text, acHits).units);
-    return { matched: true, scoreBoost: n, units: [{ id: node, wsum: n, n, parts }] };
+    const w = node.type === 'TERM' || node.type === 'REGEX' ? node.weight ?? 1 : 1;
+    return { matched: true, scoreBoost: w * n, units: unit(node, w * n, n).map(u => ({ ...u, parts })), logWeight: logOf(w) };
 }
 
 function ensureAst(scope, id, build) {

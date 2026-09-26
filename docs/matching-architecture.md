@@ -296,7 +296,7 @@ resolves toward the literal: `*` is text, `~` is text except as `~N` on a group,
   - XOR inside a group is `(a -b) | (b -a)`, the negations being the group's own veto.
   - In `((a b)~2)~3` the inner slack binds: a nested group is one conjunct whose spans are its clusters.
   - The group is one unit, seen once per cluster; leaf weights inside it are not read, its own weight
-    applies. Its unit carries its leaves under `parts` for the witness walk; the cluster window is not a
+    applies, and a one-term group's term weight is the group's. Its unit carries its leaves under `parts` for the witness walk; the cluster window is not a
     span.
   - A group without `~` keeps segment scope. `"…"~N` is refused, quoting being the construct that
     carries order; `? (-x)~N` has no positive to anchor and is `negation-only`.
@@ -398,7 +398,7 @@ close, found by balance, or to the end. Off is core's behaviour.
 `evaluate` returns `{ matched, scoreBoost, units, logWeight }`. A unit is one thing the key is about, `n`
 occurrences at weight `wsum/n`. A TERM or REGEX is one unit at `weight x n`; `AND` yields both sides'
 units; `OR` pools its sides into one unit, the alternation; `XOR` yields the matched side's; `NOT`
-yields none. A group weight multiplies every unit's `wsum` and never `n`, and a unit it weights to 0 is dropped, as a `::0` term's is. `logWeight` is read off the expression, not the units: a matched TERM or REGEX gives `ln(weight)`, `AND` adds its sides, `OR` takes the larger of its matched sides, `XOR` the matched side's, a group weight adds its `ln` once, and `NOT`, `::0`, a `~N` group's leaves and an unmatched optional give 0. `keywordScore` pools units by
+yields none. A group weight multiplies every unit's `wsum` and never `n`, and a unit it weights to 0 is dropped, as a `::0` term's is; a matched key left with no unit, every term `::0`, is a hit that scores 0, so it activates without scoring. `logWeight` is read off the expression, not the units: a matched TERM or REGEX gives `ln(weight)`, `AND` adds its sides, `OR` takes the larger of its matched sides, `XOR` the matched side's, a group weight adds its `ln` once, and `NOT`, `::0`, the leaves of a `~N` group of several terms and an unmatched optional give 0. `keywordScore` pools units by
 identity across the window, then credits each as `weight x repeatCurveOf(n)`: `presence-log`, `1 + R
 ln(1 + (n-1)/k1)`, `R` 1 and `k1` the `bm25K1` setting. A hit reports `count`, the occurrences, and
 `score`, the contribution. There is no frequency discount on a key: a ubiquitous key is the audit's

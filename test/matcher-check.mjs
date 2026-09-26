@@ -135,10 +135,14 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     setMacros({ '{{user}}': 'Neil Armstrong' });
     eq(odds(['? {{user}}::2 astronaut'], 'Neil Armstrong the astronaut'), 2, '...and a many-word one weighs once, not per word');
     setMacros({});
+    eq(odds(['? (Janeway::2)~3 Borg'], 'Janeway fought the Borg'), 2, '...as a literal lone term does');
+    eq(sc('? (moon::2)~3', 'moon'), 2 * sc('? (moon)~3', 'moon'), '...which its score reads too');
 
     // negation-only is fatal in a primary, so the all-zero-weight key is the reachable case
-    eq(sc('? moon::0', 'moon'), 1, 'an all-zero-weight key that matches still counts as one');
-    eq(sc('? (moon)::0', 'moon'), 1, '...a zero-weight group as well');
+    eq(sc('? moon::0', 'moon'), 0, 'an all-zero-weight key that matches scores nothing');
+    eq(sc('? (moon)::0', 'moon'), 0, '...a zero-weight group as well');
+    eq(sc('? (moon rocket)::0', 'moon rocket'), 0, '...however many terms it gates on');
+    eq(keywordScore({ key: ['? moon::0'] }, 'moon', ['? moon::0']).hits.length, 1, '...and still hits, which is what activates it');
 
     const gated = (logic, sec, text) => Number(keywordScore(
         { key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text).score.toFixed(3));

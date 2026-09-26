@@ -803,7 +803,7 @@ function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
 
 const NO_UNITS = { units: [], logWeight: 0 };
 /** One key's scoring units against one segment, with the matched expression's `logWeight`; a plain key is one unit seen n times,
- *  and a matched expression with no units is one unit (countKey's negation-only floor). */
+ *  and a matched expression with no units, every term weighted 0, is one unit at weight 0: a hit that scores nothing. */
 function keyUnits(entry, key, text, caseSensitive, wholeWords, sec) {
     const raw = String(key ?? '').trim();
     if (!raw || !text) return NO_UNITS;
@@ -814,7 +814,7 @@ function keyUnits(entry, key, text, caseSensitive, wholeWords, sec) {
             ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec ?? [])
             : evaluateSmartKey(raw, text);
         if (!matched) return NO_UNITS;
-        return { units: units.length ? units : [{ id: raw, wsum: 1, n: 1 }], logWeight };
+        return { units: units.length ? units : [{ id: raw, wsum: 0, n: 1 }], logWeight };
     }
 
     const n = countKey(raw, text, caseSensitive, wholeWords);
