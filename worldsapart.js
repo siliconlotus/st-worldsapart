@@ -526,7 +526,7 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
             density: Number(it.density) || 0,
         });
         // The fit's own population (`standardise`), minus constants, as both calibration sites build it.
-        const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !it.entry?.constant).map(col);
+        const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !layout.isConstant(it.entry)).map(col);
         const eCredit = scoreRelevance(fit, rows.map(col), population);
         rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
     }
@@ -1247,7 +1247,7 @@ function recordCoreSet(activated, args, how) {
             key, uid: entry.uid, world: entry.world,
             title: entry.comment || entry.key?.[0] || `uid ${entry.uid}`,
             order: entry.waOriginalOrder ?? entry.order ?? 0,
-            constant: Boolean(entry.constant),
+            constant: layout.isConstant(entry),
         })),
     };
 }

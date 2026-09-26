@@ -110,7 +110,7 @@ can never surface an entry retrieval did not return, so no scoring change is a r
 precision one.
 
 **Three populations, and they cross-cut.** `memory` is STMB-marked and `reference` is everything else —
-the tier an entry belongs to. `durable` is `constant` plus sticky: in the prompt by intent rather than
+the tier an entry belongs to. `durable` is constant — the `constant` flag or `@@activate`, `layout.mjs` `isConstant` — plus sticky: in the prompt by intent rather than
 because relevance chose it — how a row got there, not what kind of thing it is. Sticky is read at two
 moments: the runtime reads the armed effect and hoists it past the cut, while the eval side reads a
 capture row's `block`, which a dry run never sets to sticky, so a sticky entry is durable at runtime

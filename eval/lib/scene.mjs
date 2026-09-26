@@ -15,7 +15,7 @@ import { setMacros } from '../../extension/smartkeys.mjs';
 import { hasPromoteDecorator } from '../../extension/matcher.mjs';
 import { isDurable, openBundle } from '../../extension/grading.mjs';
 import * as selection from '../../extension/selection.mjs';
-import { layoutScore } from '../../extension/layout.mjs';
+import { isConstant, layoutScore } from '../../extension/layout.mjs';
 import * as delivery from '../../extension/delivery.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../../extension/content-lexical.mjs';
 import { defaultSettings } from '../../extension/state.mjs';
@@ -439,7 +439,7 @@ export function makeGradeOf(grades, { outOfScope, primary }) {
 import { isMemory, buildNameDf, properNames, properShared, properDensity, scoreRelevance, modelKey, postDates, UNFITTED_FALLBACK } from '../../extension/relevance.mjs';
 export { isMemory };
 const isReference = e => !isMemory(e);
-export const isDurableEntry = e => Boolean(e?.constant);
+export const isDurableEntry = isConstant;
 
 /** Recall split by tier over one selection's kept set (identity, not uid); `population` arrives with durable already excluded. */
 export function tierRecall(population, kept, gradeOf) {
@@ -704,7 +704,7 @@ export const makeLayoutOrder = ({ scene, haystack, fit = null, fitDir = null }) 
             if (!mine.length) continue;
             // Population rule and the noCosine fallback are read off the fit, as worldsapart.js scoreRelevanceColumn does; must not drift.
             const fit = mine.some(r => Number.isFinite(r.score)) ? model : (model.noCosine ?? model);
-            const population = (fit.standardise === 'pooled' ? rows : mine).filter(r => !r.entry?.constant).map(col);
+            const population = (fit.standardise === 'pooled' ? rows : mine).filter(r => !isConstant(r.entry)).map(col);
             const e = scoreRelevance(fit, mine.map(col), population);
             // No `cutoff` off the fit, not even as provenance: the cut and its number belong to scoreScene `admits`.
             mine.forEach((r, i) => { r.eCredit = e[i]; });
@@ -733,7 +733,7 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
     const all = scoreAll(P.K1, P.B, tw, qv, query, haystackFor(S, P));
 
     // Constants are not ranked; sticky and reference ARE (F48).
-    const rankable = all.filter(r => !r.entry?.constant);
+    const rankable = all.filter(r => !isConstant(r.entry));
 
     const top = layoutOrder(rankable).slice(0, k);
     const unjudged = top.filter(r => !scene.POOL.has(entryKey(r.entry)));

@@ -517,7 +517,7 @@ and an unscored row is kept.
 **Term weights** (`layout.mjs` `weightedCredit`). The fit never reads a term weight: a weight is the author's assertion of what matters, which no corpus predicts. `keywordScore` returns an entry's weights as `logWeight`, `evaluate`'s for the matched expression (**Scoring units**), whatever the counts, and the strongest over every key and segment that matched, since keys are alternatives. It is read over the same window as the keys column, recursion buffer included, and undivided by trigger depth: an entry recursion reached weighs as one the chat named. `weightedCredit` adds `logWeight` to `E[credit]`'s log-odds, `e·w / (1 − e + e·w)` with `w = exp(logWeight)`: exactly `E[credit]` for an entry without weights, never standardised, so `::2` doubles an entry's odds in every turn, and computed in log-odds so no weight overflows. It is `relevanceCut`'s default score. `E[credit]` itself stays the fit's; a capture records it unweighted as `score`, with the multiplier beside it as `weight`.
 
 **Layout** (`layout.mjs` `layoutOrder`). Rows are classified by what the entry is, durable first: armed
-sticky (core's `timedEffects.isEffectActive`), then `constant`, then promoted (`waPromote`), then
+sticky (core's `timedEffects.isEffectActive`), then constant (`isConstant`: the `constant` flag or `@@activate`, which core activates before any matching, as it does a constant), then promoted (`waPromote`), then
 dynamic. The scored blocks sort by the weighted credit, an unscored row below every scored one, then authored
 order; `sequential` book priority makes the book tier the primary key, `interleaved` scales the score
 by the book's weight and shifts authored order by its offset. Durable blocks sort by authored order.

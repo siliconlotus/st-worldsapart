@@ -1,5 +1,5 @@
 // delivery.mjs — stage 5: what fits, and in what order the budget walks. Pure; every setting is injected.
-import { hasDecorator } from './matcher.mjs';
+import { isConstant } from './layout.mjs';
 
 /** The budget's walk order: constants, armed stickies, promoted, then the dynamic block — durable first is what makes every cap in applyBudget a prefix cut. */
 export function walkOrder({ sticky = [], constant = [], promoted = [], results = [] }) {
@@ -11,7 +11,7 @@ export function walkOrder({ sticky = [], constant = [], promoted = [], results =
 export function dropUndecided(activated, isStickyArmed = () => false) {
     let kept = 0;
     for (const [key, entry] of [...activated]) {
-        if (entry && (entry.constant || hasDecorator(entry, '@@activate') || isStickyArmed(entry))) kept++;
+        if (entry && (isConstant(entry) || isStickyArmed(entry))) kept++;
         else activated.delete(key);
     }
     return kept;

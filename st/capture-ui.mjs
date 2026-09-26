@@ -13,7 +13,7 @@ import * as matcher from '../extension/matcher.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { entryKey } from '../extension/content-lexical.mjs';
 import { gradeOrder } from '../extension/sort.mjs';
-import { layoutScore } from '../extension/layout.mjs';
+import { isConstant, layoutScore } from '../extension/layout.mjs';
 import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
 
 /** The pipeline entry points the capture flows drive, injected once at registration.
@@ -283,7 +283,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
                 book: x.entry.world,
                 uid: x.entry.uid,
                 title: x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`,
-                block: x.entry.constant ? 'constant' : 'dynamic',
+                block: isConstant(x.entry) ? 'constant' : 'dynamic',
                 tokens: x.tokens,
             }),
             index: i,

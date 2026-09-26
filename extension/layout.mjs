@@ -2,6 +2,10 @@
 // budget walks and orders each. Pure: settings and resolved book names arrive as parameters
 // (eval/layout-check.mjs).
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
+import { hasDecorator } from './matcher.mjs';
+
+/** A constant: the `constant` flag or `@@activate`, which core activates before any matching, as it does a constant. */
+export const isConstant = entry => Boolean(entry?.constant) || hasDecorator(entry, '@@activate');
 
 /** E[credit] with its odds multiplied by the author's term weights (`logWeight`, matcher `keywordScore`); exactly E[credit] when there are none. */
 export const weightedCredit = it => {
@@ -31,7 +35,7 @@ export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [
     for (const item of items ?? []) {
         // Durable first: a promoted constant is a constant.
         if (isArmedSticky?.(item.entry)) sticky.push(item);
-        else if (item.entry?.constant) constant.push(item);
+        else if (isConstant(item.entry)) constant.push(item);
         else if (isPromoted?.(item.entry)) promoted.push(item);
         else results.push(item);
     }

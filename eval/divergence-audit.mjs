@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import * as matcher from '../extension/matcher.mjs';
 import { countKey } from '../extension/matcher.mjs';
 import { openBundle } from '../extension/grading.mjs';
+import { isConstant } from '../extension/layout.mjs';
 import { gradeValue } from './lib/metrics.mjs';
 
 const files = process.argv.slice(2);
@@ -49,7 +50,7 @@ for (const file of files) {
     const suppress = j.params?.suppressVectorKeys ?? j.paramSnapshot?.settings?.suppressVectorKeys;
     let eligible = 0, misses = 0;
     for (const e of entries) {
-        if (matched.has(Number(e.uid)) || e.disable || e.constant || (e.vectorized && suppress)) continue;
+        if (matched.has(Number(e.uid)) || e.disable || isConstant(e) || (e.vectorized && suppress)) continue;
         eligible++;
         const hits = (e.key ?? []).filter(k => countKey(k, sceneText, e.caseSensitive, e.matchWholeWords) > 0);
         if (hits.length) {

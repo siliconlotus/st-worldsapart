@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, resolve as resolvePath } from 'node:path';
 import { armNames, openBundle, rowKey, sceneDiff, setGrades } from '../extension/grading.mjs';
 import * as matcher from '../extension/matcher.mjs';
+import { isConstant } from '../extension/layout.mjs';
 import { gradeValue, arg } from './lib/metrics.mjs';
 
 /** Unit Separator — joins title to content so neither can spell the other's boundary. */
@@ -98,7 +99,7 @@ for (const path of files) {
         // First: the one reason re-grading recovers.
         if (rewritten(g)) return 'entry text changed since it was graded';
         if (e.disable) return 'disabled';
-        if (e.constant || Number(e.sticky) > 0) return 'durable (constant/sticky)';
+        if (isConstant(e) || Number(e.sticky) > 0) return 'durable (constant/sticky)';
         if (!isMemoryTitle(e.comment ?? e.title)) return 'reference tier (no STMB marker)';
         return 'rankable, but nothing surfaced it';
     };

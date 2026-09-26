@@ -15,7 +15,7 @@ usePack(PACK);
 const COMMON_WORDS = table().common;
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './lib/logistic.mjs';
 import * as entity from '../extension/entity.mjs';
-import { weightedCredit } from '../extension/layout.mjs';
+import { isConstant, weightedCredit } from '../extension/layout.mjs';
 import { mean, sd } from '../extension/relevance.mjs';
 import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-suggest.mjs';
@@ -354,7 +354,7 @@ const queryVec = async (S, name, value, em) => {
             }
             const gradeOf = makeGradeOf(S.entries, scene);
             const kept = [], ungraded = [], offTier = [];
-            for (const r of rows.filter(r => !r.entry?.constant)) {
+            for (const r of rows.filter(r => !isConstant(r.entry))) {
                 // Kept, not dropped: under --standardise pooled the other tier is part of the statistics.
                 if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) { offTier.push(r); continue; }
                 const g = gradeOf(r);

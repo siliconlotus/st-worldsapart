@@ -49,6 +49,13 @@ eq(layoutScore({ eCredit: 0 }), 0, '...and a genuine 0 is not treated as unscore
     const both = layoutOrder([row(1, { constant: true })], { ...BASE, isArmedSticky: () => true });
     eq([uids(both.sticky), uids(both.constant)], [[1], []], 'an armed sticky classifies as sticky, not constant');
 }
+{
+    const parsed = row(1, { eCredit: 0.01, entry: { decorators: ['@@activate'] } });
+    const raw = row(2, { eCredit: 0.01, entry: { content: '@@activate\nAlways here.' } });
+    const { constant, results } = layoutOrder([parsed, raw, row(3, { eCredit: 0.5 })], BASE);
+    eq([uids(constant), uids(results)], [[1, 2], [3]], 'an @@activate entry is a constant, whether core parsed the decorator or not');
+    eq(uids(relevanceCut(results, { cutoffOf: () => 0.12 }).kept), [3], '...so the relevance cut never sees it');
+}
 
 // --- the dynamic block's order --------------------------------------------------------------------
 {

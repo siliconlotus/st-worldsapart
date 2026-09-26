@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { cachePath, chunkConfig } from './lib/reindex.mjs';
 import { openBundle } from '../extension/grading.mjs';
+import { isConstant } from '../extension/layout.mjs';
 
 const argv = process.argv.slice(2);
 const WRITE = argv.includes('--write');
@@ -18,7 +19,7 @@ if (!files.length) {
 /** This corpus only: an STMB entry is titled with a number, or ARC + number; letter suffix = a manual split. A repair rule over data, never a predicate in scene.mjs or matcher.mjs, which keep testing fields. */
 const isMemoryTitle = t => /^\s*\[?\s*ARC\s*[-—]?\s*\d+/i.test(String(t)) || /^\s*\d+[A-Za-z]?\s*[-—.:]/.test(String(t));
 const marked = e => ('stmemorybooks' in e) || ('STMB_start' in e);
-const durable = e => Boolean(e.constant) || Number(e.sticky) > 0;
+const durable = e => isConstant(e) || Number(e.sticky) > 0;
 const title = e => e.comment ?? e.title ?? '';
 
 /** Same gate reindex.mjs buildItems applies — an entry it would not index cannot need a vector. */

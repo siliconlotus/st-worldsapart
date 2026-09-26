@@ -3,6 +3,7 @@
 import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
 import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
+import { isConstant } from './layout.mjs';
 import { buildAst, cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
 
 
@@ -144,7 +145,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
 
     const inScope = e => {
         if (!opts.includeInactive && e.disable) return false;
-        if (e.constant) return opts.scanConstant;
+        if (isConstant(e)) return opts.scanConstant;
         if (e.vectorized) return opts.scanVectorized;
         return opts.scanKeyword;
     };
@@ -424,7 +425,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const classifyEntry = e => {
         if (!inScope(e)) return [];
         const cs = effCase(e), ww = effWhole(e);
-        const declared = Boolean(e.constant) || Number(e.sticky) > 0;
+        const declared = isConstant(e) || Number(e.sticky) > 0;
         const out = [];
         for (const key of (Array.isArray(e.key) ? e.key : [])) {
             if (ignoreSet.has(key)) continue;

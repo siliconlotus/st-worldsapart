@@ -18,6 +18,7 @@ import { offlineTokenCounter } from './lib/tokens.mjs';
 import * as query from '../extension/query.mjs';
 import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
+import { isConstant } from '../extension/layout.mjs';
 import { bundleSamples, openBundle, stRelative } from '../extension/grading.mjs';
 import { gitVersion } from './lib/gitversion.mjs';
 
@@ -272,7 +273,7 @@ for (const idx of picks) {
             const row = {
                 title: wiTitle(e),
                 // Derived, not observed: sticky is 'sticky' only once an earlier turn armed it, and nothing offline does.
-                block: e.constant ? 'constant' : 'dynamic',
+                block: isConstant(e) ? 'constant' : 'dynamic',
                 sticky: e.sticky || 0,
                 tokens: tokens.count(e.content ?? ''),
                 score: r5(r.fused), uid: Number(e.uid),
