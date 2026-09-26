@@ -588,6 +588,7 @@ its `upstream-st.md` number.
   SmartKeys loads in a stock install and matches nothing rather than breaking.
 - **`splitKeys`** parses a key list where core's `customTokenizer` skips the character after every
   comma and loses a `/regex/` written directly after one (`upstream-st.md` #17).
+- **Recursion off runs no recursion pass.** Core still forces one per `delayUntilRecursion` level past the first, scanning activated content with the setting off; WA sets `state.next` to none on a scan it owns (`upstream-st.md` #19).
 - **`messageDepth` supersedes `world_info_depth`** when WA runs; a per-entry `scanDepth` still wins.
 - **Entry flags do not reach a SmartKey or a pattern.**
 - **The match window** segments the haystack where core matches over the joined scan text; `scan` is

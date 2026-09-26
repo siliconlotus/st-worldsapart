@@ -176,14 +176,7 @@ is charged to later passes and pushed into the recurse buffer despite never bein
   `preventRecursion`; their content is pushed into the recurse buffer for the next pass.
 - Min activations — fewer than `world_info_min_activations` total activated, and depth has not passed
   `world_info_min_activations_depth_max` or the chat length. Advances `#skew` by one.
-- Delayed recursion levels — when nothing else continues the scan but `delayUntilRecursion` levels
-  remain, the next level opens and forces one more recursion pass. The lowest level is current from the
-  start and is never what remains, so a book with one level gets no forced pass: its delayed entries wait
-  on ordinary recursion. The levels are read off every entry, disabled ones included, and the branch is
-  not guarded on `world_info_recursive`, so with two levels a scan with recursion off still runs forced
-  passes. Every delayed entry the chat names activates in them, and they scan the recurse buffer, which
-  `addRecurse` fills regardless of the setting, so any entry can be triggered by another's content (`upstream-st.md` #19). The harness runs no
-  recursion pass with recursion off.
+- Delayed recursion levels — when nothing else continues the scan but `delayUntilRecursion` levels remain, the next level opens and forces one more recursion pass. The lowest level is current from the start and is never what remains, so a book with one level gets no forced pass: its delayed entries wait on ordinary recursion. The levels are read off every entry, disabled ones included, and the branch is not guarded on `world_info_recursive`, so with two levels a scan with recursion off still runs forced passes. Every delayed entry the chat names activates in them, and they scan the recurse buffer, which `addRecurse` fills regardless of the setting, so any entry can be triggered by another's content (`upstream-st.md` #19). WA ends that pass on a scan it owns, and the harness runs none.
 - Budget overflow blocks the first two, not the third: recursion and min activations are guarded on
   `!token_budget_overflowed`, the delayed-recursion branch is not, so an overflowed scan still runs a
   pass per remaining level in which only `ignoreBudget` entries can activate.

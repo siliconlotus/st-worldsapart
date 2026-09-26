@@ -1316,6 +1316,9 @@ async function onScanDone(args) {
 /** The owned half of a scan: the recursion feed on every loop, then — on the last one — scoring (stage 3), the
  *  relevance cut (4) and the budget (5). Throws are the caller's. */
 async function rankOwnedScan(activated, args, skip) {
+    // Recursion off, `RECURSION` is only core's forced delay-level pass (upstream-st.md #19). Before isLastLoop reads `next`.
+    if (!world_info_recursive && args?.state?.next === scan_state.RECURSION) args.state.next = scan_state.NONE;
+
     // Before the size-0 return: a pass that activated nothing can still be followed by a min-activations widening.
     if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
         await feedScanLoop(args);

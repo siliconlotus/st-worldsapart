@@ -532,7 +532,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // --- STAGE 2: activation, keyword route, run to a fixpoint. May admit only what core could activate, so never a
         // disabled entry (F49), and on the initial pass never a delayUntilRecursion one. Its LEVEL is not modelled:
         // core walks distinct levels (world-info.js currentRecursionDelayLevel), this admits at the first pass.
-        // With recursion off it runs no pass at all, where core forces one per level past the first (upstream-st.md #19).
+        // With recursion off it runs no pass at all: core forces one per level past the first, and WA ends it (upstream-st.md #19).
         // The capture's gate inputs (eval/bundle-schema.md, 3.1). A field the bundle does not carry leaves its
         // gate OFF, and every gate left off is reported: absent is not the same as "nothing was latched".
         const gateOpts = {
