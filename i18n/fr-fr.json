@@ -471,7 +471,7 @@
  "One call per entry.": "Un appel par entrée.",
  "One entry": "Une entrée",
  "Only constant and sticky entries were included. Try again.": "Seules les entrées constantes et épinglées ont été incluses. Réessayez.",
- "Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.": "Seules les entrées vectorisées dont un mot-clé est actif ont été incluses ce tour-ci, et le score n’a pas tenu compte de la similarité de vectorisation.",
+ "Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.": "Seules les entrées vectorisées dont un mot-clé est actif ont été incluses ce tour-ci, et aucun score n’a tenu compte de la similarité vectorielle.",
  "Open in a larger window": "Ouvrir dans une fenêtre plus grande",
  "Open the Key Lab": "Ouvrir le Labo des clés",
  "Open the Studio on the Key Lab": "Ouvrir le Studio sur le Labo des clés",
