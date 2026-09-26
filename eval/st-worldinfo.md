@@ -181,7 +181,9 @@ is charged to later passes and pushed into the recurse buffer despite never bein
   start and is never what remains, so a book with one level gets no forced pass: its delayed entries wait
   on ordinary recursion. The levels are read off every entry, disabled ones included, and the branch is
   not guarded on `world_info_recursive`, so with two levels a scan with recursion off still runs forced
-  passes, and every delayed entry the chat names activates in them.
+  passes. Every delayed entry the chat names activates in them, and they scan the recurse buffer, which
+  `addRecurse` fills regardless of the setting, so any entry can be triggered by another's content (`upstream-st.md` #19). The harness runs no
+  recursion pass with recursion off.
 - Budget overflow blocks the first two, not the third: recursion and min activations are guarded on
   `!token_budget_overflowed`, the delayed-recursion branch is not, so an overflowed scan still runs a
   pass per remaining level in which only `ignoreBudget` entries can activate.
