@@ -106,20 +106,24 @@ const run = (overrides = {}) => {
     eq(withConstant({ key: ['workshop'] })?.keywordScore, withConstant({})?.keywordScore, 'a keyed constant the chat also matches feeds its content once');
 }
 
-// --- the delayed pass runs with nothing in the buffer: core opens it whenever delayed levels remain.
+// --- a standing buffer ends the scan, unless a second delay level makes core force the pass that opens it.
 {
-    const books = { B: {
-        1: entry(1, ['workshop'], 'The workshop is quiet.', { preventRecursion: true }),
-        6: S.books.B[6],
-        7: entry(7, [], 'The harbour smells of kelpfire.', { constant: true, delayUntilRecursion: true }),
-        8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
-    } };
-    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
-    const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
-        2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
-    const r = new Map(rows.map(x => [x.uid, x]));
-    eq(r.get(6)?.triggerDepth, 1, 'a delayed entry the chat names is admitted though pass 0 fed nothing');
-    eq(r.get(8)?.triggerDepth, 2, '...and a delayed constant still feeds the pass after');
+    const quiet = level2 => {
+        const books = { B: {
+            1: entry(1, ['workshop'], 'The workshop is quiet.', { preventRecursion: true }),
+            6: S.books.B[6],
+            7: entry(7, [], 'The harbour smells of kelpfire.', { constant: true, delayUntilRecursion: true }),
+            8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
+            ...(level2 ? { 9: entry(9, ['nowhere'], 'Unmatched.', { delayUntilRecursion: 2, disable: true }) } : {}),
+        } };
+        const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+        const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
+            2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
+        return new Map(rows.map(x => [x.uid, x]));
+    };
+    eq(quiet(false).has(6), false, 'one delay level and pass 0 fed nothing: no recursion pass, so the delayed entry never activates');
+    eq(quiet(true).get(6)?.triggerDepth, 1, 'a second level, even on a disabled entry, forces the pass, and level 1 activates in it');
+    eq(quiet(true).get(8)?.triggerDepth, 2, '...and a delayed constant feeds the pass after');
 }
 
 // --- the step cap.

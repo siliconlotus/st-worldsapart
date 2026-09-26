@@ -559,12 +559,14 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         const depthOf = new Map();
         // Termination is the buffer standing still, not a pass admitting nothing: the retrieval winners seed the buffer
         // and the depth-0 pass matches chat only, so a pass that admits nothing can still leave text for the next one.
-        // Pass 1 runs on an empty buffer too: it is the delayUntilRecursion pass, which core opens whatever pass 0 fed.
+        // Core forces a recursion pass on a standing buffer only to open a delay level past the first, so pass 1 runs on one
+        // only when two levels exist; disabled entries count, as core reads them before its disable check.
+        const delayLevels = new Set(entries.filter(e => e.delayUntilRecursion).map(e => (e.delayUntilRecursion === true ? 1 : Number(e.delayUntilRecursion)))).size;
         let scanned = 0;
         for (let depth = 0; ; depth++) {
             if (depth > 0) {
                 if (!P.recursive || (P.maxRecursionSteps && depth > P.maxRecursionSteps)) break;
-                if (depth > 1 && buffer.length === scanned) break;
+                if (buffer.length === scanned && !(depth === 1 && delayLevels > 1)) break;
                 scanned = buffer.length;
             }
             const hay = depth === 0 ? haystackFor : (e => buffered(0, e));
