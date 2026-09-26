@@ -125,14 +125,30 @@ const QUERY_TIMEOUT_MS = 10_000;
 const SYNC_TIMEOUT_MS = 300_000;
 
 async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
-    const response = await fetch(`/api/vector/${route}`, {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(vectorRequestBody(args)),
-        signal: AbortSignal.timeout(timeoutMs),
-    });
+    const body = vectorRequestBody(args);
+    const target = body.apiUrl ? `${body.source} (${body.apiUrl})` : body.source;
+    let response;
+    try {
+        response = await fetch(`/api/vector/${route}`, {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+    } catch (error) {
+        if (error?.name === 'TimeoutError') {
+            throw Object.assign(new Error(`WorldsApart: /api/vector/${route}: ${target} did not answer within ${timeoutMs / 1000} s`),
+                { explanation: [t`The embedding source ${target} did not answer within ${timeoutMs / 1000} seconds.`] });
+        }
+        throw error;
+    }
 
     if (!response.ok) {
+        // ST's vector routes answer every failure with a bare 500, and on these three the embedding call is what fails.
+        if (response.status === 500 && ['insert', 'query', 'query-multi'].includes(route)) {
+            throw Object.assign(new Error(`WorldsApart: /api/vector/${route} failed with 500 (${target})`),
+                { explanation: [t`SillyTavern could not get embeddings from ${target}.`, t`Check SillyTavern server logs for more info.`] });
+        }
         throw new Error(`WorldsApart: /api/vector/${route} failed with ${response.status}`);
     }
 
@@ -772,9 +788,10 @@ const reportedFailures = new Set();
  * Toasts a generation-time failure with the top stack frame — once per distinct message per session, or, when `loud`,
  * on every occurrence and stuck until dismissed.
  * @param {string} consequence What the user will observe this turn
- * @param {'error'|'warning'} [severity]
+ * @param {Error & {explanation?: string[]}} error `explanation`, translated lines, replaces the message and the stack frame
+ * @param {{severity?: 'error'|'warning', loud?: boolean}} [opts]
  */
-function reportFailure(stage, consequence, error, severity = 'error', loud = false) {
+function reportFailure(stage, consequence, error, { severity = 'error', loud = false } = {}) {
     console.error(`WorldsApart: ${stage} — ${consequence}`, error);
     const cause = String(error?.message ?? error);
     const key = `${stage}${US}${cause}`;
@@ -783,9 +800,9 @@ function reportFailure(stage, consequence, error, severity = 'error', loud = fal
     const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
     // ST sets toastr.options.escapeHtml = true globally, which collapses `\n`; opt out per toast and escape by hand.
     toastr[severity](
-        [escapeHtml(consequence),
-            escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
-            t`See the browser console for the full trace.`].join('<br><br>'),
+        `${escapeHtml(consequence)}<br><br>` + (error?.explanation
+            ? error.explanation.map(escapeHtml).join('<br>')
+            : escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : '') + '<br>' + t`See the browser console for the full trace.`),
         `WorldsApart: ${stage}`,
         { timeOut: loud ? 0 : 20000, extendedTimeOut: loud ? 0 : 15000, escapeHtml: false, closeButton: true, tapToDismiss: !loud },
     );
@@ -814,9 +831,7 @@ async function selectAndActivate(chat, token) {
     try {
         winners = await retrieve(chat);
     } catch (error) {
-        reportFailure(t`retrieval failed`,
-            t`No vectorized entry is activated this turn, so an entry with no keys is absent from the prompt rather than ranked lower. Every entry loses its cosine, and relevance falls back to the cosine-free fit. Keyword matching and constants are unaffected.`,
-            error);
+        reportFailure(t`retrieval failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
         runState.lastScores.clear();
     }
     if (superseded()) return;
@@ -1309,7 +1324,7 @@ async function onScanDone(args) {
         if (isLastLoop(args)) delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
         reportFailure(t`activation error`,
             t`Only constant and sticky entries were included. Try again.`,
-            error, 'error', true);
+            error, { loud: true });
     }
 }
 
