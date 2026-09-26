@@ -106,6 +106,22 @@ const run = (overrides = {}) => {
     eq(withConstant({ key: ['workshop'] })?.keywordScore, withConstant({})?.keywordScore, 'a keyed constant the chat also matches feeds its content once');
 }
 
+// --- the delayed pass runs with nothing in the buffer: core opens it whenever delayed levels remain.
+{
+    const books = { B: {
+        1: entry(1, ['workshop'], 'The workshop is quiet.', { preventRecursion: true }),
+        6: S.books.B[6],
+        7: entry(7, [], 'The harbour smells of kelpfire.', { constant: true, delayUntilRecursion: true }),
+        8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
+    } };
+    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+    const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
+        2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
+    const r = new Map(rows.map(x => [x.uid, x]));
+    eq(r.get(6)?.triggerDepth, 1, 'a delayed entry the chat names is admitted though pass 0 fed nothing');
+    eq(r.get(8)?.triggerDepth, 2, '...and a delayed constant still feeds the pass after');
+}
+
 // --- the step cap.
 {
     const r = run({ recursive: true, maxRecursionSteps: 1 });
