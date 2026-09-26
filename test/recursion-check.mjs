@@ -89,6 +89,23 @@ const run = (overrides = {}) => {
     eq(Number(Math.exp(r8?.logWeight ?? NaN).toFixed(6)), 3, '...and its ::3 weighs as it would from the chat');
 }
 
+// --- ...but only a constant core would have activated: its gates rule, a delayUntilRecursion one waits a pass, and it feeds once.
+{
+    const withConstant = (extra, gates) => {
+        const books = { B: { ...S.books.B,
+            7: entry(7, extra.key ?? [], 'The harbour smells of kelpfire.', { constant: true, ...extra }),
+            8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
+        } };
+        const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+        const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P, gates })(
+            2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
+        return rows.find(r => r.uid === 8);
+    };
+    eq(withConstant({ delay: 5 }, { chatLength: 2 }), undefined, 'a constant its delay holds back feeds nothing');
+    eq(withConstant({ delayUntilRecursion: true })?.triggerDepth, 2, 'a delayUntilRecursion constant feeds from the first recursion pass');
+    eq(withConstant({ key: ['workshop'] })?.keywordScore, withConstant({})?.keywordScore, 'a keyed constant the chat also matches feeds its content once');
+}
+
 // --- the step cap.
 {
     const r = run({ recursive: true, maxRecursionSteps: 1 });

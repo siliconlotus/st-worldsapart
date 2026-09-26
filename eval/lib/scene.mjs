@@ -549,9 +549,12 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // The retrieval winners feed recursion too: WA force-activates them, so core counts them in new.successful.
         const feeds = e => P.recursive && !e.preventRecursion && Boolean(String(e.content ?? '').trim());
         const buffer = rows.map(r => r.entry).filter(feeds).map(e => String(e.content).trim());
-        // Core activates every constant and `@@activate` entry on its first loop, retrieved or not, so their content feeds recursion too.
-        const unconditional = e => !e.disable && (matcher.hasDecorator(e, '@@activate') || (e.constant && !matcher.hasDecorator(e, '@@dont_activate')));
-        for (const e of entries) if (unconditional(e) && !admitted.has(entryKey(e)) && feeds(e)) buffer.push(String(e.content).trim());
+        // Core activates every gate-passing constant and `@@activate` entry, retrieved or not (delayUntilRecursion ones on pass 1, read from pass 2); seeded, the keyword route must not push one again.
+        const unconditional = e => !e.disable && (matcher.hasDecorator(e, '@@activate') || (e.constant && !matcher.hasDecorator(e, '@@dont_activate')))
+            && matcher.gateVerdict(e, gateOpts) !== 'skip' && !admitted.has(entryKey(e)) && feeds(e);
+        const seeded = new Set();
+        const seed = e => { seeded.add(entryKey(e)); buffer.push(String(e.content).trim()); };
+        for (const e of entries) if (unconditional(e) && !e.delayUntilRecursion) seed(e);
         const buffered = matcher.withExtraTexts((_d, e) => haystackFor(e), buffer, P.matchWindow);
         const depthOf = new Map();
         // Termination is the buffer standing still, not a pass admitting nothing: the retrieval winners seed the buffer
@@ -585,7 +588,8 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                 depthOf.set(key, depth);
                 rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: P.cosineAvailable === false ? undefined : dense.get(key), textScore: contentText.get(key) ?? 0, keywordScore: 0, vectorEligible: dense.has(key) || !!e.vectorized, textEligible: hasContent(e), keysEligible: true });
             }
-            for (const e of found) if (feeds(e)) buffer.push(String(e.content).trim());
+            for (const e of found) if (feeds(e) && !seeded.has(entryKey(e))) buffer.push(String(e.content).trim());
+            if (depth === 1) for (const e of entries) if (unconditional(e) && e.delayUntilRecursion) seed(e);
         }
         // --- STAGE 3, reference cosine under another centring; the column only, stage 1 keeps the production centroid.
         if (P.referenceCentroid !== 'memory') {
@@ -611,6 +615,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             r.triggerDepth = depthOf.get(entryKey(r.entry)) ?? 0;
             const kw = keywordResult(r.entry, hay, k1);
             r.keywordScore = kw.score / (1 + r.triggerDepth);
+            r.keywordHits = kw.hits;
             r.logWeight = kw.logWeight;
         }
         return rows;
