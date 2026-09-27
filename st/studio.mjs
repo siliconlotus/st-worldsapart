@@ -3547,9 +3547,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         navToggle.addEventListener('click', () => { navCollapsed = !navCollapsed; renderBooks(); });
         // Collapsed, the rail holds nothing but the way back.
         if (navCollapsed) { nav.append(navToggle); return; }
+        // Sticky; holds the title row, the undo bar after a delete and, in select mode, the bulk bar.
         const head = document.createElement('div');
         head.className = 'wa-studio-navhead';
-        head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;';
+        const headRow = document.createElement('div');
+        headRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;';
         const ttl = document.createElement('b'); ttl.textContent = t`Lorebooks`;
         const sortBtn = document.createElement('i');
         sortBtn.className = `fa-solid ${sortAsc ? 'fa-arrow-down-a-z' : 'fa-arrow-up-a-z'}`;
@@ -3563,7 +3565,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         bulkToggle.addEventListener('click', () => { bookBulkMode = !bookBulkMode; if (!bookBulkMode) { selectedBooks.clear(); bookAnchor = null; } renderBooks(); });
         const navtools = document.createElement('span'); navtools.style.cssText = 'display:flex;align-items:center;gap:9px;';
         navtools.append(bulkToggle, sortBtn, navToggle);
-        head.append(ttl, navtools);
+        headRow.append(ttl, navtools);
+        head.append(headRow);
         nav.append(head);
 
         if (pendingUndo) {
@@ -3579,7 +3582,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const undoBtn = document.createElement('button'); undoBtn.type = 'button'; undoBtn.className = 'menu_button wa-undo-btn'; undoBtn.textContent = t`Undo`;
             undoBtn.addEventListener('click', restoreBook);
             bar.append(top, name, undoBtn);
-            nav.append(bar);
+            head.append(bar);
         }
 
         const names = [...world_names].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
@@ -3599,7 +3602,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const hint = document.createElement('div'); hint.className = 'wa-bookbulk-hint'; hint.textContent = t`Tick books to copy or delete.`;
                 bar.append(hint);
             }
-            nav.append(bar);
+            head.append(bar);
         }
 
         const attached = new Set(attachedBookNames());
