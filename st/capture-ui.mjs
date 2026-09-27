@@ -222,6 +222,7 @@ export async function versusCore(named) {
         in: coreKeys.has(k) && waKeys.has(k) ? 'both' : coreKeys.has(k) ? 'core' : 'WA',
         tokens: x.tokens, order: x.entry.waOriginalOrder ?? x.entry.order ?? 0,
         eCredit: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(4)) : null,
+        weight: x.logWeight ? Number(Math.exp(x.logWeight).toFixed(2)) : 1,
         cosine: Number.isFinite(x.score) ? Number(x.score.toFixed(4)) : null,
         text: Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(3)) : null,
         keys: Number(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null,
