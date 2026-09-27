@@ -115,6 +115,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const searchScope = { title: true, entry: true, keywords: true };   // which fields the search looks in
     let pendingUndo = null;          // { books: [{name, data}] } of the last deletion, offered in the nav undo bar
     let undoTimer = null;            // auto-expiry for the undo bar
+    let entryUndo = null;            // { book, entries, originalData, n, chatId, latches?, rekeyBack?, target? } before the last entry bulk action
+    let entryUndoTimer = null;
     const selectedBooks = new Set(); // book names ticked in the nav for book-level bulk actions
     let bookAnchor = null;           // last-ticked book, for shift-click range selection
     let bookBulkMode = false;        // nav "select multiple" mode — reveals row checkboxes + the copy/delete bar
@@ -204,7 +206,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     root.append(nav, explorer, closeBtn);
 
     const firstLine = e => { const txt = String(e.content ?? '').trim(); const nl = txt.indexOf('\n'); return (nl < 0 ? txt : txt.slice(0, nl)) || t`(empty)`; };
-    const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
+    // A save ends the entry undo, whose snapshot predates it.
+    const save = () => { dirty = true; if (entryUndo) { clearEntryUndo(); refreshBulkBar(); } saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
     /** ST's substitution, except that with no character selected a character macro stays unresolved rather than naming the system user or, in a group, nobody. */
     const stSubstitute = tok => (/^\{\{char(IfNotGroup)?\}\}$/i.test(tok) && this_chid === undefined ? tok : substituteParams(tok));
@@ -384,7 +387,36 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const selectedList = () => [...selectedEntries].map(uid => data?.entries?.[uid]).filter(Boolean);
     let lastSel = null;   // the selection a bulk action spent, offered back as "Reselect N"
     const consumeSelection = () => { if (!selectedEntries.size) return; lastSel = new Set(selectedEntries); selectedEntries.clear(); syncSelCheckboxes(); };
-    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; for (const e of sel) fn(e); save(); sel.forEach(x => renderEntry(x)); consumeSelection(); };
+    const snapEntries = () => ({ entries: structuredClone(data.entries), originalData: data.originalData && structuredClone(data.originalData) });
+    const clearEntryUndo = () => { entryUndo = null; if (entryUndoTimer) { clearTimeout(entryUndoTimer); entryUndoTimer = null; } };
+    /** Offers `u` (a snapEntries() taken before the action, plus `n` and any latch or target record) as the bulk bar's undo; call after the action's save(). */
+    const armEntryUndo = u => {
+        clearEntryUndo();
+        entryUndo = { ...u, book: selected, chatId: getContext().chatId };
+        entryUndoTimer = setTimeout(() => { clearEntryUndo(); refreshBulkBar(); }, 30000);
+        refreshBulkBar();
+    };
+    const undoEntries = async () => {
+        const u = entryUndo; if (!u || u.book !== selected) return;
+        clearEntryUndo();
+        data.entries = u.entries;
+        if (u.originalData) data.originalData = u.originalData;
+        selectedEntries.clear(); lastSel = null; sugg.clear();
+        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        if (u.target) {
+            const tgt = await loadWorldInfo(u.target.name);
+            if (tgt?.entries) {
+                for (const uid of u.target.uids) { deleteWIOriginalDataValue(tgt, String(uid)); delete tgt.entries[uid]; }
+                await saveWorldInfo(u.target.name, tgt, true);
+                reloadEditor(u.target.name);
+            } else toastr.warning(t`Could not load “${u.target.name}”.`, 'WorldsApart');
+        }
+        // The forward pass must have finished before it is reversed.
+        const forward = await u.latches;
+        if (u.rekeyBack) latchWarn((await rekeyChatLatches(u.rekeyBack)).failed);
+        if (forward?.dropped.length) latchWarn(await putLatchesBack(forward.dropped, u.chatId));
+    };
+    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; const snap = snapEntries(); for (const e of sel) fn(e); save(); armEntryUndo({ ...snap, n: sel.length }); sel.forEach(x => renderEntry(x)); consumeSelection(); };
     const numberPrompt = async (title, label, def, min, max) => {
         const raw = await Popup.show.input(title, label, String(def));
         if (raw == null) return null;
@@ -445,8 +477,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (SORT_FNS[sortKey]) ordered.sort(SORT_FNS[sortKey]);
         const n = ordered.length;
         const targetOf = blockTarget(start, n, desc);
+        const snap = snapEntries();
 
-        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
+        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); armEntryUndo({ ...snap, n }); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
 
         // UID is the entries-object key and the entry's identity, so this rebuilds data.entries.
         if (data.originalData) { toastr.warning(t`UID renumbering is not available for character-embedded books.`, 'WorldsApart'); return; }
@@ -462,17 +495,22 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
         entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
-        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))))).failed);
+        const latches = rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))));
+        armEntryUndo({ ...snap, n, latches, rekeyBack: uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(nu), o]))) });
+        latchWarn((await latches).failed);
         toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'WorldsApart');
     };
     const bulkDelete = async () => {
         const n = selectedEntries.size; if (!n) return;
-        if (!await Popup.show.confirm(n === 1 ? t`Delete ${n} selected entry?` : t`Delete ${n} selected entries?`, t`This is irreversible.`)) return;
+        if (!await Popup.show.confirm(n === 1 ? t`Delete ${n} selected entry?` : t`Delete ${n} selected entries?`, t`Undo is available for 30 seconds.`)) return;
         const gone = [...selectedEntries];
+        const snap = snapEntries();
         for (const uid of gone) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); }
         selectedEntries.clear(); lastSel = null;   // no Reselect offer: those uids don't exist any more
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map(gone.map(u => [String(u), null]))))).failed);
+        const latches = rekeyChatLatches(uidRekey(selected, new Map(gone.map(u => [String(u), null]))));
+        armEntryUndo({ ...snap, n: gone.length, latches });
+        latchWarn((await latches).failed);
     };
     const bulkAddTerm = async () => {
         const raw = await Popup.show.input(t`Add key — selected entries`, t`Key to add to every selected entry:`);
@@ -485,24 +523,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const addedTxt = added === 1 ? t`“${term}” added to ${added} entry` : t`“${term}” added to ${added} entries`;
         toastr[added ? 'success' : 'info'](added ? (skipped ? t`${addedTxt} (${skipped} already had it).` : `${addedTxt}.`) : t`Every selected entry already has “${term}”.`, 'WorldsApart');
     };
-    // Undo restores by uid (a rescan rebuilds rows) and refuses if the book changed, since save() writes to `selected`.
     const bulkClearTerms = async () => {
         const sel = selectedList(); if (!sel.length) return;
         const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
         if (!total) { toastr.info(t`The selected entries have no keys.`, 'WorldsApart'); return; }
         const kwTxt = total === 1 ? t`${total} key` : t`${total} keys`;
-        if (!await Popup.show.confirm(sel.length === 1 ? t`Delete all ${kwTxt} from ${sel.length} selected entry?` : t`Delete all ${kwTxt} from ${sel.length} selected entries?`, t`Undo is available for 20 seconds.`)) return;
-        const book = selected, before = sel.map(e => [e.uid, Array.isArray(e.key) ? [...e.key] : []]);
+        if (!await Popup.show.confirm(sel.length === 1 ? t`Delete all ${kwTxt} from ${sel.length} selected entry?` : t`Delete all ${kwTxt} from ${sel.length} selected entries?`, t`Undo is available for 30 seconds.`)) return;
         applyBulk(e => e.key = []);
         suggest = null; if (scan) { rebuildScan(); sel.forEach(x => renderEntry(x)); }
-        const undo = () => {
-            if (selected !== book) { toastr.warning(t`That undo belongs to “${book}”. Reopen it first.`, 'WorldsApart'); return; }
-            let n = 0;
-            for (const [uid, keys] of before) { const e = data?.entries?.[uid]; if (!e) continue; e.key = keys; n += keys.length; }
-            save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-            toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'WorldsApart');
-        };
-        toastr.success(total === 1 ? t`Deleted ${total} key. Click to undo.` : t`Deleted ${total} keys. Click to undo.`, 'WorldsApart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
+        toastr.success(total === 1 ? t`Deleted ${total} key.` : t`Deleted ${total} keys.`, 'WorldsApart');
     };
     const menuBtn = (label, onClick, cls = '', style = '') => {
         const b = document.createElement('button'); b.type = 'button';
@@ -517,9 +546,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const wrap = document.createElement('div');
         const n = selectedEntries.size;
         const sep = () => { const s = document.createElement('span'); s.className = 'wa-bulk-sep'; return s; };
-        if (!n) {   // nothing selected -> the Reselect offer if a bulk action just spent one, else no footprint
-            if (!lastSel?.size) return wrap;
+        const undo = entryUndo?.book === selected ? [barBtn(t`Undo (${entryUndo.n})`, undoEntries)] : [];
+        if (!n) {   // nothing selected -> the Reselect offer if a bulk action just spent one, and the undo while it lasts, else no footprint
+            if (!lastSel?.size && !undo.length) return wrap;
             wrap.classList.add('wa-bulk-on');
+            wrap.append(...undo);
+            if (!lastSel?.size) return wrap;
             const note = document.createElement('span'); note.className = 'wa-bulk-count'; note.textContent = t`Deselected`;
             const drop = document.createElement('i'); drop.className = 'fa-solid fa-xmark wa-undo-dismiss'; drop.title = t`Dismiss`;
             drop.addEventListener('click', () => { lastSel = null; refreshBulkBar(); });
@@ -570,6 +602,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             count,
             barBtn(n === all.length ? t`Select none` : t`Select all`, () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
             ...(n === all.length ? [] : [barBtn(t`Deselect`, consumeSelection)]),
+            ...undo,
             sep(),
             addTermBtn,
             setBtn,
@@ -1395,20 +1428,24 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const tgt = await loadWorldInfo(target);
         if (!tgt?.entries) { toastr.warning(t`Could not load “${target}”.`, 'WorldsApart'); return; }
         let maxDisplay = Object.values(tgt.entries).reduce((m, x) => Math.max(m, x.displayIndex ?? -1), -1);
-        const copied = [], landed = new Map();
+        const copied = [], landed = new Map(), added = [];
         for (const e of list) {
             const uid = getFreeWorldEntryUid(tgt); if (uid == null) break;   // book full (1M entries) — stop, keep what copied
             const clone = structuredClone(e); clone.uid = uid; clone.displayIndex = ++maxDisplay;
-            tgt.entries[uid] = clone; copied.push(e); landed.set(latchKey({ world: selected, uid: e.uid }), latchKey({ world: target, uid }));
+            tgt.entries[uid] = clone; copied.push(e); added.push(uid); landed.set(latchKey({ world: selected, uid: e.uid }), latchKey({ world: target, uid }));
         }
         await saveWorldInfo(target, tgt, true);
         reloadEditor(target);   // refresh the core WI editor if that book happens to be open there
         if (deleteOriginal) {
+            const snap = snapEntries();
             // Only what landed in the target is dropped; deleteWIOriginalDataValue keeps embedded-book originalData in sync.
             for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); lastSel?.delete(e.uid); }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
             // A move keeps the entry's after-match state; a copy is a new entry and starts without one.
-            latchWarn((await rekeyChatLatches(k => landed.get(k))).failed);
+            const latches = rekeyChatLatches(k => landed.get(k));
+            const back = new Map([...landed].map(([from, to]) => [to, from]));
+            armEntryUndo({ ...snap, n: copied.length, latches, rekeyBack: k => back.get(k), target: { name: target, uids: added } });
+            latchWarn((await latches).failed);
         }
         toastr.success(deleteOriginal ? t`Moved ${copied.length} to “${target}”.` : t`Copied ${copied.length} to “${target}”.`, 'WorldsApart');
     };
@@ -1563,18 +1600,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (f.ignore) (settings().keywordIgnore ??= {})[f.name] = f.ignore;
         }
         if (p.forgotten?.some(f => !skipped.includes(f.name))) saveSettingsDebounced();
-        // Only into the chat the keys came from: the record is chat-scoped, and writing chat A's latches into chat B would mark
-        // entries fired where they never fired. The chat open at the delete is restored only while it still is.
-        const failedBack = [];
-        for (const { target, fired } of p.latches ?? []) {
-            const back = Object.fromEntries(Object.entries(fired).filter(([k]) => !skipped.includes(latchBook(k))));
-            if (!Object.keys(back).length) continue;
-            const add = m => withFired(m, { ...(m?.[WA_METADATA_KEY]?.fired ?? {}), ...back });
-            if (target) { if (!await editClosedChat(target, add)) failedBack.push(target.file); continue; }
-            if (p.chatId && p.chatId === getContext().chatId) { Object.assign(getContext().chatMetadata, add(getContext().chatMetadata)); getContext().saveMetadata?.(); }
-        }
-        if (p.latches?.some(l => l.target)) { chatIndex = null; groupIndex = null; }
-        latchWarn(failedBack);
+        latchWarn(await putLatchesBack(p.latches, p.chatId, k => !skipped.includes(latchBook(k))));
         await updateWorldInfoList();
         if (restored && !selected) selected = p.books.find(b => world_names.includes(b.name))?.name ?? null;
         renderBooks();
@@ -1671,6 +1697,22 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         chatIndex = null; groupIndex = null;   // the records just changed under it
         return { dropped, failed };
+    };
+    /**
+     * Puts rekeyChatLatches' `dropped` back into the chat each key came from, the open one only while it is still `chatId`.
+     * @returns {Promise<string[]>} the chats it could not write
+     */
+    const putLatchesBack = async (dropped, chatId, keep = () => true) => {
+        const failed = [];
+        for (const { target, fired } of dropped ?? []) {
+            const back = Object.fromEntries(Object.entries(fired).filter(([k]) => keep(k)));
+            if (!Object.keys(back).length) continue;
+            const add = m => withFired(m, { ...(m?.[WA_METADATA_KEY]?.fired ?? {}), ...back });
+            if (target) { if (!await editClosedChat(target, add)) failed.push(target.file); continue; }
+            if (chatId && chatId === getContext().chatId) { Object.assign(getContext().chatMetadata, add(getContext().chatMetadata)); getContext().saveMetadata?.(); }
+        }
+        if (dropped?.some(l => l.target)) { chatIndex = null; groupIndex = null; }
+        return failed;
     };
     const latchWarn = failed => { if (failed.length) toastr.warning(t`Could not carry over the after-match state in: ${failed.join(', ')}.`, 'WorldsApart', { timeOut: 12000 }); };
     /** Gives the open book's entry `e` the free uid `to`, carrying its per-uid view state and its after-match state with it. */
@@ -3525,7 +3567,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         orphanView = false;
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
         selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
-        cleanupChecks.clear(); cleanupUndo = null;   // rowId is (uid, term): uids collide across books, so a tick or an undo must not cross one
+        cleanupChecks.clear(); cleanupUndo = null; clearEntryUndo();   // rowId is (uid, term): uids collide across books, so a tick or an undo must not cross one
         explorer.innerHTML = `<div style="opacity:0.6;padding:8px;">${escapeHtml(t`Loading…`)}</div>`; explorer.append(closeBtn);   // same re-adopt as the no-book branch
         renderBooks();
         data = await loadWorldInfo(name);
@@ -3666,7 +3708,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     pop.buttonControls.style.display = 'none';   // hiding the OK button alone leaves the row's padding
     closeBtn.addEventListener('click', () => pop.complete(POPUP_RESULT.AFFIRMATIVE));
     await pop.show();
-    clearUndo();   // drop the pending timer/snapshot when Studio closes
+    clearUndo(); clearEntryUndo();   // drop the pending timers/snapshots when Studio closes
     if (dirty && selected) reloadEditor(selected);
     return '';
 }
