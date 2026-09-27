@@ -500,17 +500,23 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         latchWarn((await latches).failed);
         toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'WorldsApart');
     };
-    const bulkDelete = async () => {
-        const n = selectedEntries.size; if (!n) return;
-        if (!await Popup.show.confirm(n === 1 ? t`Delete ${n} selected entry?` : t`Delete ${n} selected entries?`, t`Undo is available for 30 seconds.`)) return;
-        const gone = [...selectedEntries];
+    /** Deletes `gone` (uids of the open book), after a confirm titled `title` when one is given, with the bulk bar's undo and the latch
+     *  pass; false on a cancel. */
+    const deleteEntries = async (gone, title = null) => {
+        if (!gone.length || (title && !await Popup.show.confirm(title, t`Undo is available for 30 seconds.`))) return false;
         const snap = snapEntries();
-        for (const uid of gone) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); }
-        selectedEntries.clear(); lastSel = null;   // no Reselect offer: those uids don't exist any more
+        // Out of the selection too: core hands freed uids back out, so a stale one would re-point at the next entry created.
+        for (const uid of gone) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); selectedEntries.delete(uid); lastSel?.delete(uid); }
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
         const latches = rekeyChatLatches(uidRekey(selected, new Map(gone.map(u => [String(u), null]))));
         armEntryUndo({ ...snap, n: gone.length, latches });
         latchWarn((await latches).failed);
+        return true;
+    };
+    const bulkDelete = async () => {
+        const gone = [...selectedEntries], n = gone.length;
+        // No Reselect offer: those uids don't exist any more.
+        if (await deleteEntries(gone, n === 1 ? t`Delete ${n} selected entry?` : t`Delete ${n} selected entries?`)) { lastSel = null; refreshBulkBar(); }
     };
     const bulkAddTerm = async () => {
         const raw = await Popup.show.input(t`Add key — selected entries`, t`Key to add to every selected entry:`);
@@ -1393,13 +1399,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('wa-flash'); setTimeout(() => row.classList.remove('wa-flash'), 1200); }
         toastr.success(t`Entry duplicated.`, 'WorldsApart');
     };
-    const delEntry = async e => {
-        if (!await deleteWorldInfoEntry(data, e.uid)) return;   // shows its own confirm
-        // Drop the uid from the selection: core hands freed uids back out, so it would re-point at the next entry created.
-        selectedEntries.delete(e.uid); lastSel?.delete(e.uid);
-        save(); suggest = null; if (scan) rebuildScan(); sugg.delete(e.uid); rowEls.delete(e.uid); renderExplorer();
-        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map([[String(e.uid), null]])))).failed);
-    };
+    const delEntry = e => deleteEntries([e.uid]);
     // Picks a target lorebook (any but the open one); null = cancelled.
     // `withSelected` includes the open book, which a copy/move target must not offer.
     const pickBook = async (prompt, withSelected = false) => {
