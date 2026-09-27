@@ -411,6 +411,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-entry-titleline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wa-entry-titleline .wa-entry-title { flex: 0 1 auto; }
 .wa-entry-meta-sub { white-space: normal; overflow: visible; }
+.wa-meta-edit { cursor: pointer; }
+.wa-meta-edit:hover { text-decoration: underline dotted; }
 .wa-entry-badge { font-size: 0.78em; background: var(--wa-kw-flag-bg, #274d78); color: #fff;
     border-radius: 8px; padding: 1px 7px; white-space: nowrap; flex-shrink: 0; }
 .wa-entry-body { margin-top: 2px; }

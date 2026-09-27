@@ -39,6 +39,25 @@ const LOGIC_OPTS = [
     ['2', 'NOT_ANY', LOGIC_LABEL[2]],
     ['1', 'NOT_ALL', LOGIC_LABEL[1]],
 ];
+/** ST's position select, one choice per position and at-depth role, as `[value, short label, tooltip, menu label]`; the value is
+ *  `position`, or `4:role` at depth. */
+const PLACEMENTS = [
+    ['0', t`↑Char`, t`Before character definitions`, t`↑ Char`],
+    ['1', t`↓Char`, t`After character definitions`, t`↓ Char`],
+    ['5', t`↑EM`, t`Before example messages`, t`↑ Example Messages`],
+    ['6', t`↓EM`, t`After example messages`, t`↓ Example Messages`],
+    ['2', t`↑AN`, t`Before Author's Note`, t`↑ Author's Note`],
+    ['3', t`↓AN`, t`After Author's Note`, t`↓ Author's Note`],
+    ['4:0', t`@D ⚙️`, t`At depth, as system`, t`@Depth (System)`],
+    ['4:1', t`@D 👤`, t`At depth, as user`, t`@Depth (User)`],
+    ['4:2', t`@D 🤖`, t`At depth, as assistant`, t`@Depth (Assistant)`],
+    ['7', t`➡️ Outlet`, t`Outlet: placed only where the prompt holds its {{outlet::name}} macro`, t`➡️ Outlet`],
+];
+/** The PLACEMENTS row an entry's position and role select, undefined for a position core places nowhere. */
+const placementOf = e => {
+    const v = Number(e.position) === 4 ? `4:${e.role ?? 0}` : String(e.position);
+    return PLACEMENTS.find(([pv]) => pv === v);
+};
 
 /**
  * Lorebook Studio (/wa-studio).
@@ -378,6 +397,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bulkCooldown = async () => { const v = await numberPrompt(t`Cooldown — selected entries`, t`Messages before it can re-activate (0 = none):`, 0, 0); if (v != null) applyBulk(e => e.cooldown = Math.floor(v) || null); };
     const bulkScanDepth = async () => { const v = await numberPrompt(t`Scan depth — selected entries`, t`Messages to scan (0 = global default):`, 0, 0); if (v != null) applyBulk(e => e.scanDepth = Math.floor(v) > 0 ? Math.floor(v) : null); };
     const bulkOrderSet = async () => { const v = await numberPrompt(t`Order — selected entries`, t`Order value for every selected entry:`, 100); if (v != null) applyBulk(e => e.order = Math.floor(v)); };
+    /** The fields a PLACEMENTS choice writes; an at-depth or outlet one asks for its depth or name first, and a cancel answers null.
+     *  @param {object} [cur] The entry whose depth and name the prompts start from */
+    const placementFields = async (val, cur = {}) => {
+        const [pos, role] = val.split(':');
+        const f = { position: Number(pos), role: role === undefined ? null : Number(role) };
+        if (pos === '4') { const d = await numberPrompt(t`Depth`, t`Depth (0 = after the last message):`, cur.depth ?? 4, 0); if (d == null) return null; f.depth = Math.floor(d); }
+        if (pos === '7') { const name = await Popup.show.input(t`Outlet`, t`Outlet name:`, cur.outletName ?? ''); if (name == null) return null; f.outletName = String(name).trim(); }
+        return f;
+    };
+    const bulkPlacement = async val => { const f = await placementFields(val); if (f) applyBulk(e => Object.assign(e, f)); };
     const bulkRecLevel = async () => { const v = await numberPrompt(t`Delay until recursion — selected entries`, t`Recursion level (0 = any; turns the flag on):`, 0, 0); if (v != null) applyBulk(e => e.delayUntilRecursion = Math.floor(v) > 0 ? Math.floor(v) : true); };
     const bulkCopyTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, false); };
     const bulkMoveTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, true); };
@@ -525,6 +554,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 ] },
                 { label: t`Ignore budget`, children: onOff('ignoreBudget') },
                 { label: t`Order…`, fn: bulkOrderSet },
+                { label: t`Position`, children: PLACEMENTS.map(([val, , , label]) => ({ label, fn: () => bulkPlacement(val) })) },
                 { label: t`Scan depth…`, fn: bulkScanDepth },
             ];
         };
@@ -942,11 +972,37 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const delay = Number(e.delay) || 0;
         const cooldown = Number(e.cooldown) || 0;
         const keysTxt = keyCount ? (keyCount === 1 ? t`${keyCount} key` : t`${keyCount} keys`) : t`no keys`;
-        const metaBits = [keysTxt, t`UID ${e.uid}`, t`order ${e.order ?? 100}`];
+        const place = placementOf(e);
+        const placeTxt = !place ? t`position not set`
+            : Number(e.position) === 4 ? t`position ${place[1]} depth ${e.depth ?? 4}`
+                : Number(e.position) === 7 && e.outletName ? t`position ${place[1]} ${e.outletName}`
+                    : t`position ${place[1]}`;
+        // Every click here stops at the bit: the header row's own click toggles the entry open.
+        const editBit = (text, tip, onClick) => {
+            const b = document.createElement('span'); b.className = 'wa-meta-edit'; b.textContent = text; b.title = tip;
+            b.addEventListener('click', ev => { ev.stopPropagation(); onClick(b); });
+            return b;
+        };
+        const orderBit = editBit(t`order ${e.order ?? 100}`, t`Click to edit the order`, b => {
+            const { inp } = inlineInput(b, (nv, ok) => {
+                const n = Math.floor(Number(nv));
+                if (ok && nv !== '' && Number.isFinite(n) && n !== (e.order ?? 100)) { e.order = n; save(); }
+                renderEntry(e);
+            }, { value: String(e.order ?? 100), css: 'margin:0;font-size:1em;width:auto;', fit: x => Math.max(4, x.value.length + 2) });
+            inp.addEventListener('click', ev => ev.stopPropagation());
+        });
+        const placeBit = editBit(placeTxt, t`Click to change the position`, b => {
+            const r = b.getBoundingClientRect();
+            showCtxMenu(PLACEMENTS.map(([val, , , label]) => ({ label, active: val === place?.[0], fn: async () => {
+                const f = await placementFields(val, e);
+                if (f) { Object.assign(e, f); save(); renderEntry(e); }
+            } })), r.left, r.bottom + 2, ctxMount());
+        });
+        const metaBits = [keysTxt, t`UID ${e.uid}`, orderBit, placeBit];
         if (e.useProbability !== false && prob < 100) metaBits.push(`${prob}%`);   // only when it actually gates
         if (delay > 0) metaBits.push(t`delay ${delay}`);
         if (cooldown > 0) metaBits.push(t`cd ${cooldown}`);
-        meta.textContent = `· ${metaBits.join(' · ')}`;
+        meta.append('· ', ...metaBits.flatMap((b, i) => (i ? [' · ', b] : [b])));
         const probTxt = e.useProbability !== false ? prob : 100;
         meta.title = (keyCount ? t`Keys (${keyCount}): ${e.key.join(', ')}` : t`No keys`) + '\n' + t`trigger probability ${probTxt}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         // Open: the meta line sits under the title, with the title's own left edge; closed: it trails the row.
@@ -1204,10 +1260,38 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); repaint(e); });
             l.append(s, sel); return l;
         };
+        // Writes `role` as ST's editor does: the at-depth choice's role, null for every other position.
+        const placeSel = () => {
+            const l = document.createElement('label'); l.className = 'wa-adv-row';
+            const s = document.createElement('span'); s.textContent = t`Position`; s.style.whiteSpace = 'nowrap';
+            const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';
+            const cur = placementOf(e);
+            // Disabled: choosing it would write no position, and Number('') would write 0.
+            if (!cur) { const o = new Option(t`Not set`, ''); o.disabled = true; sel.append(o); }
+            for (const [val, label, tip] of PLACEMENTS) { const o = new Option(label, val); o.title = tip; sel.append(o); }
+            sel.value = cur?.[0] ?? '';
+            sel.title = cur?.[2] ?? t`No position: SillyTavern leaves this entry out of the prompt even when it activates.`;
+            sel.addEventListener('change', () => {
+                const [pos, role] = sel.value.split(':');
+                e.position = Number(pos); e.role = role === undefined ? null : Number(role);
+                save(); repaint(e);
+            });
+            l.append(s, sel); return l;
+        };
+        const outletRow = () => {
+            const l = document.createElement('label'); l.className = 'wa-adv-row';
+            const s = document.createElement('span'); s.textContent = t`Outlet name`; s.style.whiteSpace = 'nowrap';
+            const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.value = e.outletName ?? '';
+            inp.addEventListener('change', () => { e.outletName = inp.value.trim(); save(); repaint(e); });
+            l.append(s, inp); return l;
+        };
         const durLevel = (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0) ? e.delayUntilRecursion : '';
         adv.append(
             col(t`Placement`,
                 numRow(t`Order`, () => (e.order ?? 100), v => e.order = Math.floor(Number(v) || 0), '100'),
+                placeSel(),
+                ...(Number(e.position) === 4 ? [numRow(t`Depth`, () => (e.depth ?? 4), v => e.depth = Math.max(0, Math.floor(Number(v) || 0)), '4')] : []),
+                ...(Number(e.position) === 7 ? [outletRow()] : []),
             ),
             col(t`Timed`,
                 numRow(t`Sticky`, () => (Number(e.sticky) > 0 ? Number(e.sticky) : ''), v => e.sticky = toMsg(v), '0'),
