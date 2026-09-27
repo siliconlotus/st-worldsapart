@@ -20,8 +20,8 @@ const label = x => (x.with?.length ? x.with.join('+') : 'three signals');
 
 const byScene = x => new Map(x.scenes.map(sc => [sc.name, sc]));
 // By (book, uid): a scene ranks every attached book, and uids repeat across books. A rows file from before --emit-rows
-// wrote `book` has none, so a pair where either side lacks it is joined by uid alone.
-const withBook = x => x.scenes.every(sc => sc.rows.every(r => r.book !== undefined));
+// wrote `book` has none on any row, so a pair where either file is one is joined by uid alone.
+const withBook = x => x.scenes.some(sc => sc.rows.some(r => r.book !== undefined));
 const keyOf = withBook(A) && withBook(B) ? rowKey : r => r.uid;
 if (keyOf !== rowKey) console.error('note: a rows file carries no book, so rows are joined by uid alone and a uid two books share can pair across them');
 const byRow = rows => new Map(rows.map(r => [keyOf(r), r]));

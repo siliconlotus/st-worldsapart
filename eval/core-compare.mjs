@@ -100,7 +100,7 @@ const coreNominate = (rows) => {
     for (const r of [...rows].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, TOP_K)) picked.add(r);
     return [...picked].sort(ORDERS[CORE_ORDER]);
 };
-// Stage 4 itself, over rows already in layout order; a promoted row is exempt, as at runtime.
+// Stage 4 itself, over rows already in layout order: a promoted or unscored row is kept, as at runtime, and constants stay in the walk.
 const waNominate = rows => relevanceCut(rows, { cutoffOf: r => (hasPromoteDecorator(r.entry) ? NaN : CUTOFF) }).kept;
 
 console.log(`${scenes.length} scene(s), ${TIER} tier, ${tk.tokenizer} tokens; core: top-${TOP_K}, scan depth ${CORE_DEPTH}, walked by ${CORE_UIDS ? "a real install's answer" : CORE_ORDER}; WA cut at ${CUTOFF}`);
