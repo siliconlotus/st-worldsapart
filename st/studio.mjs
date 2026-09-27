@@ -16,7 +16,7 @@ import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, S
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { macroMap, setMacros, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
-import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, partitionLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
+import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
 import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
@@ -157,7 +157,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const r = await fetch('/api/plugins/worlds-apart/chat-bindings', { method: 'POST', headers: getRequestHeaders() });
                 if (!r.ok) throw new Error(String(r.status));
                 {
-                    const { bindings } = await r.json();
+                    const { bindings, groups: groupRows } = await r.json();
                     // Every field the index reads, on every row.
                     if (!Array.isArray(bindings) || !bindings.every(b => typeof b?.dir === 'string' && typeof b?.file === 'string')) throw new Error('no bindings list');
                     const byDir = new Map();
@@ -175,7 +175,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                         return e;
                     };
                     for (const c of characters ?? []) if (c?.avatar) entry(String(c.avatar).replace(/\.png$/, ''));
-                    for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, file_size: humanSize(b.size), chat_metadata: { world_info: b.world_info } });
+                    groupIndex = (Array.isArray(groupRows) ? groupRows : []).map(g => ({ id: String(g.id), chat_metadata: { world_info: g.world_info, ...(g.fired ? { [WA_METADATA_KEY]: { fired: g.fired } } : {}) } }));
+                    for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, file_size: humanSize(b.size), chat_metadata: { world_info: b.world_info, ...(b.fired ? { [WA_METADATA_KEY]: { fired: b.fired } } : {}) } });
                     return [...out.values()];
                 }
             } catch (err) { pluginFallback('chat-bindings', err); }
@@ -461,14 +462,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
         entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
+        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))))).failed);
         toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'WorldsApart');
     };
     const bulkDelete = async () => {
         const n = selectedEntries.size; if (!n) return;
         if (!await Popup.show.confirm(n === 1 ? t`Delete ${n} selected entry?` : t`Delete ${n} selected entries?`, t`This is irreversible.`)) return;
-        for (const uid of [...selectedEntries]) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); }
+        const gone = [...selectedEntries];
+        for (const uid of gone) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); }
         selectedEntries.clear(); lastSel = null;   // no Reselect offer: those uids don't exist any more
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map(gone.map(u => [String(u), null]))))).failed);
     };
     const bulkAddTerm = async () => {
         const raw = await Popup.show.input(t`Add key — selected entries`, t`Key to add to every selected entry:`);
@@ -998,7 +1002,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (f) { Object.assign(e, f); save(); renderEntry(e); }
             } })), r.left, r.bottom + 2, ctxMount());
         });
-        const metaBits = [keysTxt, t`UID ${e.uid}`, orderBit, placeBit];
+        // Plain text on a character-embedded book, whose uids Renumber refuses too.
+        const uidBit = data.originalData ? t`UID ${e.uid}` : editBit(t`UID ${e.uid}`, t`Click to change the UID`, b => {
+            const { inp } = inlineInput(b, (nv, ok) => {
+                const to = Number(nv);
+                renderEntry(e);
+                if (!ok || nv === '' || to === e.uid) return;
+                if (!Number.isInteger(to) || to < 0) { toastr.warning(t`A UID is a whole number, 0 or more.`, 'WorldsApart'); return; }
+                if (Object.hasOwn(data.entries, to)) { toastr.warning(t`UID ${to} is already used by another entry.`, 'WorldsApart'); return; }
+                void changeUid(e, to);
+            }, { value: String(e.uid), css: 'margin:0;font-size:1em;width:auto;', fit: x => Math.max(4, x.value.length + 2) });
+            inp.addEventListener('click', ev => ev.stopPropagation());
+        });
+        const metaBits = [keysTxt, uidBit, orderBit, placeBit];
         if (e.useProbability !== false && prob < 100) metaBits.push(`${prob}%`);   // only when it actually gates
         if (delay > 0) metaBits.push(t`delay ${delay}`);
         if (cooldown > 0) metaBits.push(t`cd ${cooldown}`);
@@ -1349,6 +1365,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Drop the uid from the selection: core hands freed uids back out, so it would re-point at the next entry created.
         selectedEntries.delete(e.uid); lastSel?.delete(e.uid);
         save(); suggest = null; if (scan) rebuildScan(); sugg.delete(e.uid); rowEls.delete(e.uid); renderExplorer();
+        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map([[String(e.uid), null]])))).failed);
     };
     // Picks a target lorebook (any but the open one); null = cancelled.
     // `withSelected` includes the open book, which a copy/move target must not offer.
@@ -1378,11 +1395,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const tgt = await loadWorldInfo(target);
         if (!tgt?.entries) { toastr.warning(t`Could not load “${target}”.`, 'WorldsApart'); return; }
         let maxDisplay = Object.values(tgt.entries).reduce((m, x) => Math.max(m, x.displayIndex ?? -1), -1);
-        const copied = [];
+        const copied = [], landed = new Map();
         for (const e of list) {
             const uid = getFreeWorldEntryUid(tgt); if (uid == null) break;   // book full (1M entries) — stop, keep what copied
             const clone = structuredClone(e); clone.uid = uid; clone.displayIndex = ++maxDisplay;
-            tgt.entries[uid] = clone; copied.push(e);
+            tgt.entries[uid] = clone; copied.push(e); landed.set(latchKey({ world: selected, uid: e.uid }), latchKey({ world: target, uid }));
         }
         await saveWorldInfo(target, tgt, true);
         reloadEditor(target);   // refresh the core WI editor if that book happens to be open there
@@ -1390,6 +1407,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             // Only what landed in the target is dropped; deleteWIOriginalDataValue keeps embedded-book originalData in sync.
             for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); lastSel?.delete(e.uid); }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+            // A move keeps the entry's after-match state; a copy is a new entry and starts without one.
+            latchWarn((await rekeyChatLatches(k => landed.get(k))).failed);
         }
         toastr.success(deleteOriginal ? t`Moved ${copied.length} to “${target}”.` : t`Copied ${copied.length} to “${target}”.`, 'WorldsApart');
     };
@@ -1494,33 +1513,27 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (d) books.push({ name: n, data: structuredClone(d) });
             await deleteWorldInfo(n);
         }
-        // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
-        const meta = getContext().chatMetadata;
-        const { kept, dropped } = partitionLatches(meta?.[WA_METADATA_KEY]?.fired, names);
-        if (Object.keys(dropped).length) {
-            meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: kept };
-            getContext().saveMetadata?.();
-        }
         // The per-book settings and latch keys go with the book; restoreBook puts them back when the delete is undone.
         const s = settings();
-        const forgotten = names.map(n => ({
-            name: n,
-            sort: s.studioSortByBook?.[n],
-            ignore: s.keywordIgnore?.[n],
-            fired: Object.fromEntries(Object.entries(dropped).filter(([k]) => latchBook(k) === n)),
-        }));
+        const forgotten = names.map(n => ({ name: n, sort: s.studioSortByBook?.[n], ignore: s.keywordIgnore?.[n] }));
         for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
         saveSettingsDebounced();
+        // Off the deleted book before the latch pass awaits: save() writes `selected`, and would recreate it.
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
             data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
         }
         dirty = false;
-        if (undoTimer) clearTimeout(undoTimer);
-        pendingUndo = { books, forgotten, chatId: getContext().chatId };
-        undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; renderBooks(); }, 30000);
         renderBooks();
         if (wasOpen) { if (selected) openBook(selected); else renderExplorer(); }
+        const chatId = getContext().chatId;
+        // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
+        const latches = await rekeyChatLatches(k => (names.includes(latchBook(k)) ? null : undefined));
+        latchWarn(latches.failed);
+        if (undoTimer) clearTimeout(undoTimer);
+        pendingUndo = { books, forgotten, latches: latches.dropped, chatId };
+        undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; renderBooks(); }, 30000);
+        renderBooks();
     };
     const delBook = async () => {
         if (!await Popup.show.confirm(t`Delete lorebook “${selected}”?`, t`This deletes the entire book and every entry in it.`)) return;
@@ -1550,16 +1563,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (f.ignore) (settings().keywordIgnore ??= {})[f.name] = f.ignore;
         }
         if (p.forgotten?.some(f => !skipped.includes(f.name))) saveSettingsDebounced();
-        // Only into the chat the keys came from: the record is chat-scoped, and writing chat A's latches into
-        // chat B would mark entries fired where they never fired. A closed chat has no metadata-only write.
-        if (p.chatId && p.chatId === getContext().chatId) {
-            const back = Object.assign({}, ...(p.forgotten ?? []).filter(f => !skipped.includes(f.name)).map(f => f.fired ?? {}));
-            if (Object.keys(back).length) {
-                const meta = getContext().chatMetadata;
-                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: { ...(meta?.[WA_METADATA_KEY]?.fired ?? {}), ...back } };
-                getContext().saveMetadata?.();
-            }
+        // Only into the chat the keys came from: the record is chat-scoped, and writing chat A's latches into chat B would mark
+        // entries fired where they never fired. The chat open at the delete is restored only while it still is.
+        const failedBack = [];
+        for (const { target, fired } of p.latches ?? []) {
+            const back = Object.fromEntries(Object.entries(fired).filter(([k]) => !skipped.includes(latchBook(k))));
+            if (!Object.keys(back).length) continue;
+            const add = m => withFired(m, { ...(m?.[WA_METADATA_KEY]?.fired ?? {}), ...back });
+            if (target) { if (!await editClosedChat(target, add)) failedBack.push(target.file); continue; }
+            if (p.chatId && p.chatId === getContext().chatId) { Object.assign(getContext().chatMetadata, add(getContext().chatMetadata)); getContext().saveMetadata?.(); }
         }
+        if (p.latches?.some(l => l.target)) { chatIndex = null; groupIndex = null; }
+        latchWarn(failedBack);
         await updateWorldInfoList();
         if (restored && !selected) selected = p.books.find(b => world_names.includes(b.name))?.name ?? null;
         renderBooks();
@@ -1568,26 +1583,115 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (restored) toastr.success(restored === 1 ? t`Restored ${restored} lorebook.` : t`Restored ${restored} lorebooks.`, 'WorldsApart');
     };
     /**
-     * Re-points one closed chat's binding by round-tripping the whole chat through /api/chats/get and /api/chats/save; ST has no metadata-only write.
-     * ponytail: the whole chat crosses the wire per binding; revisit if ST exposes a metadata-only endpoint.
+     * Rewrites one closed chat's metadata by round-tripping the whole chat through /api/chats/get and /api/chats/save; ST has no
+     * metadata-only write. `edit` returns the new metadata, or null to leave the file untouched.
+     * ponytail: the whole chat crosses the wire per edit; revisit if ST exposes a metadata-only endpoint.
      */
-    const repointOne = async ({ char, avatar, file }, newName) => {
-        const name = String(file ?? '').replace(/\.jsonl$/, '');
+    // One closed-chat edit at a time: each is a whole-chat read then write, and two interleaved would save from a stale read.
+    let chatEdits = Promise.resolve();
+    const editClosedChat = (target, edit) => (chatEdits = chatEdits.then(() => editClosedChatNow(target, edit)));
+    const editClosedChatNow = async ({ char, avatar, file, group }, edit) => {
+        const name = group != null ? String(group) : String(file ?? '').replace(/\.jsonl$/, '');
         if (!name) return false;
+        const route = group != null ? '/api/chats/group' : '/api/chats';
+        const ids = group != null ? { id: name } : { ch_name: char, file_name: name, avatar_url: avatar };
         try {
-            const got = await fetch('/api/chats/get', {
+            const got = await fetch(`${route}/get`, {
                 method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
-                body: JSON.stringify({ ch_name: char, file_name: name, avatar_url: avatar }),
+                body: JSON.stringify(ids),
             });
             const chat = got.ok ? await got.json() : null;
             if (!Array.isArray(chat) || !chat.length) return false;
-            chat[0].chat_metadata = { ...(chat[0].chat_metadata ?? {}), [METADATA_KEY]: newName };
-            const put = await fetch('/api/chats/save', {
+            const next = edit(chat[0].chat_metadata ?? {});
+            if (!next) return true;
+            chat[0].chat_metadata = next;
+            const put = await fetch(`${route}/save`, {
                 method: 'POST', headers: getRequestHeaders(),
-                body: JSON.stringify({ ch_name: char, file_name: name, avatar_url: avatar, chat }),
+                body: JSON.stringify({ ...ids, chat }),
             });
             return put.ok;
-        } catch (err) { console.error('[WA] repoint', name, err); return false; }
+        } catch (err) { console.error('[WA] edit chat', name, err); return false; }
+    };
+    /** Every group chat's metadata: the plugin's line-0 read when bindingIndex had it, else one /group/get per chat.
+     *  ponytail: without the plugin each group chat crosses the wire whole to read its line 0. */
+    const groupChatIndex = async () => {
+        if (!groupIndex) await bindingIndex();
+        if (groupIndex) return groupIndex;
+        const out = [];
+        for (const id of (getContext().groups ?? []).flatMap(g => (Array.isArray(g.chats) ? g.chats : []))) {
+            try {
+                const r = await fetch('/api/chats/group/get', { method: 'POST', headers: getRequestHeaders(), cache: 'no-cache', body: JSON.stringify({ id }) });
+                const chat = r.ok ? await r.json() : null;
+                out.push({ id: String(id), chat_metadata: Array.isArray(chat) ? chat[0]?.chat_metadata ?? {} : {} });
+            } catch { /* an unreadable group chat is skipped */ }
+        }
+        return (groupIndex = out);
+    };
+    /** Every chat but the open one, character and group, as `{ target, meta }`; `target.file` names it in a warning. */
+    const closedChats = async () => {
+        const openFile = String(getContext().chatId ?? '');
+        const out = [];
+        for (const c of await bindingIndex()) for (const ch of c.chats) {
+            const file = String(ch.file_name ?? '').replace(/\.jsonl$/, '');
+            if (file && file !== openFile) out.push({ target: { char: c.char, avatar: c.avatar, file }, meta: ch.chat_metadata });
+        }
+        for (const g of await groupChatIndex()) if (g.id !== openFile) out.push({ target: { group: g.id, file: g.id }, meta: g.chat_metadata });
+        return out;
+    };
+    const repointOne = (target, newName) => editClosedChat(target, m => ({ ...m, [METADATA_KEY]: newName }));
+    /** `m` with its latch record replaced by `fired`. */
+    const withFired = (m, fired) => ({ ...m, [WA_METADATA_KEY]: { ...(m?.[WA_METADATA_KEY] ?? {}), fired } });
+    // One pass at a time, on its own chain: a pass picks its chats from an index a running one may be about to make stale.
+    let latchPasses = Promise.resolve();
+    /**
+     * Applies rekeyLatches' `rekey` to the open chat's latch record and to every closed chat whose record it changes.
+     * @returns {Promise<{dropped: Array<{target: object|null, fired: object}>, failed: string[]}>} `target` null for the open chat;
+     *          `dropped` is what an undo puts back
+     */
+    const rekeyChatLatches = rekey => {
+        const pass = latchPasses.then(() => rekeyChatLatchesNow(rekey));
+        latchPasses = pass.catch(() => {});
+        return pass;
+    };
+    const rekeyChatLatchesNow = async rekey => {
+        const dropped = [], failed = [];
+        const ctx = getContext();
+        const open = ctx.chatMetadata && rekeyLatches(ctx.chatMetadata[WA_METADATA_KEY]?.fired, rekey);
+        if (open) {
+            Object.assign(ctx.chatMetadata, withFired(ctx.chatMetadata, open.fired));
+            ctx.saveMetadata?.();
+            if (Object.keys(open.dropped).length) dropped.push({ target: null, fired: open.dropped });
+        }
+        for (const { target, meta } of await closedChats()) {
+            if (!rekeyLatches(meta?.[WA_METADATA_KEY]?.fired, rekey)) continue;
+            let out = null;
+            const ok = await editClosedChat(target, m => { out = rekeyLatches(m?.[WA_METADATA_KEY]?.fired, rekey); return out && withFired(m, out.fired); });
+            if (!ok) failed.push(target.file);
+            else if (out && Object.keys(out.dropped).length) dropped.push({ target, fired: out.dropped });
+        }
+        chatIndex = null; groupIndex = null;   // the records just changed under it
+        return { dropped, failed };
+    };
+    const latchWarn = failed => { if (failed.length) toastr.warning(t`Could not carry over the after-match state in: ${failed.join(', ')}.`, 'WorldsApart', { timeOut: 12000 }); };
+    /** Gives the open book's entry `e` the free uid `to`, carrying its per-uid view state and its after-match state with it. */
+    const changeUid = async (e, to) => {
+        const from = e.uid;
+        const next = {};
+        for (const [k, x] of Object.entries(data.entries)) if (x !== e) next[k] = x;
+        e.uid = to; next[to] = e; data.entries = next;
+        for (const set of [entryOpen, expanded, tall, advOpen, selectedEntries, ...(lastSel ? [lastSel] : [])]) if (set.delete(from)) set.add(to);
+        if (sugg.has(from)) { sugg.set(to, sugg.get(from)); sugg.delete(from); }
+        rowEls.delete(from);
+        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map([[String(from), to]])))).failed);
+    };
+    /** Latch keys of `book` whose uid `moves` maps (old uid -> new uid, or null to drop), as a rekeyLatches `rekey`. */
+    const uidRekey = (book, moves) => k => {
+        if (latchBook(k) !== book) return undefined;
+        const uid = k.slice(book.length + 1);
+        if (!moves.has(uid)) return undefined;
+        const to = moves.get(uid);
+        return to === null ? null : latchKey({ world: book, uid: to });
     };
 
     /** Re-points every character card whose primary lorebook is `oldName`, through /api/characters/merge-attributes (what /char-set runs), one card per call. */
@@ -1609,17 +1713,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     const repointChats = async (oldName, newName) => {
         const moved = [], failed = [];
-        const openFile = String(getContext().chatId ?? '');
-        chatIndex = null;   // a rename invalidates the fallback's cache, and this is the one place that must not read stale
-        for (const c of await bindingIndex()) {
-            for (const ch of c.chats) {
-                if (ch?.chat_metadata?.world_info !== oldName) continue;
-                const file = String(ch.file_name ?? '').replace(/\.jsonl$/, '');
-                if (!file || file === openFile) continue;   // the open chat goes through saveMetadata
-                (await repointOne({ char: c.char, avatar: c.avatar, file }, newName) ? moved : failed).push(file);
-            }
+        chatIndex = null; groupIndex = null;   // a rename invalidates the fallback's cache, and this is the one place that must not read stale
+        // The open chat goes through saveMetadata; closedChats leaves it out.
+        for (const { target, meta } of await closedChats()) {
+            if (meta?.world_info !== oldName) continue;
+            (await repointOne(target, newName) ? moved : failed).push(target.file);
         }
-        chatIndex = null;   // the bindings just changed under it
+        chatIndex = null; groupIndex = null;   // the bindings just changed under it
         return { moved, failed };
     };
 
@@ -1660,6 +1760,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (oldName === selected) { renderBooks(); openBook(newName); }
         else { renderBooks(); }
         const { moved, failed } = await repointChats(oldName, newName);
+        latchWarn((await rekeyChatLatches(k => (latchBook(k) === oldName ? latchKey({ world: newName, uid: k.slice(oldName.length + 1) }) : undefined))).failed);
         const cards = await repointCards(oldName, newName);
         const bits = [];
         if (moved.length) bits.push(moved.length === 1 ? t`${moved.length} chat` : t`${moved.length} chats`);
@@ -1997,6 +2098,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     let chatIndex = null;   // [{ char, avatar, charWorld, chats }], cached for the Studio session and book-independent
+    let groupIndex = null;  // [{ id, chat_metadata }], every group chat; cleared wherever chatIndex is
     const loadChatIndex = async () => {
         if (chatIndex) return chatIndex;
         const list = (characters ?? []).filter(c => c?.avatar);
@@ -2170,7 +2272,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const boundChats = async () => {
         let bound = (await findBookChats()).filter(c => c.bound);
         // The index is session-cached, so a chat bound since reads as absent: drop the cache and look again.
-        if (!bound.length) { chatIndex = null; bound = (await findBookChats()).filter(c => c.bound); }
+        if (!bound.length) { chatIndex = null; groupIndex = null; bound = (await findBookChats()).filter(c => c.bound); }
         return bound;
     };
 
@@ -3165,7 +3267,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** Re-run the scan and repaint, after anything that changes a binding. */
     const refreshOrphans = async () => {
-        chatIndex = null;
+        chatIndex = null; groupIndex = null;
         orphanChecks.clear();
         const r = findOrphanBindings(await bindingIndex(), world_names);
         orphans = (r.chatCount || r.cardCount) ? r : null;

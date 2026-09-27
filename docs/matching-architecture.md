@@ -189,9 +189,10 @@ run, which arms no timed effect and must not arm this either), and read in `acti
 `firedUpTo`, which drops every firing past the current chat length, so a rewind past a firing point
 un-latches as core drops a timed effect: a recorded `@@dont_activate_after_match` entry is skipped, a
 recorded `@@keep_activate_after_match` entry is included unconditionally — both present resolves to
-latches ON, below. Deleting a book prunes its
-entries' latch keys from the current chat's record (`latchBook(key)` recovers the segment before the US;
-`st/studio.mjs` `deleteBooks`), alongside its settings.
+latches ON, below. A record follows its entry through the Studio, in the open chat and every character and group chat on disk
+(`rekeyLatches`; `st/studio.mjs` `rekeyChatLatches`, which finds closed chats through the plugin's `/chat-bindings`): renaming a
+book, renumbering uids, changing one, and moving an entry to another book move its keys; deleting a book or an entry drops them,
+and the undo of a book delete or of an entry bulk action puts them back. Edits made in ST's own editor are not followed.
 
 **`@@activate_only_after N`, `@@is_greeting N`, `@@activate_only_every N`, `@@is_user_icon NAME`** are
 `activationAdds` gates, not fields: WA owns activation, so these route through the same window and

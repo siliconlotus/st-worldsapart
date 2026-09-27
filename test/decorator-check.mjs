@@ -1,6 +1,6 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedUpTo, latchActive, latchSuppressed, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, rekeyLatches, firedUpTo, latchActive, latchSuppressed, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
@@ -296,16 +296,21 @@ eq(latchSuppressed(dontE(1, ' 5'), REC1, 16), false, '...and lets it back in pas
 eq(latchSuppressed(dontE(1, ' 0'), REC1, 11), false, 'a duration of 0 is over the next turn');
 eq(latchSuppressed(keepE(1), REC1, 10), false, 'the other latch is not this one');
 
-// Deleting a book prunes its latch keys from the open chat's record; the undo puts them back, so the
-// prune has to hand back what it removed rather than only what it kept.
-eqDeep(partitionLatches(REC, ['W']),
-    { kept: { [`X${US}3`]: 25 }, dropped: { [`W${US}1`]: 10, [`W${US}2`]: 40 } },
-    'a deleted book\'s keys are separated from the rest, firing turns intact');
-eqDeep(partitionLatches(REC, ['W', 'X']), { kept: {}, dropped: REC }, 'several books at once');
-eqDeep(partitionLatches({ [`W${US}1`]: 10 }, ['X']), { kept: { [`W${US}1`]: 10 }, dropped: {} },
-    'a book with no latches drops nothing');
-eqDeep(partitionLatches({}, ['W']), { kept: {}, dropped: {} }, 'an empty record');
-eqDeep(partitionLatches(null, ['W']), { kept: {}, dropped: {} }, 'an absent record is not a crash');
+// A latch record follows its entry: a delete drops the keys and hands them back for the undo, a rename or a new uid moves them.
+const dropBooks = names => k => (names.includes(latchBook(k)) ? null : undefined);
+eqDeep(rekeyLatches(REC, dropBooks(['W'])),
+    { fired: { [`X${US}3`]: 25 }, dropped: { [`W${US}1`]: 10, [`W${US}2`]: 40 } },
+    'a deleted book\'s keys are dropped and handed back, firing turns intact');
+eqDeep(rekeyLatches(REC, dropBooks(['W', 'X'])), { fired: {}, dropped: REC }, 'several books at once');
+eq(rekeyLatches({ [`W${US}1`]: 10 }, dropBooks(['X'])), null, 'a book with no latches changes nothing');
+eq(rekeyLatches({}, dropBooks(['W'])), null, 'an empty record');
+eq(rekeyLatches(null, dropBooks(['W'])), null, 'an absent record is not a crash');
+eqDeep(rekeyLatches(REC, k => (latchBook(k) === 'W' ? `V${k.slice(1)}` : undefined)),
+    { fired: { [`X${US}3`]: 25, [`V${US}1`]: 10, [`V${US}2`]: 40 }, dropped: {} }, 'a renamed book\'s keys move with it');
+eqDeep(rekeyLatches(REC, k => ({ [`W${US}1`]: `W${US}2`, [`W${US}2`]: `W${US}1` })[k]),
+    { fired: { [`X${US}3`]: 25, [`W${US}2`]: 10, [`W${US}1`]: 40 }, dropped: {} }, 'two entries that swap uids swap records');
+eqDeep(rekeyLatches(REC, k => (k === `W${US}1` ? `W${US}2` : undefined)),
+    { fired: { [`X${US}3`]: 25, [`W${US}2`]: 10 }, dropped: { [`W${US}2`]: 40 } }, 'a moved record displaces a stale one at its target');
 
 // Offline scene re-derivation cannot model the gates that read the chat's shape — an assistant/user split,
 // message 0's swipe_id, the persona, the latch record — because a capture stores the chat as one joined

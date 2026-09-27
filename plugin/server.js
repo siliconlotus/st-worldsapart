@@ -19,7 +19,7 @@ import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-v
 import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
-import { countChatHits, dropTags, setBoundaryMode } from './matcher.mjs';
+import { WA_METADATA_KEY, countChatHits, dropTags, setBoundaryMode } from './matcher.mjs';
 import { setMacros } from './smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
@@ -306,36 +306,52 @@ export async function init(router) {
     /** `[{ dir, file, world_info, size }]` for EVERY chat, `world_info` null when line 0 names no book; line 0 is all
      *  that is read (P1). Every chat, not only the bound ones: a book attached through the character or globally
      *  reaches chats whose own metadata names nothing. */
+    /** A chat file's line-0 metadata, null when unreadable; stops at line 0. */
+    const chatMetadataOf = full => new Promise(resolve => {
+        const stream = fs.createReadStream(full);
+        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+        let done = false;
+        // destroy, not just rl.close(): close only pauses the stream, and a stream paused at line 0 never autocloses its fd.
+        const finish = v => { if (!done) { done = true; rl.close(); stream.destroy(); resolve(v); } };
+        rl.on('line', line => { try { finish(JSON.parse(line)?.chat_metadata ?? null); } catch { finish(null); } });
+        rl.on('close', () => finish(null));
+        rl.on('error', () => finish(null));
+    });
+    /** A chat's binding and, only on a chat that holds one, `fired`, the WA latch record. */
+    const bindingOf = meta => {
+        const fired = meta?.[WA_METADATA_KEY]?.fired;
+        return { world_info: meta?.world_info ? String(meta.world_info) : null, ...(fired && typeof fired === 'object' ? { fired } : {}) };
+    };
+
+    // `bindings` are character chats, one per file under its character's folder; `groups` are group chats, by chat id.
     router.post('/chat-bindings', async (request, response) => {
         try {
             const root = request.user.directories.chats;
-            if (!fs.existsSync(root)) return response.send({ bindings: [], chats: 0 });
-            const bindings = [];
+            const bindings = [], groups = [];
             let chats = 0;
-            for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
-                if (!dir.isDirectory()) continue;
-                const dirPath = path.join(root, dir.name);
-                for (const file of fs.readdirSync(dirPath)) {
-                    if (!file.endsWith('.jsonl')) continue;
-                    chats++;
-                    const full = path.join(dirPath, file);
-                    const world = await new Promise(resolve => {
-                        const stream = fs.createReadStream(full);
-                        const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-                        let done = false;
-                        // destroy, not just rl.close(): close only pauses the stream, and a stream paused at line 0 never autocloses its fd.
-                        const finish = v => { if (!done) { done = true; rl.close(); stream.destroy(); resolve(v); } };
-                        // Line 0 is the metadata header; stop there.
-                        rl.on('line', line => { try { finish(JSON.parse(line)?.chat_metadata?.world_info ?? null); } catch { finish(null); } });
-                        rl.on('close', () => finish(null));
-                        rl.on('error', () => finish(null));
-                    });
-                    let size = null;
-                    try { size = fs.statSync(full).size; } catch { /* unreadable: listed without a size */ }
-                    bindings.push({ dir: dir.name, file, world_info: world ? String(world) : null, size });
+            if (fs.existsSync(root)) {
+                for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
+                    if (!dir.isDirectory()) continue;
+                    const dirPath = path.join(root, dir.name);
+                    for (const file of fs.readdirSync(dirPath)) {
+                        if (!file.endsWith('.jsonl')) continue;
+                        chats++;
+                        const full = path.join(dirPath, file);
+                        const meta = await chatMetadataOf(full);
+                        let size = null;
+                        try { size = fs.statSync(full).size; } catch { /* unreadable: listed without a size */ }
+                        bindings.push({ dir: dir.name, file, size, ...bindingOf(meta) });
+                    }
                 }
             }
-            return response.send({ bindings, chats });
+            const groupRoot = request.user.directories.groupChats;
+            if (groupRoot && fs.existsSync(groupRoot)) {
+                for (const file of fs.readdirSync(groupRoot)) {
+                    if (!file.endsWith('.jsonl')) continue;
+                    groups.push({ id: file.replace(/\.jsonl$/, ''), ...bindingOf(await chatMetadataOf(path.join(groupRoot, file))) });
+                }
+            }
+            return response.send({ bindings, groups, chats });
         } catch (error) {
             console.error('WorldsApart: /chat-bindings failed', error);
             return response.status(500).send({ error: String(error?.message ?? error) });

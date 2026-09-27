@@ -1073,13 +1073,22 @@ export function latchActive(entry, record, chatLength) {
     return n === null || Number(chatLength) <= Number(at) + n;   // `=== null`, not falsy: a duration of 0 expires at once
 }
 
-/** A latch record split by book: `kept` for the record to write back, `dropped` for the delete's undo to
- *  restore. Both halves, because a prune that returns only what it keeps cannot be undone. */
-export function partitionLatches(record, names) {
-    const drop = new Set(Array.isArray(names) ? names : []);
-    const kept = {}, dropped = {};
-    for (const [k, at] of Object.entries(record ?? {})) (drop.has(latchBook(k)) ? dropped : kept)[k] = at;
-    return { kept, dropped };
+/** A latch record with each key `rekey` answers for moved to its answer, or dropped on `null`; `undefined` keeps it. Moves are
+ *  simultaneous, so two entries may swap uids, and a moved record displaces one already at its target. `dropped` is what an undo
+ *  restores. Null when `rekey` changes no key.
+ *  @returns {{fired: object, dropped: object}|null} */
+export function rekeyLatches(record, rekey) {
+    const kept = {}, moved = {}, dropped = {};
+    let changed = false;
+    for (const [k, at] of Object.entries(record ?? {})) {
+        const to = rekey(k);
+        if (to === undefined || to === k) { kept[k] = at; continue; }
+        changed = true;
+        if (to === null) dropped[k] = at; else moved[to] = at;
+    }
+    if (!changed) return null;
+    for (const k of Object.keys(moved)) if (k in kept) { dropped[k] = kept[k]; delete kept[k]; }
+    return { fired: { ...kept, ...moved }, dropped };
 }
 
 /** Entries WA force-activates, judged over WA's own window (`windowFor(depth, entry)` -> segments). Skips disabled,
