@@ -24,7 +24,12 @@ const writeIndex = (dir, rows) => {
 writeIndex(path.join(vectors, 'extras', 'wa_big'), Array.from({ length: 700 }, (_, i) => [i, [1, (i % 7) / 7, (i % 11) / 11]]));
 writeIndex(path.join(vectors, 'extras', 'wa_foreign'), [[1, [1, 0]], [2, [0, 1]]]);
 writeIndex(path.join(vectors, 'extras', 'wa_mixed'), [[1, [1, 0, 0]], [2, [0, 1]], [3, [0, 1, 0]]]);
-const rowsOf = coll => JSON.parse(fs.readFileSync(path.join(vectors, 'extras', coll, 'index.json'), 'utf8')).items.length;
+// Never queried, so never cleaned: an old branch clone still holding another model's rows.
+writeIndex(path.join(vectors, 'extras', 'wa_stale'), [[5000, [1, 0]]]);
+const rowsOf = coll => {
+    const file = path.join(vectors, 'extras', coll, 'index.json');
+    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).items.length : 0;
+};
 writeIndex(path.join(vectors, 'openrouter', 'wa_or', 'openaitext-embedding-3-large'), [[1, [1, 0, 0]]]);
 // Whole seconds, so the mtime survives being set back after the file is rewritten.
 const BIG = path.join(vectors, 'extras', 'wa_big', 'index.json');
@@ -62,6 +67,7 @@ try {
     eq(q.body?.wa_big?.hashes.length, 700, 'topK up to admitCeiling(true) is honoured, not cut at 512');
     eq('wa_foreign' in (q.body ?? {}), false, 'a wholly foreign collection answers nothing');
     eq(rowsOf('wa_foreign'), 0, '...and its rows are dropped, so the next sync re-embeds them');
+    eq(fs.existsSync(path.join(vectors, 'extras', 'wa_foreign')), true, '...leaving the collection directory, which an empty model scope shares');
     eq(rowsOf('wa_mixed'), 2, 'a mixed collection loses only its foreign row');
     eq(q.body?.wa_mixed?.hashes.length, 2, '...and scores the rest in the same query');
 
@@ -78,9 +84,9 @@ try {
     fs.utimesSync(BIG, 1_700_000_000, 1_700_000_000);
     fs.mkdirSync(path.join(vectors, 'extras', 'wa_broken'));
     fs.writeFileSync(path.join(vectors, 'extras', 'wa_broken', 'index.json'), '{');
-    const adopt = await call('/adopt', { collectionId: 'wa_clone', hashes: [1003, 1004, 99999], ...extras });
+    const adopt = await call('/adopt', { collectionId: 'wa_clone', hashes: [1003, 1004, 6000, 99999], ...extras });
     eq(adopt.code, 200, 'an unreadable sibling is skipped, not fatal');
-    eq(adopt.body?.adopted?.sort().join(','), '1003,1004', 'adopt reads a cached sibling from the cache, not the disk');
+    eq(adopt.body?.adopted?.sort().join(','), '1003,1004', 'adopt reads a cached sibling from the cache, not the disk, and skips rows not of the query dimension');
     eq(fs.existsSync(path.join(vectors, 'extras', 'wa_clone', 'index.json')), true, '...into the clone\'s collection');
 
     const scan = await call('/scan-chats', { keys: ['a'], chats: [{ dir: 'd', file: 'f' }], wordBoundary: 'strict' });

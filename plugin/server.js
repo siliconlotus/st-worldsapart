@@ -50,6 +50,9 @@ const MEAN_CACHE_MAX = 16;
 const ADOPT_SIBLINGS_MAX = 32;
 const CHAT_READS_MAX = 16;
 const meanCache = new Map();
+/** The query dimension last seen per model directory, by scopeKey; /adopt copies only rows of it. */
+const queryDims = new Map();
+const scopeKey = (directories, source, model) => `${path.join(directories.vectors, sanitize(String(source)))}\u001f${sanitize(String(model ?? ''))}`;
 
 const openAiish = (q, urlOverride = null) => getOpenAIVector(q.text, q.source, q.directories, String(q.s.model), urlOverride);
 // Vector Storage embeds these in the browser; thrown so the client falls back.
@@ -172,20 +175,24 @@ async function readCentered(indexPath, mtimeMs, name) {
     return { items, mean };
 }
 
-/** Deletes the rows whose vector is not `dim` long, which sync cannot replace since a hash does not carry the model;
- *  the next sync re-embeds them. Returns the index as reloaded, or `loaded` when every row fits. */
+/** Deletes the rows whose vector is not `dim` long, so the next sync re-embeds them. Returns the index as reloaded, or
+ *  `loaded` when every row fits. */
 async function dropForeignRows(indexPath, name, loaded, dim) {
     if (loaded.checkedDim === dim) return loaded;
     const foreign = loaded.items.filter(it => rowDim(it?.vector) !== dim);
     if (!foreign.length) { loaded.checkedDim = dim; return loaded; }
-    const index = new LocalIndex(indexPath);
-    await index.beginUpdate();
-    for (const it of foreign) await index.deleteItem(it.id);
-    await index.endUpdate();
+    if (foreign.length === loaded.items.length) {
+        // The file, not vectra's deleteIndex: that removes the folder, which under an empty model scope is the collection dir.
+        await fs.promises.rm(path.join(indexPath, 'index.json'), { force: true });
+    } else {
+        const index = new LocalIndex(indexPath);
+        await index.beginUpdate();
+        for (const it of foreign) await index.deleteItem(it.id);
+        await index.endUpdate();
+    }
     console.warn(`[WorldsApart] ${name}: dropped ${foreign.length} of ${loaded.items.length} chunks that are not ${dim}-dimensional like the query; the next sync re-embeds them`);
-    const reloaded = await loadCentered(indexPath, name);
-    if (reloaded) reloaded.checkedDim = dim;
-    return reloaded;
+    // Not marked checked: a write racing the delete is checked by the next query.
+    return loadCentered(indexPath, name);
 }
 
 export async function init(router) {
@@ -221,6 +228,7 @@ export async function init(router) {
             const loadedAll = await loading;
             // No query vector is the provider's failure: scoring throws it, and nothing is dropped.
             const dim = rowDim(queryVector);
+            if (dim) queryDims.set(scopeKey(request.user.directories, source, settings.model), dim);
 
             for (let i = 0; i < collectionIds.length; i++) {
                 const collectionId = collectionIds[i];
@@ -422,6 +430,8 @@ export async function init(router) {
             const sourceDir = path.join(dirs.vectors, sanitize(String(source)));
             const wanted = new Set(hashes.map(Number));
             const found = new Map();
+            // Unknown until this model directory has been queried since startup; then any vector is taken.
+            const dim = queryDims.get(scopeKey(dirs, source, model));
             // getIndexPath per sibling, not a fixed depth: an empty model scope (llamacpp, extras) puts index.json in the collection dir itself.
             // Newest first and capped: each sibling not in meanCache costs a whole index.json parse.
             const siblings = (fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : [])
@@ -448,7 +458,7 @@ export async function init(router) {
                 }
                 for (const it of items) {
                     const h = Number(it.metadata?.hash);
-                    if (wanted.has(h) && !found.has(h) && rowDim(it.vector)) found.set(h, it);
+                    if (wanted.has(h) && !found.has(h) && rowDim(it.vector) && (!dim || rowDim(it.vector) === dim)) found.set(h, it);
                 }
             }
             if (found.size) {
