@@ -870,21 +870,24 @@ async function selectAndActivate(chat, token) {
 /** How long a newcomer waits on a run that has armed but not finished its scan. Past it, the run is taken to be blocked on
  *  the newcomer itself — an interceptor after WA's awaiting a generation — and the newcomer supersedes it. */
 const RUN_WAIT_MS = 15_000;
+/** How long a newcomer waits for a run to arm: a hang detector past the longest retrieval a first sync can take. */
+const ARM_WAIT_MS = 600_000;
 
 /** The WA run in progress, from a generation's interceptor to its armed scan's last loop: `{ token, armed, done }`. */
 let currentRun = null;
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 
-/** Waits out the run in progress, then starts one and returns its token. Only a run still unfinished RUN_WAIT_MS after
- *  arming is superseded. */
+/** Waits out the run in progress, then starts one and returns its token. A run not armed within ARM_WAIT_MS, or still
+ *  unfinished RUN_WAIT_MS after arming, is superseded. */
 async function takeRun() {
+    const after = ms => new Promise(r => setTimeout(r, ms));
     while (currentRun) {
         const prior = currentRun;
-        await prior.armed.promise;
-        const finished = await Promise.race([prior.done.promise, new Promise(r => setTimeout(r, RUN_WAIT_MS))]);
+        const armed = await Promise.race([prior.armed.promise.then(() => true), after(ARM_WAIT_MS)]);
+        const finished = armed && await Promise.race([prior.done.promise, after(RUN_WAIT_MS)]);
         if (finished || currentRun !== prior) continue;
-        console.warn(`WorldsApart: the previous generation had not finished its World Info scan ${RUN_WAIT_MS / 1000} s after WA armed it — superseding it`);
+        console.warn(`WorldsApart: the previous generation had not ${armed ? `finished its World Info scan ${RUN_WAIT_MS / 1000} s after WA armed it` : `armed within ${ARM_WAIT_MS / 1000} s`} — superseding it`);
         toastr.warning(t`A new generation started while the previous one was still scanning World Info. WorldsApart moved to the new one, and the previous one fell back to SillyTavern's own World Info.`, 'WorldsApart', { timeOut: 15000 });
         break;
     }
@@ -950,6 +953,9 @@ function applyReverseDepth(args) {
 function onEntriesLoaded(loaded) {
     if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
+
+    // Core's scan returns before any WORLDINFO_SCAN_DONE when it loads no entries, so the run it belongs to ends here.
+    if (!entries.length && runState.waOwnsScan && !runState.generationIsDryRun) { endRun(runState.armedToken); runState.waOwnsScan = false; }
 
     showExemptCount(entries);
 
@@ -2513,7 +2519,10 @@ async function initBody() {
     // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at
     // GENERATION_ENDED, so a between-scans getSortedEntries escapes the blanking.
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, (args) => {
-        if (isLastLoop(args)) runState.waOwnsScan = false;
+        if (!isLastLoop(args)) return;
+        // Whichever gate onScanDone returned at: a run whose scan was not ranked still ends with it.
+        if (runState.waOwnsScan && !runState.generationIsDryRun && !runState.inCoreProbe) endRun(runState.armedToken);
+        runState.waOwnsScan = false;
     });
 
     if (settings().enabled) renderDeliveryPanel(runState.lastPromptOrder);
