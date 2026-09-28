@@ -139,12 +139,12 @@ const freshEntry = (indexPath, { mtimeMs, size }) => {
     return cached && cached.mtimeMs === mtimeMs && cached.size === size ? cached : undefined;
 };
 
-/** An index's items and corpus mean, null when it has none; cached per path. */
-function loadCentered(indexPath) {
+/** An index's items and corpus mean, null when it has none; cached per path. `name` labels the log. */
+function loadCentered(indexPath, name) {
     const stat = statIndex(indexPath);
     let entry = freshEntry(indexPath, stat);
     if (!entry) {
-        entry = { ...stat, loaded: readCentered(indexPath, stat.mtimeMs) };
+        entry = { ...stat, loaded: readCentered(indexPath, stat.mtimeMs, name) };
         entry.loaded.catch(() => { if (meanCache.get(indexPath) === entry) meanCache.delete(indexPath); });
     }
     meanCache.delete(indexPath);   // delete before set: set() on an existing key keeps its old position, so the sweep would evict a just-refreshed path first
@@ -153,7 +153,7 @@ function loadCentered(indexPath) {
     return entry.loaded;
 }
 
-async function readCentered(indexPath, mtimeMs) {
+async function readCentered(indexPath, mtimeMs, name) {
     const index = new LocalIndex(indexPath);
 
     if (!mtimeMs || !await index.isIndexCreated()) {
@@ -167,14 +167,25 @@ async function readCentered(indexPath, mtimeMs) {
     }
 
     const mean = corpusMean(items);
-    // Against mean.length, not rowDim alone: corpusMean drops a row of another dimension, which still has a length.
-    const usable = mean.length ? items.filter(it => rowDim(it?.vector) === mean.length).length : 0;
-    if (usable < items.length) console.warn(`[WorldsApart] skipped ${items.length - usable} of ${items.length} chunks with a missing or foreign-dimension vector — re-sync the book, or delete the collection if it was embedded under another model`);
-    // The wa_ segment, not a fixed depth: an empty model scope puts index.json in the collection dir itself.
-    const name = indexPath.split(path.sep).findLast(seg => seg.startsWith('wa_')) ?? indexPath;
-    console.log(`[WorldsApart] indexed ${name}: ${usable} chunks, mean norm ${norm(mean).toFixed(4)}`);
+    console.log(`[WorldsApart] indexed ${name}: ${items.length} chunks, mean norm ${norm(mean).toFixed(4)}`);
 
     return { items, mean };
+}
+
+/** Deletes the rows whose vector is not `dim` long, which sync cannot replace since a hash does not carry the model;
+ *  the next sync re-embeds them. Returns the index as reloaded, or `loaded` when every row fits. */
+async function dropForeignRows(indexPath, name, loaded, dim) {
+    if (loaded.checkedDim === dim) return loaded;
+    const foreign = loaded.items.filter(it => rowDim(it?.vector) !== dim);
+    if (!foreign.length) { loaded.checkedDim = dim; return loaded; }
+    const index = new LocalIndex(indexPath);
+    await index.beginUpdate();
+    for (const it of foreign) await index.deleteItem(it.id);
+    await index.endUpdate();
+    console.warn(`[WorldsApart] ${name}: dropped ${foreign.length} of ${loaded.items.length} chunks that are not ${dim}-dimensional like the query; the next sync re-embeds them`);
+    const reloaded = await loadCentered(indexPath, name);
+    if (reloaded) reloaded.checkedDim = dim;
+    return reloaded;
 }
 
 export async function init(router) {
@@ -202,34 +213,26 @@ export async function init(router) {
             // `{ collectionId: [uid, ...] }` defining each collection's centroid; absent means every chunk, which is what an older client sends.
             const centroidUids = request.body.centroidUids ?? {};
 
-            const loading = Promise.all(collectionIds.map(collectionId =>
-                loadCentered(getIndexPath(request.user.directories, String(collectionId), String(source), settings.model))));
+            const indexPaths = collectionIds.map(collectionId => getIndexPath(request.user.directories, String(collectionId), String(source), settings.model));
+            const loading = Promise.all(indexPaths.map((indexPath, i) => loadCentered(indexPath, String(collectionIds[i]))));
             loading.catch(() => {});   // surfaced by the await below; without this an embed failure leaves an unhandled rejection
             const queryVector = await embed(String(source), settings, String(searchText), request.user.directories, request);
             const results = [];
             const loadedAll = await loading;
-            let scored = 0, foreign = 0;
+            // No query vector is the provider's failure: scoring throws it, and nothing is dropped.
+            const dim = rowDim(queryVector);
 
             for (let i = 0; i < collectionIds.length; i++) {
                 const collectionId = collectionIds[i];
-                const loaded = loadedAll[i];
+                const loaded = dim && loadedAll[i] ? await dropForeignRows(indexPaths[i], String(collectionId), loadedAll[i], dim) : loadedAll[i];
 
                 if (!loaded) {
                     continue;
                 }
 
                 const mean = centroidFor(loaded, centroidUids[String(collectionId)]);
-                if (mean.length && rowDim(queryVector) !== mean.length) {
-                    foreign++;
-                    if (!loaded.warnedDim) console.warn(`[WorldsApart] ${collectionId} skipped: its vectors have ${mean.length} dimensions, the query ${rowDim(queryVector) || 'none'} — re-sync the book`);
-                    loaded.warnedDim = true;
-                    continue;
-                }
                 results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
-                scored++;
             }
-            // Every collection foreign is the provider's failure, not one collection's.
-            if (foreign && !scored) throw new Error(`the query has ${rowDim(queryVector) || 'no'} dimensions, matching no attached collection`);
 
             // Pool to entries FIRST, then cut, so topK counts entries.
             return response.send(selectTopK(poolEntries(results), topK));

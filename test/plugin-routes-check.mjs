@@ -23,12 +23,19 @@ const writeIndex = (dir, rows) => {
 };
 writeIndex(path.join(vectors, 'extras', 'wa_big'), Array.from({ length: 700 }, (_, i) => [i, [1, (i % 7) / 7, (i % 11) / 11]]));
 writeIndex(path.join(vectors, 'extras', 'wa_foreign'), [[1, [1, 0]], [2, [0, 1]]]);
+writeIndex(path.join(vectors, 'extras', 'wa_mixed'), [[1, [1, 0, 0]], [2, [0, 1]], [3, [0, 1, 0]]]);
+const rowsOf = coll => JSON.parse(fs.readFileSync(path.join(vectors, 'extras', coll, 'index.json'), 'utf8')).items.length;
 writeIndex(path.join(vectors, 'openrouter', 'wa_or', 'openaitext-embedding-3-large'), [[1, [1, 0, 0]]]);
 // Whole seconds, so the mtime survives being set back after the file is rewritten.
 const BIG = path.join(vectors, 'extras', 'wa_big', 'index.json');
 fs.utimesSync(BIG, 1_700_000_000, 1_700_000_000);
 
-const embedder = http.createServer((req, res) => { req.resume(); req.on('end', () => res.end(JSON.stringify({ embedding: [1, 0.5, 0.2] }))); });
+// NOVEC stands for a provider that answers without a vector.
+const embedder = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', c => (body += c));
+    req.on('end', () => res.end(JSON.stringify({ embedding: body.includes('NOVEC') ? [] : [1, 0.5, 0.2] })));
+});
 await new Promise(r => embedder.listen(0, '127.0.0.1', r));
 const extrasUrl = `http://127.0.0.1:${embedder.address().port}`;
 
@@ -46,11 +53,17 @@ try {
     };
     const extras = { source: 'extras', sourceSettings: { extrasUrl, extrasKey: '' } };
 
-    const q = await call('/query-multi', { collectionIds: ['wa_big', 'wa_foreign'], searchText: 'x', topK: 1000, ...extras });
+    const novec = await call('/query-multi', { collectionIds: ['wa_big', 'wa_foreign'], searchText: 'NOVEC', ...extras });
+    eq(novec.code, 500, 'a provider answering without a vector fails the query');
+    eq(rowsOf('wa_foreign'), 2, '...and drops nothing');
+
+    const q = await call('/query-multi', { collectionIds: ['wa_big', 'wa_foreign', 'wa_mixed'], searchText: 'x', topK: 1000, ...extras });
     eq(q.code, 200, 'a foreign-dimension collection does not fail the query');
     eq(q.body?.wa_big?.hashes.length, 700, 'topK up to admitCeiling(true) is honoured, not cut at 512');
-    eq('wa_foreign' in (q.body ?? {}), false, '...and the foreign collection is skipped');
-    eq((await call('/query-multi', { collectionIds: ['wa_foreign'], searchText: 'x', ...extras })).code, 500, 'every collection failing still fails the query');
+    eq('wa_foreign' in (q.body ?? {}), false, 'a wholly foreign collection answers nothing');
+    eq(rowsOf('wa_foreign'), 0, '...and its rows are dropped, so the next sync re-embeds them');
+    eq(rowsOf('wa_mixed'), 2, 'a mixed collection loses only its foreign row');
+    eq(q.body?.wa_mixed?.hashes.length, 2, '...and scores the rest in the same query');
 
     const cols = await call('/collections', extras);
     const byId = Object.fromEntries((cols.body ?? []).map(c => [c.collectionId, c]));
