@@ -14,7 +14,7 @@ import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { chatUser, macroMap, validateSmartKey, withMacros } from '../extension/smartkeys.mjs';
+import { chatUser, macroMap, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
@@ -219,13 +219,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Every term is judged below, so an edited row drops the false the edit forced.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
        
-        // The audit keeps the map it was built under for its lazy verdicts.
-        scan = withMacros(macrosOf(), () => buildKeyPruneScan(data, studioOpts, ignoreSet, {
+        scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             t, translate,
             matchWindow: settings().matchWindow,
+            macros: macrosOf(), boundary: settings().wordBoundary,
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
             chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs, unit: chatUnit } : undefined,
-        }));
+        });
     };
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); refreshTabStatus(); };
     /** Every key in the book, trimmed, once each — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
@@ -2290,13 +2290,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 let messages = 0, unit;
                 const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
                 for (const name of members) {
-                    const r = withMacros({ ...chatMap, '{{char}}': name }, () => countChatHits(keys, got, { ...unitOpts, hitIndex: true }));
+                    const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true, macros: { ...chatMap, '{{char}}': name }, boundary: settings().wordBoundary });
                     messages = r.messages; unit = r.unit;
                     union(by, r.hitsBy); union(typedBy, r.typedBy);
                 }
                 add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
             } else {
-                add(withMacros(chatMap, () => countChatHits(keys, got, unitOpts)));
+                add(countChatHits(keys, got, { ...unitOpts, macros: chatMap, boundary: settings().wordBoundary }));
             }
             via = via ? 'server + browser' : 'browser';
         }
@@ -2747,16 +2747,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         labRunSource = { label, load };
         if (!keep) labFlagOverride = {};
         labRunEntries = await load();
-        // After the await: the map is set only for the synchronous run, and a parts run sets each part's itself.
-        const parts = labPartsFor();
-        const run = underLabMap(parts, () => runBook(labRunEntries, labHay, {
+        const run = runBook(labRunEntries, labHay, {
             matchWindow: labWindow,
             context: 30,
             override: labFlagOverride,
-            parts,
+            parts: labPartsFor(),
+            macros: labMacroMap(), boundary: settings().wordBoundary,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
             skipVectorized: labSkipVector,
-        }));
+        });
         labRun = { label, ...run };
         toastr.info(run.scanned === 1 ? t`${run.entries.length} of ${run.scanned} keyed entry matched` : t`${run.entries.length} of ${run.scanned} keyed entries matched`, t`Key Lab`);
         labRepaint?.();
@@ -2967,14 +2966,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const labMacroMap = () => Object.fromEntries(Object.entries(labBaseMap()).map(([tok, v]) => [tok, Object.hasOwn(labMacros, tok) ? labMacros[tok] : Object.hasOwn(labChatMacros, tok) ? labChatMacros[tok] : v]));
     /** The loaded chats as parts for the model, each under its own values with the Lab's overrides on top; null without a load. */
     const labPartsFor = () => labParts?.map(p => ({ ...p, macros: { ...labBaseMap(), ...p.macros, ...labMacros } })) ?? null;
-    /** `fn()` under the Lab's map, or as is for a parts run, whose parts carry their own. */
-    const underLabMap = (parts, fn) => (parts ? fn() : withMacros(labMacroMap(), fn));
 
     /** The Lab's result plus the colour to draw it in, from whatever the panes hold now. */
     const scanLab = () => {
-        const parts = labPartsFor();
-        const r = underLabMap(parts, () => labScan({
-            parts,
+        const r = labScan({
+            parts: labPartsFor(),
+            macros: labMacroMap(), boundary: settings().wordBoundary,
             hay: labHay,
             keys: labKeys,
             sec: labSec,
@@ -2986,7 +2983,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             run: labRun,
             override: labFlagOverride,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
-        }));
+        });
         const ink = (sp, a) => labInk(Math.max(0, r.keys.indexOf(sp.key)), a);
         for (const row of r.rows) row.color = ink({ key: row.key });
         return { ...r, ink };

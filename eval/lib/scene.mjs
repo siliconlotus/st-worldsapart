@@ -11,7 +11,7 @@ import { scoreCollection, poolEntries, selectTopK, admitCeiling } from '../../pl
 import { corpusMean, centeredCosineScores } from '../../plugin/vector.mjs';
 import * as entity from '../../extension/entity.mjs';
 import * as matcher from '../../extension/matcher.mjs';
-import { setMacros } from '../../extension/smartkeys.mjs';
+import { createScanScope } from '../../extension/smartkeys.mjs';
 import { hasPromoteDecorator } from '../../extension/matcher.mjs';
 import { isDurable, openBundle } from '../../extension/grading.mjs';
 import * as selection from '../../extension/selection.mjs';
@@ -111,15 +111,18 @@ export function haystackFor(S, P, over = {}) {
     return entry => windowFor(matcher.scanDepthFor(entry, over.depth ?? S.depth), entry);
 }
 
+/** The match scope of a parameter set: its macros and wordBoundary, and the caches built under them, one per `P`. */
+const scopes = new WeakMap();
+const scopeOf = P => { let s = scopes.get(P); if (!s) scopes.set(P, s = createScanScope({ macros: P.macros, boundary: P.wordBoundary })); return s; };
+
 /** Key hits for one entry against a scan window — the same call onScanDone makes. */
 export function whyFor(entry, scanText, P) {
-    matcher.setBoundaryMode(P.wordBoundary);
-    setMacros(P.macros);
     const keys = scoringKeys(entry, P);
     if (!keys.length || !scanText) return [];
-    const { hits } = matcher.keywordScore(entry, scanText, keys, { k1: P.K1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords });
+    const scope = scopeOf(P);
+    const { hits } = matcher.keywordScore(entry, scanText, keys, { k1: P.K1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, scope });
     return hits.slice(0, 4).map(h => {
-        const contexts = matcher.keyExcerpts(h.key, scanText, entry.caseSensitive, entry.matchWholeWords);
+        const contexts = matcher.keyExcerpts(h.key, scanText, entry.caseSensitive, entry.matchWholeWords, 28, 20, scope);
         return { key: h.key, count: h.count, excerpt: contexts[0] ?? null, contexts };
     });
 }
@@ -219,9 +222,9 @@ export const sceneParams = (S, overrides = {}) => ({
     caseSensitive: false, wholeWords: false, includeNames: true,
     // How the haystack is segmented for countKey; a document that records it overrides this.
     matchWindow: 'scan',
-    // What counts as inside a word when wholeWords is on (shipped 'strict'). Matcher module state: pushed through setBoundaryMode per call.
+    // What counts as inside a word when wholeWords is on (shipped 'strict'). With `macros`, the match scope every key here is matched in.
     wordBoundary: 'strict',
-    macros: S.macros ?? {},   // the map the capture recorded; pushed with the boundary mode wherever a key is matched
+    macros: S.macros ?? {},   // the map the capture recorded
     // Occurrences -> score (matcher.mjs repeatCurveOf). 'bm25', not the shipped 'presence-log': captures predating the setting must reproduce.
     repeatCurve: 'bm25', repeatR: 1,
     meanCentered: true,
@@ -481,12 +484,9 @@ export const scoringKeys = (e, P) => {
     return P.dropKeys ? ks.filter(k => !P.dropKeys.includes(k)) : ks;
 };
 
-/** Keyword score via the shared matcher.keywordScore; the boundary mode is pushed per call, since arms hold their scorers across each other's runs. */
-export const makeKeywordResult = P => (e, text, k1) => {
-    matcher.setBoundaryMode(P.wordBoundary);
-    setMacros(P.macros);
-    return matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, repeatCurve: P.repeatCurve, repeatR: P.repeatR });
-};
+/** Keyword score via the shared matcher.keywordScore, in the arm's own scope. */
+export const makeKeywordResult = P => (e, text, k1) =>
+    matcher.keywordScore(e, text, scoringKeys(e, P), { k1, caseSensitiveDefault: P.caseSensitive, wholeWordsDefault: P.wholeWords, repeatCurve: P.repeatCurve, repeatR: P.repeatR, scope: scopeOf(P) });
 export const makeKeywordScore = P => { const result = makeKeywordResult(P); return (e, text, k1) => result(e, text, k1).score; };
 
 /**

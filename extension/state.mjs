@@ -22,7 +22,7 @@ export const defaultSettings = {
     presentationTiered: false, // group prompt order into tiers (constant → sticky → …) before the base sort
     dropUnavailable: true, // hide memory entries whose STMB_end postdates the current message (relevance.mjs postDates)
     matchWindow: 'paragraph', // 'scan' | 'message' | 'paragraph' — the unit a key must match within; 'scan' is core's
-    wordBoundary: 'strict', // 'permissive' | 'strict' (also hyphen and apostrophes); read through matcher.mjs setBoundaryMode()
+    wordBoundary: 'strict', // 'permissive' | 'strict' (also hyphen and apostrophes); the match scope's boundary (smartkeys.mjs createScanScope)
     raterId: '', // UUIDv4 a typed grade is signed as, generated on first use
     language: 'en', // which language pack the suggester and audit read (lang.mjs); 'en' is bundled, others fetch once
 
@@ -83,6 +83,7 @@ export const runState = {
     lastPromptOrder: [],          // the last scan's prompt order, post-cut
     lastQuery: '',                // last retrieval query text
     lastMacros: {},               // the macro map the last scan ran under, `{{token}}` -> value; a capture records it
+    matchScope: null,             // the runtime's match scope (createScanScope): the scan's macros and wordBoundary, with the caches built under them
     lastQueryChat: [],            // the messages that query was joined from
     scanChat: null,               // the interceptor's chat — core's own scan haystack; SCAN_DONE consumers read this, not the raw chat
     lastScanChat: [],             // scan-eligible messages at capture depth

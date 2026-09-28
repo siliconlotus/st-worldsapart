@@ -2,7 +2,6 @@
 
 import { entryFlags, entryGate, labMessages, labScan, runBook, runSpans, windowTip } from '../extension/lab.mjs';
 import { WI_LOGIC } from '../extension/matcher.mjs';
-import { setMacros } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 
@@ -134,7 +133,6 @@ eq(windowTip(win('short', [{ at: 0, to: 5 }]), { at: 0, to: 5 }), '«short»', '
 
 // --- parts: several chats as one text, each matched under its own macro map, the results merged and offset into the whole
 {
-    setMacros({});
     const a = 'Alice waved.', b = 'Bob waved.';
     const hay = `${a}\n\n${b}`;
     const parts = [{ text: a, at: 0, macros: { '{{char}}': 'Alice' } }, { text: b, at: a.length + 2, macros: { '{{char}}': 'Bob' } }];

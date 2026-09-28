@@ -4,7 +4,7 @@ import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
 import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { isConstant } from './layout.mjs';
-import { buildAst, cachedCount, createScanScope, getMacros, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey, withMacros } from './smartkeys.mjs';
+import { buildAst, cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; common word still applies. */
@@ -70,6 +70,7 @@ const commonTerm = (n, isLoose) => { const v = String(n.value ?? '').trim(); ret
 function smartPaths(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return [];
     let paths;
+    // No macros: a probe keeps its tokens, so each chat counts it under that chat's own values.
     try { paths = pathsOf(buildAst(String(raw))); } catch { return []; }
     return paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
 }
@@ -94,6 +95,7 @@ const KEY_BOOK_COMMON = 0.45;
  * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
  * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
  * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
+ * @param {object} [macros] `macros` and `boundary` are the match context every verdict is reached under (createScanScope)
  * @returns {{entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
  */
 /** The audit's three severities, by name. The colours they are drawn in belong to the display, and the order to RANK there. */
@@ -131,7 +133,7 @@ export function orthoAlternates(k) {
  *  message, so probing every key would cost more than the scan. */
 export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
-export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain, translate = s => s } = {}) {
+export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain, translate = s => s, macros = {}, boundary = 'strict' } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     // The unit the chat scan counted, named for a chip: what a rate is a rate of.
     const units = { message: t`messages`, paragraph: t`paragraphs`, window: t`scan windows` }[chatScan?.unit] ?? t`messages`;
@@ -167,7 +169,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const keysOf = e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])].map(k => String(k).trim()).filter(Boolean);
     const allKeys = [...new Set(allEntries.flatMap(keysOf))];
     // Its OWN scope: sharing the retrieval scope would leave thousands of keys in the live automaton.
-    const scanScope = createScanScope();
+    const scanScope = createScanScope({ macros, boundary });
     registerKeys(allKeys, scanScope);
     const comboId = (cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0}`;
     const ck = (key, cs, ww) => `${comboId(cs, ww)} ${cs ? key : String(key).toLowerCase()}`;
@@ -250,7 +252,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
      *  scope, so the shared automaton is not rebuilt, and the answer is a verdict rather than "0/0". */
     const onDemand = (key, cs, ww) => {
         const r = { df: 0, total: 0, typed: 0 };
-        const own = createScanScope();
+        const own = createScanScope(scanScope);
         for (const segments of contentSegments) {
             primeScan([key], segments, own);
             let n = 0, typed = 0;
@@ -276,7 +278,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             for (const segments of contentSegments) {
                 for (const seg of segments) {
                     const hay = String(seg).normalize('NFC');   // the form keyExcerpts indexes
-                    for (const { at: start, to: end } of keyExcerpts(needle, seg, cs, true, 0, Infinity)) {
+                    for (const { at: start, to: end } of keyExcerpts(needle, seg, cs, true, 0, Infinity, scanScope)) {
                         let embedded = false;
                         for (let j = start - 1; j >= 0 && NUMRUN.test(hay[j]); j--) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
                         if (!embedded) for (let j = end; j < hay.length && NUMRUN.test(hay[j]); j++) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
@@ -521,13 +523,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         for (const list of dupes.values()) list.sort((p, q) => q.sim - p.sim);
     }
 
-    // Verdicts are computed lazily, so each runs under the map the scan was built under, whatever is in force when it is asked.
-    const builtUnder = getMacros();
-    return {
-        entries, nE, reasonOf, severityOf, effCase, effWhole, dupes,
-        classifyEntry: e => withMacros(builtUnder, () => classifyEntry(e)),
-        unusableKeysOf: e => withMacros(builtUnder, () => unusableKeysOf(e)),
-    };
+    return { entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf };
 }
 
 /** Every entry, every mode. */

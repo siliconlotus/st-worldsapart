@@ -1,11 +1,11 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
-import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey, splitKeys } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, getMacros, setMacros, macroTokens, macroMap, withMacros } from '../extension/smartkeys.mjs';
+import { countChatHits, countKey, keywordScore, repeatCurveOf, isRegexKey, splitKeys } from '../extension/matcher.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, macroTokens, macroMap } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
-const matches = (key, text) => countKey(key, text, false, false) > 0;
+const matches = (key, text, scope) => countKey(key, text, false, false, scope) > 0;
 
 // Spec acceptance table.
 eq(matches('moon mission', 'Astronaut on a mission to the moon.'), false, 'legacy key: not contiguous, no match');
@@ -85,10 +85,8 @@ eq(matches('? meeting "10:30"', 'the meeting is at 10:30'), true, 'literal colon
 eq(matches('? "10:30"', 'at 10 30 sharp'), false, 'quoted colon term is literal, not split');
 eq(matches('? =c++', 'some c++ code'), true, '= boundary handles punctuation-edged terms (no \\b)');
 eq(matches('? =cat', 'the category'), false, '= boundary still rejects substrings');
-setBoundaryMode('permissive');
-eq(matches('? =Joe', "that is Joe's coat"), true, 'permissive: = treats an apostrophe as a boundary');
-setBoundaryMode('strict');
-eq(matches('? =Joe', "that is Joe's coat"), false, 'strict: = treats it as inside the word, like a plain key');
+eq(matches('? =Joe', "that is Joe's coat", createScanScope({ boundary: 'permissive' })), true, 'permissive: = treats an apostrophe as a boundary');
+eq(matches('? =Joe', "that is Joe's coat", createScanScope({ boundary: 'strict' })), false, 'strict: = treats it as inside the word, like a plain key');
 eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same answer the plain key gives');
 // --- regex TERMS ------------------------------------------------------------------------------------
 {
@@ -593,11 +591,8 @@ console.log('ok   the docs/smartkeys.md worked example holds');
     eq(c('? (=cat (dog | wolf))~1', 'the category and wolf'), 0, '...so = still refuses the substring');
     eq(c('? (fire pipe)~0', 'firetruck pipe'), 1, 'a span is widened to its word before slack is counted: a substring hit is as near as its word');
     eq(c('? (fire -drill)~0', 'firetruck drill'), 0, '...and the pad is measured from the word too');
-    setBoundaryMode('strict');
-    eq(c('? (copper pipe)~1', 'copper well-known pipe'), 1, 'slack counts words off the boundary class: strict reads well-known as one');
-    setBoundaryMode('permissive');
-    eq(c('? (copper pipe)~1', 'copper well-known pipe'), 0, '...and permissive as two');
-    setBoundaryMode('strict');
+    eq(countKey('? (copper pipe)~1', 'copper well-known pipe', false, false, createScanScope({ boundary: 'strict' })), 1, 'slack counts words off the boundary class: strict reads well-known as one');
+    eq(countKey('? (copper pipe)~1', 'copper well-known pipe', false, false, createScanScope({ boundary: 'permissive' })), 0, '...and permissive as two');
     const cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
     eq(keywordScore({ key: ['? (copper pipe)~1'] }, 'copper pipe', undefined, cfg).score, 1, 'a proximity group scores as one thing');
     eq(keywordScore({ key: ['? copper pipe'] }, 'copper pipe', undefined, cfg).score, 2, '...where the conjunction is two');
@@ -619,12 +614,13 @@ console.log('ok   the docs/smartkeys.md worked example holds');
 }
 console.log('ok   proximity: (…)~N clusters a group within N words, vetoes over the padded window');
 
-// --- macros: a key's `{{token}}`s expand to DATA at every leaf, under the map setMacros holds -------------------------
+// --- macros: a key's `{{token}}`s expand to DATA at every leaf, under the scope's map ---------------------------------
 {
-    setMacros({ '{{user}}': 'Nick Parsons', '{{char}}': 'Dr. (Doc) Brown', '{{alias}}': 'Nick OR Parsons', '{{empty}}': '' });
+    let M = createScanScope({ macros: { '{{user}}': 'Nick Parsons', '{{char}}': 'Dr. (Doc) Brown', '{{alias}}': 'Nick OR Parsons', '{{empty}}': '' } });
+    const matches = (key, text) => countKey(key, text, false, false, M) > 0;
     eq(matches('? {{user}} sword', 'Parsons handed Nick the sword'), true, 'an unquoted macro is its words as terms: any order, any distance');
     eq(matches('? {{user}} sword', 'Nick drew a sword'), false, '...all of them');
-    eq(countKey('? {{user}}', 'Nick Parsons', false, false), 2, '...each a term, so the name scores its word count');
+    eq(countKey('? {{user}}', 'Nick Parsons', false, false, M), 2, '...each a term, so the name scores its word count');
     eq(matches('? "{{user}}" sword', 'Nick Parsons drew a sword'), true, 'quoted, the name is one phrase');
     eq(matches('? "{{user}}" sword', 'Parsons handed Nick the sword'), false, '...in order');
     eq(matches('? {{char}}', '(Doc) Brown and Dr. arrived'), true, 'a name with syntax characters is data: its words, never a group');
@@ -640,7 +636,7 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     // The expansion is a group, so a macro term takes the modifiers a group takes, in either order.
     eq(matches('? {{user}}~0 sword', 'Parsons, Nick, has a sword'), true, '`~N` on a macro term is the group\'s');
     eq(matches('? {{user}}~0 sword', 'Nick has a Parsons sword'), false);
-    const s = (k, x) => countKey(k, x, false, false);
+    const s = (k, x) => countKey(k, x, false, false, M);
     eq(s('? {{user}}::2 sword', 'Nick Parsons sword'), s('? (Nick Parsons)::2 sword', 'Nick Parsons sword'), 'a weight on a macro term is the group\'s');
     eq(s('? {{user}}~0::2', 'Parsons Nick'), s('? (Nick Parsons)~0::2', 'Parsons Nick'), '...with `~N` first');
     eq(s('? {{user}}::2~0', 'Parsons Nick'), s('? (Nick Parsons)~0::2', 'Parsons Nick'), '...or the weight first');
@@ -670,21 +666,21 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(matches('{{user}}', 'Parsons, Nick'), false);
     eq(matches('? {{nope}} x', '{{nope}} x'), true, 'an unknown token stays as written');
     eq(matches('? {{empty}} sword', 'a sword'), true, 'an empty value contributes no term');
-    setMacros({ '{{path}}': '/dev/null/' });
+    M = createScanScope({ macros: { '{{path}}': '/dev/null/' } });
     eq(matches('{{path}}', 'at /dev/null/ now'), true, 'a plain key whose value looks like a pattern is still a literal');
     eq(matches('{{path}}', 'dev'), false);
-    setMacros({ '{{user}}': 'Kyle Sommers' });
-    eq(matches('? {{user}}', 'Kyle Sommers'), true, 'a changed map is in force at once');
-    eq(matches('? {{user}}', 'Nick Parsons'), false, '...and the old value is gone');
-    setMacros({ '{{user}}': 'Nick Parsons' });
+    M = createScanScope({ macros: { '{{user}}': 'Kyle Sommers' } });
+    eq(matches('? {{user}}', 'Kyle Sommers'), true, 'another scope matches under its own map');
+    eq(matches('? {{user}}', 'Nick Parsons'), false, '...and not the other\'s');
+    M = createScanScope({ macros: { '{{user}}': 'Nick Parsons' } });
     const gated = { key: ['sword'], keysecondary: ['{{user}}'], selectiveLogic: 0 }, cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
-    eq(keywordScore(gated, 'Nick Parsons has a sword', gated.key, cfg).score > 0, true, 'a secondary key expands too');
-    eq(keywordScore(gated, 'Kyle has a sword', gated.key, cfg).score > 0, false);
-    const chat = countChatHits(['{{user}}', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody']);
+    eq(keywordScore(gated, 'Nick Parsons has a sword', gated.key, { ...cfg, scope: M }).score > 0, true, 'a secondary key expands too');
+    eq(keywordScore(gated, 'Kyle has a sword', gated.key, { ...cfg, scope: M }).score > 0, false);
+    const chat = countChatHits(['{{user}}', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody'], { macros: M.macros });
     eq(chat.messagesWith.get('{{user}}'), 1, 'the chat scan counts a plain macro key by its value');
     eq(chat.messagesWith.get('? {{user}}'), 2, '...and a SmartKey by its words');
     // `hitIndex`: which units each key hit, so a caller scanning the same chat under several maps can union them.
-    const idx = countChatHits(['{{user}}', 'nobody', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody'], { hitIndex: true });
+    const idx = countChatHits(['{{user}}', 'nobody', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody'], { hitIndex: true, macros: M.macros });
     eq([...idx.hitsBy.get('{{user}}')].join(), '0', 'a literal key names the unit it hit');
     eq([...idx.hitsBy.get('nobody')].join(), '2', '...each key its own');
     eq([...idx.hitsBy.get('? {{user}}')].join(), '0,1', '...a SmartKey too');
@@ -692,27 +688,22 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(idx.hitsBy.get('{{user}}').size, idx.messagesWith.get('{{user}}'), 'the index agrees with the count');
     eq(macroTokens(['? {{user}} and {{char}}', '{{user}}', 'plain']).join(','), '{{user}},{{char}}', 'the tokens a key list carries, once each');
     eq(JSON.stringify(macroMap(['? {{user}} x'], tok => tok.toUpperCase())), '{"{{user}}":"{{USER}}"}', 'the map is the tokens through the substitution the caller supplies');
-    setMacros({});
-    eq(matches('? {{user}} sword', 'Nick Parsons sword'), false, 'with no map a token is literal text again');
-
-    setMacros({ '{{user}}': 'Nick' });
-    eq(withMacros({ '{{user}}': 'Kyle' }, () => matches('? {{user}}', 'Kyle')), true, 'withMacros runs under its map');
-    eq(getMacros()['{{user}}'], 'Nick', '...and puts the map in force back');
-    // The audit's verdicts are lazy: they must answer under the map the scan was built under, not whatever is in force when asked.
+    eq(countKey('? {{user}} sword', 'Nick Parsons sword', false, false) > 0, false, 'without a scope a token is literal text');
+    // A scope is a context: whatever else is matched meanwhile, and under what map, a scope's answers do not move.
     const book = { entries: { 0: { uid: 0, key: ['? {{user}}'], content: 'Kyle stood watch.' } } };
     const auditOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, ignoreProper: false, minLength: 4 };
-    const audit = withMacros({ '{{user}}': 'Kyle' }, () => buildKeyPruneScan(book, auditOpts, new Set()));
-    eq(audit.classifyEntry(book.entries[0]).length, 0, 'an audit built under Kyle finds the key attested in the book...');
-    eq(getMacros()['{{user}}'], 'Nick', '...asked while Nick is in force...');
-    eq(withMacros({ '{{user}}': 'Nick' }, () => buildKeyPruneScan(book, auditOpts, new Set())).classifyEntry(book.entries[0])[0]?.flag, 'unattested', '...where one built under Nick finds it dead');
-    setMacros({});
+    const audit = buildKeyPruneScan(book, auditOpts, new Set(), { macros: { '{{user}}': 'Kyle' } });
+    eq(countKey('? {{user}}', 'Nick', false, false, createScanScope({ macros: { '{{user}}': 'Nick' } })), 1, 'another context matches meanwhile...');
+    eq(audit.classifyEntry(book.entries[0]).length, 0, '...and an audit built under Kyle still finds the key attested in the book');
+    eq(buildKeyPruneScan(book, auditOpts, new Set(), { macros: { '{{user}}': 'Nick' } }).classifyEntry(book.entries[0])[0]?.flag, 'unattested', '...where one built under Nick finds it dead');
 }
 
 // --- optional terms: a trailing `?` never gates and scores when present, on a term, a phrase, a group or a pattern ------
 {
-    setMacros({ '{{user}}': 'Kyle Parsons' });
+    const M = createScanScope({ macros: { '{{user}}': 'Kyle Parsons' } });
+    const matches = (key, text) => countKey(key, text, false, false, M) > 0;
     const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
-    const s = (k, x) => countKey(k, x, false, false);
+    const s = (k, x) => countKey(k, x, false, false, M);
     eq(matches('? Kyle Parsons?', 'Kyle alone'), true, 'an optional term does not gate');
     eq(s('? Kyle Parsons?', 'Kyle Parsons'), 2, '...and scores when present');
     eq(s('? Kyle Parsons?', 'Kyle'), 1);
@@ -755,7 +746,6 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(codes('? Kyle? Parsons'), '', '...whichever it is');
     eq(codes('? (Kyle OR Nick) Parsons?'), '', '...and a required group does too');
     eq(codes('? NOT water'), 'error:negation-only', 'negation-only keeps its own name');
-    setMacros({});
 }
 
 // --- a flag in front of a group reaches every term in it, as it reaches every word of a macro ------------------------------

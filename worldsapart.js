@@ -26,7 +26,7 @@ import { admitCeiling } from './plugin/scoring.mjs';
 import * as query from './extension/query.mjs';
 import * as entity from './extension/entity.mjs';
 import * as matcher from './extension/matcher.mjs';
-import { macroMap, registerKeys, resetSmartKeys, setMacros } from './extension/smartkeys.mjs';
+import { createScanScope, macroMap, registerKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
 import * as layout from './extension/layout.mjs';
 import * as delivery from './extension/delivery.mjs';
@@ -755,11 +755,15 @@ async function retrieve(chat) {
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
 }
 
-/** The macro map for this scan, `{{token}}` -> value over every key the entries carry, evaluated now: {{char}} moves per speaker in a group. */
+/** Sets this scan's match scope: the macro map over every key the entries carry, evaluated now ({{char}} moves per speaker in a
+ *  group), and the wordBoundary setting. The scope in use is kept, caches and all, while it already holds every value this map
+ *  does: a key expands only its own tokens. */
 function applyMacros(entries) {
     const keys = entries.flatMap(e => [...(e.key ?? []), ...(e.keysecondary ?? []), ...(e.waKeys ?? []), ...(e.waSecondary ?? [])]);
     runState.lastMacros = macroMap(keys, substituteParams);
-    setMacros(runState.lastMacros);
+    const boundary = settings().wordBoundary, held = runState.matchScope;
+    const covers = held && held.boundary === boundary && Object.entries(runState.lastMacros).every(([tok, v]) => held.macros[tok] === v);
+    if (!covers) runState.matchScope = createScanScope({ macros: runState.lastMacros, boundary });
 }
 
 /** The entries WA's own matcher activates over its window; candidacy and the verdict live in matcher.mjs activationAdds. */
@@ -776,7 +780,7 @@ async function keywordActivations(chat) {
     registerKeys(candidates.flatMap(e => {
         const keys = e.disable ? [] : matcher.usableKeys(e.key);
         return keys.length ? [...keys, ...matcher.secondaryKeys(e)] : [];
-    }));
+    }), runState.matchScope);
 
     return matcher.activationAdds(candidates, windowFor, activationOpts());
 }
@@ -1115,6 +1119,7 @@ async function scanWindowFor(chat) {
 
 /** Match defaults for both activation passes — live settings and ST globals, so it stays a function read at call time. */
 const activationOpts = () => ({
+    scope: runState.matchScope ?? undefined,
     messageDepth: settings().messageDepth,
     fallbackDepth: world_info_depth,
     caseSensitiveDefault: world_info_case_sensitive,
@@ -1173,6 +1178,7 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
     repeatR: settings().repeatR,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
+    scope: runState.matchScope ?? undefined,
 });
 
 /** Stable per-character (or per-group) key for the priority order; null with nothing selected. */
@@ -1481,7 +1487,7 @@ async function rankOwnedScan(activated, args, skip) {
         registerKeys(items.flatMap(it => {
             const keys = scoreKeysOf(it.entry);
             return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
-        }));
+        }), runState.matchScope);
 
         for (const item of items) {
             // Per-entry scanDepth wins, as in core. Nullish, not `||`: 0 is core's authored "match nothing from chat".
@@ -1497,7 +1503,7 @@ async function rankOwnedScan(activated, args, skip) {
             item.keywordWhy = runState.verboseRun
                 ? scored.hits.slice(0, 4).map(h => {
                     // Every place it landed; `excerpt` is contexts[0], not a second call, so the line and the hover cannot disagree.
-                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
+                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords, 28, 20, runState.matchScope ?? undefined);
                     return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
                 })
                 : undefined;
@@ -2370,8 +2376,6 @@ async function initBody() {
     // turn — blocking here holds up every later extension while the interceptor is already live and the scan hooks are
     // not yet registered. The pack applies when it lands; until then `table()` is the English one.
     setLanguage(settings().language, { fetchPack, store: packStore }).catch(() => {});
-    // The one place wordBoundary crosses into the matcher, which holds it module-level; re-pushed by the select's handler below.
-    matcher.setBoundaryMode(settings().wordBoundary);
 
     $('#extensions_settings').append(SETTINGS_HTML);
 
@@ -2442,7 +2446,6 @@ async function initBody() {
     })();
     bind('#wa_drop_chat_tags', 'dropChatTags', 'string');
     bind('#wa_word_boundary', 'wordBoundary', 'string');
-    $('#wa_word_boundary').on('change', () => matcher.setBoundaryMode(settings().wordBoundary));
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
@@ -2499,8 +2502,8 @@ async function initBody() {
     // WORLDINFO_ENTRIES_LOADED only fires during a scan, so CHAT_CHANGED refreshes the attached-book set.
     const refreshAttached = () => getSortedEntries().then(showExemptCount).catch(() => {});
     eventSource.on(event_types.CHAT_CHANGED, refreshAttached);
-    // Wrapped, not passed by reference: CHAT_CHANGED emits the chat id, which would land in resetSmartKeys's `scope`.
-    eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
+    // A new chat is a new vocabulary: the scope's registry and caches go with the old one.
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.matchScope = null; });
     // The panel survives dry-run scans untouched, so it would carry the previous chat's selection across a switch.
     eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; runState.lastLayoutOrder = []; renderDeliveryPanel([]); });
     refreshAttached();

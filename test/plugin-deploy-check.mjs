@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PLUGIN_FILES } from '../plugin/fingerprint.mjs';
-import { countChatHits, setBoundaryMode } from '../extension/matcher.mjs';
+import { countChatHits } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 import { deploySandbox } from './plugin-sandbox.mjs';
 
@@ -50,7 +50,6 @@ try {
     const deployed = await import(pathToFileURL(at('matcher.mjs')).href);
     const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
     const keys = ['copper', '? copper pipe', '? =cop', '/vasqu[ei]z/i'];
-    setBoundaryMode('strict'); deployed.setBoundaryMode('strict');
     const here = countChatHits(keys, msgs), there = deployed.countChatHits(keys, msgs);
     eq(there.messages, here.messages, 'the deployed matcher counts the same messages');
     for (const k of keys) eq(there.messagesWith.get(k), here.messagesWith.get(k), `...and the same hits for ${k}`);

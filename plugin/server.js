@@ -19,8 +19,8 @@ import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-v
 import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
-import { WA_METADATA_KEY, countChatHits, dropTags, setBoundaryMode } from './matcher.mjs';
-import { chatUser, setMacros } from './smartkeys.mjs';
+import { WA_METADATA_KEY, countChatHits, dropTags } from './matcher.mjs';
+import { chatUser } from './smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
@@ -169,10 +169,6 @@ async function loadCentered(indexPath) {
 }
 
 export async function init(router) {
-    // One chat scan at a time, chained: setBoundaryMode is module-global in matcher.mjs, and two interleaved scans
-    // would count under each other's boundary mode. Requests queue; none fails.
-    let scanChain = Promise.resolve();
-
     router.post('/query-multi', async (request, response) => {
         try {
             const { collectionIds, searchText, source, sourceSettings } = request.body ?? {};
@@ -237,12 +233,9 @@ export async function init(router) {
             if (keys.length > 10000 || chats.length > 5000) {
                 return response.status(400).send({ error: 'too many keys or chats' });
             }
-            // The caller's setting, required: a default here would disagree with the browser silently. Serialized through
-            // `scanChain` — setBoundaryMode is module-global, and an interleaved scan would count under another scan's mode.
+            // The caller's setting, required: a default here would disagree with the browser silently.
             const wordBoundary = String(request.body?.wordBoundary ?? '');
             if (!wordBoundary) return response.status(400).send({ error: 'wordBoundary is required' });
-            setBoundaryMode(wordBoundary);
-            setMacros(request.body?.macros ?? {});   // the caller's map: a macro key counts by its value here as in the browser
             // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
             const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
             // The elements WA strips from every message it reads live, so the audit counts the same text the runtime does.
@@ -277,9 +270,9 @@ export async function init(router) {
                 if (unreadable) partial++;
                 // This file under its own values: the caller's {{char}} for it, and {{user}} off its user messages, over the caller's map.
                 const user = chatUser(texts);
-                setMacros({ ...(request.body?.macros ?? {}), ...(entry?.macros ?? {}), ...(user ? { '{{user}}': user } : {}) });
+                const macros = { ...(request.body?.macros ?? {}), ...(entry?.macros ?? {}), ...(user ? { '{{user}}': user } : {}) };
                 // One file at a time, then merged: a hit is per message, so where the scan is split cannot change the total.
-                const got = countChatHits(keys, texts, unitOpts);
+                const got = countChatHits(keys, texts, { ...unitOpts, macros, boundary: wordBoundary });
                 for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
                 for (const [k, n] of got.typedWith) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
                 messages += got.messages;
@@ -299,9 +292,7 @@ export async function init(router) {
         }
     }
 
-    router.post('/scan-chats', (request, response) => {
-        scanChain = scanChain.then(() => scanChats(request, response));
-    });
+    router.post('/scan-chats', scanChats);
 
     /** `[{ dir, file, world_info, size }]` for EVERY chat, `world_info` null when line 0 names no book; line 0 is all
      *  that is read (P1). Every chat, not only the bound ones: a book attached through the character or globally

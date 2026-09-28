@@ -1,7 +1,7 @@
 // How WA relates to ST core on an unmodified lorebook: parity with matchKeys/matchSecondaryKeys, and the named divergences.
 // An assertion citing core as the authority goes here; one about what a matched expression is WORTH goes in matcher-check.mjs.
-import { coreReadsAsRegex, countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, resolveDecorators, secondaryKeys, setBoundaryMode, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
-import { setMacros, synthesizeSecondary, validateSmartKey } from '../extension/smartkeys.mjs';
+import { coreReadsAsRegex, countKey, decoratorArg, hasDecorator, hasPromoteDecorator, keywordScore, resolveDecorators, secondaryKeys, splitKeys, wholeWordAdvice, withPromote, WI_LOGIC } from '../extension/matcher.mjs';
+import { createScanScope, synthesizeSecondary, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const { AND_ANY, NOT_ALL, NOT_ANY, AND_ALL } = WI_LOGIC;
@@ -187,26 +187,24 @@ eq(countKey('gfx', '<!-- GFX_START -->', false, false), 0, 'a comment is markup 
     // x + U+0301 has no precomposed form, so it survives the fold's NFC pass as a real mark; e + U+0301 would not.
     eq(countKey('x', 'the x\u0301 mark', false, true), 0, 'a combining mark is inside the word, not a boundary');
 
-    setBoundaryMode('permissive');
-    eq(countKey('Joe', "that is Joe's coat", false, true), 1, 'permissive: an apostrophe is a boundary, so a possessive matches');
-    eq(countKey('hot tub', 'the hot tub-side chair', false, true), 1, 'permissive: a hyphen is a boundary too');
-    eq(countKey('Joe', 'Joel arrived', false, true), 0, 'permissive still stops at a letter');
+    const permissive = createScanScope({ boundary: 'permissive' });
+    eq(countKey('Joe', "that is Joe's coat", false, true, permissive), 1, 'permissive: an apostrophe is a boundary, so a possessive matches');
+    eq(countKey('hot tub', 'the hot tub-side chair', false, true, permissive), 1, 'permissive: a hyphen is a boundary too');
+    eq(countKey('Joe', 'Joel arrived', false, true, permissive), 0, 'permissive still stops at a letter');
 
-    setBoundaryMode('strict');
-    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'strict: an apostrophe is inside the word');
-    eq(countKey('Joe', 'that is Joe\u2019s coat', false, true), 0, '...and the fold means the curly form behaves identically');
-    eq(countKey('hot tub', 'the hot tub-side chair', false, true), 0, 'strict: a hyphen is inside the word');
-    eq(countKey('Joe', 'Joe arrived', false, true), 1, 'strict still matches a word standing alone');
-    eq(countKey("Joe's", "that is Joe's coat", false, true), 1, '...and the affixed form is reachable by keying it');
-    eq(countKey('/\\bJoe\\b/', "that is Joe's coat", false, true), 1, 'a \\b regex key recovers permissive behaviour');
+    const strict = createScanScope({ boundary: 'strict' });
+    eq(countKey('Joe', "that is Joe's coat", false, true, strict), 0, 'strict: an apostrophe is inside the word');
+    eq(countKey('Joe', 'that is Joe\u2019s coat', false, true, strict), 0, '...and the fold means the curly form behaves identically');
+    eq(countKey('hot tub', 'the hot tub-side chair', false, true, strict), 0, 'strict: a hyphen is inside the word');
+    eq(countKey('Joe', 'Joe arrived', false, true, strict), 1, 'strict still matches a word standing alone');
+    eq(countKey("Joe's", "that is Joe's coat", false, true, strict), 1, '...and the affixed form is reachable by keying it');
+    eq(countKey('/\\bJoe\\b/', "that is Joe's coat", false, true, strict), 1, 'a \\b regex key recovers permissive behaviour');
+    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'without a scope the boundary is strict');
 
-    setBoundaryMode('nonsense');
-    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'an unknown mode falls back to the default');
-    setBoundaryMode('constructor');
-    eq(countKey('Joe', 'Joe arrived', false, true), 1, 'a prototype property name is not a mode');
-    setBoundaryMode('strict');
+    eq(countKey('Joe', "that is Joe's coat", false, true, createScanScope({ boundary: 'nonsense' })), 0, 'an unknown mode falls back to the default');
+    eq(countKey('Joe', 'Joe arrived', false, true, createScanScope({ boundary: 'constructor' })), 1, 'a prototype property name is not a mode');
 
-    eq(countKey('Joe', "that is Joe's coat", false, false), 1, 'the setting does not reach substring matching');
+    eq(countKey('Joe', "that is Joe's coat", false, false, strict), 1, 'the setting does not reach substring matching');
 }
 console.log('ok   whole words: multi-word keys included, _ excluded, permissive/strict boundary class');
 
@@ -242,21 +240,19 @@ console.log('ok   whole-word advisory: structural, two triggers, names the scrip
         ['Hey —Sara said', 'dash before, attached to the key'],
     ];
     for (const mode of ['permissive', 'strict']) {
-        setBoundaryMode(mode);
+        const scope = createScanScope({ boundary: mode });
         for (const [text, why] of em) {
-            eq(countKey(SARA, text, false, true), 1, `${mode}: whole-word matches across an ${why}`);
+            eq(countKey(SARA, text, false, true, scope), 1, `${mode}: whole-word matches across an ${why}`);
         }
     }
 
-    setBoundaryMode('strict');
-    eq(countKey(SARA, 'the Sara-shaped gap', false, true), 0, 'strict: a single hyphen is still inside a word');
-    eq(countKey(SARA, "Sara's coat", false, true), 0, "strict: an apostrophe is still inside a word");
-    eq(countKey(SARA, 'Sarah went', false, true), 0, 'strict: and a longer word is still a different word');
-    eq(countKey('wait--no', 'the wait—no moment', false, true), 1,
+    const strict = createScanScope({ boundary: 'strict' });
+    eq(countKey(SARA, 'the Sara-shaped gap', false, true, strict), 0, 'strict: a single hyphen is still inside a word');
+    eq(countKey(SARA, "Sara's coat", false, true, strict), 0, "strict: an apostrophe is still inside a word");
+    eq(countKey(SARA, 'Sarah went', false, true, strict), 0, 'strict: and a longer word is still a different word');
+    eq(countKey('wait--no', 'the wait—no moment', false, true, strict), 1,
         'the fold this excepts still works: a `--` key matches an em dash in the text');
-    setBoundaryMode('permissive');
-    eq(countKey(SARA, 'the Sara-shaped gap', false, true), 1, 'permissive: a hyphen was always a boundary');
-    setBoundaryMode('strict');
+    eq(countKey(SARA, 'the Sara-shaped gap', false, true, createScanScope({ boundary: 'permissive' })), 1, 'permissive: a hyphen was always a boundary');
 }
 console.log('ok   doubled hyphen: an em dash is a boundary, a compound hyphen is not');
 
@@ -291,12 +287,11 @@ eq(countKey('three-inch', 'three inch', false, false), 1, 'DIVERGENCE: a key exp
 
 // --- macro keys: core substitutes the whole key and substring-matches it; WA the same for a plain key. A pattern diverges.
 {
-    setMacros({ '{{char}}': 'Dr. Brown' });
-    eq(countKey('{{char}}', 'dr. brown here', false, false), 1, 'a plain macro key is the substituted substring, as core');
-    eq(countKey('{{char}}', 'brown, dr.', false, false), 0, '...and nothing looser, as core');
-    eq(countKey('/{{char}}/', 'Dr. Brown', false, false), 1, 'a pattern takes the value');
-    eq(countKey('/{{char}}/', 'DrX Brown', false, false), 0, 'DIVERGENCE: the value is inserted escaped, where core inserts it raw and its dot would match here');
-    setMacros({});
+    const scope = createScanScope({ macros: { '{{char}}': 'Dr. Brown' } });
+    eq(countKey('{{char}}', 'dr. brown here', false, false, scope), 1, 'a plain macro key is the substituted substring, as core');
+    eq(countKey('{{char}}', 'brown, dr.', false, false, scope), 0, '...and nothing looser, as core');
+    eq(countKey('/{{char}}/', 'Dr. Brown', false, false, scope), 1, 'a pattern takes the value');
+    eq(countKey('/{{char}}/', 'DrX Brown', false, false, scope), 0, 'DIVERGENCE: the value is inserted escaped, where core inserts it raw and its dot would match here');
 }
 eq(countKey('three inch', 'three-inch', false, false), 0, 'one way only: a spaces-only key interns no hyphenated form');
 eq(countKey('wait-no', 'wait\u2014no', false, false), 0, 'the expansion is not the fold: an em-dash stays two hyphens and no variant reaches it');

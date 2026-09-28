@@ -6,42 +6,20 @@ import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, ke
 import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits } from './automaton.mjs';
 export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits };
 
-// ---- macros: `{{token}}`s in a key expand to DATA at every leaf, under the map in force ----------------------------------
+// ---- macros: `{{token}}`s in a key expand to DATA at every leaf, under the scope's map ---------------------------------------
 const MACRO_RE = /\{\{[^{}]+\}\}/g;
 const HAS_MACRO = /\{\{[^{}]+\}\}/;
-let macros = {};
-let macroStamp = 0;
-// One stamp per distinct map, so a map put back in force finds the ASTs cached under it.
-const stampOf = new Map([['{}', 0]]);
-/** The map in force, `{{token}}` as written -> its value: the runtime sets it once per scan, the scene from a capture. The map is part of every AST cache id (astId). */
-export function setMacros(map) {
-    const next = Object.fromEntries(Object.entries(map ?? {}).map(([k, v]) => [k, String(v ?? '')]));
-    const json = JSON.stringify(next);
-    if (json === JSON.stringify(macros)) return;
-    macros = next;
-    if (!stampOf.has(json)) stampOf.set(json, stampOf.size);
-    macroStamp = stampOf.get(json);
-}
-/** The map in force. */
-export const getMacros = () => macros;
-/** `fn()` under `map`, the map in force put back after: everything but the runtime scan matches this way, so the map a scan
- *  sets is never changed under it. `fn` must be synchronous. */
-export function withMacros(map, fn) {
-    const was = macros;
-    setMacros(map);
-    try { return fn(); } finally { setMacros(was); }
-}
 /** Every macro token in `texts`, as written, once each. */
 export const macroTokens = texts => [...new Set([].concat(...(texts ?? []).map(t => String(t ?? '').match(MACRO_RE) ?? [])))];
-/** The tokens of `texts` through `substitute`: the map setMacros takes, and the one a capture records. */
+/** The tokens of `texts` through `substitute`: the map a scope takes, and the one a capture records. */
 export const macroMap = (texts, substitute) => Object.fromEntries(macroTokens(texts).map(tok => [tok, String(substitute(tok) ?? '')]));
 /** The {{user}} a chat names: the name on its last user message; undefined when it has none. */
 export const chatUser = messages => [...(messages ?? [])].reverse().find(m => m?.is_user && m?.name)?.name;
 // A token with a word pick: `{{user}}[2]` is the second word of the value, counting from one, negative from the end.
 const MACRO_PICK_RE = /(\{\{[^{}]+\}\})\[(-?\d+)\]/g;
-/** `text` with each known token replaced by its value, or by one word of it under `[N]`, an unknown token as written; `escape` is
- *  applied to what is inserted, for a pattern body. A pick the value has no word for inserts nothing. */
-export const expandMacros = (text, escape = s => s) => String(text ?? '')
+/** `text` with each token `macros` knows replaced by its value, or by one word of it under `[N]`, an unknown token as written; `escape`
+ *  is applied to what is inserted, for a pattern body. A pick the value has no word for inserts nothing. */
+export const expandMacros = (text, macros = {}, escape = s => s) => String(text ?? '')
     .replace(MACRO_PICK_RE, (m, tok, n) => {
         if (!Object.hasOwn(macros, tok)) return m;
         const words = macros[tok].split(/\s+/).filter(Boolean);
@@ -51,9 +29,7 @@ export const expandMacros = (text, escape = s => s) => String(text ?? '')
     })
     .replace(MACRO_RE, tok => (Object.hasOwn(macros, tok) ? escape(macros[tok]) : tok));
 /** A `/body/flags` key with each value inserted escaped, so a name is text in the pattern. Diverges from core, which inserts it raw. */
-export const expandRegex = raw => { const m = String(raw).match(REGEX_KEY_RE); return m ? `/${expandMacros(m[1], escapeRegex)}/${m[2]}` : String(raw); };
-/** The cache id of `raw` under the map in force: an AST built under another map is never reused. */
-export const astId = raw => `${raw}\u001f${macroStamp}`;
+export const expandRegex = (raw, macros = {}) => { const m = String(raw).match(REGEX_KEY_RE); return m ? `/${expandMacros(m[1], macros, escapeRegex)}/${m[2]}` : String(raw); };
 
 /** The marks that quote a phrase, by family: a phrase opens on any mark and closes on the first mark of the same family, so
  *  `"「月」"` holds its brackets. The curly and guillemet families are marks the fold collapses onto `"`; the CJK quotation and
@@ -263,12 +239,12 @@ export function parse(tokens) {
 /** The AST with every macro expanded to data: an unquoted TERM becomes the group of its value's words, `(Kyle Parsons)`, so the
  *  term's `near` and weight apply to the group as they would to one written out; a quoted TERM and a REGEX body expand in place;
  *  an empty value drops the leaf. */
-function expandAst(node) {
+function expandAst(node, macros) {
     if (!node) return null;
     if (node.type === 'TERM') {
         if (!HAS_MACRO.test(node.value)) return node;
         const { near, groupWeight, weight = 1, optional, ...leaf } = node;
-        const text = expandMacros(node.value);
+        const text = expandMacros(node.value, macros);
         const words = node.quoted ? [text] : text.split(/\s+/).filter(Boolean);
         if (!words.length) return null;
         if (words.length === 1) return { ...node, value: words[0] };
@@ -279,14 +255,23 @@ function expandAst(node) {
         if (optional) out.optional = true;
         return out;
     }
-    if (node.type === 'REGEX') return HAS_MACRO.test(node.value) ? { ...node, value: expandRegex(node.value) } : node;
-    if (node.type === 'NOT') { const operand = expandAst(node.operand); return operand ? { ...node, operand } : null; }
-    const left = expandAst(node.left), right = expandAst(node.right);
+    if (node.type === 'REGEX') return HAS_MACRO.test(node.value) ? { ...node, value: expandRegex(node.value, macros) } : node;
+    if (node.type === 'NOT') { const operand = expandAst(node.operand, macros); return operand ? { ...node, operand } : null; }
+    const left = expandAst(node.left, macros), right = expandAst(node.right, macros);
     return left && right ? { ...node, left, right } : (left ?? right);
 }
 
-/** The AST every consumer builds: parsed, then expanded under the map in force. Cache it under astId. */
-export const buildAst = raw => expandAst(parse(tokenize(raw)));
+/** `node` and everything under it carrying the scope's boundary mode, which a whole-word term and a `~N` group read at evaluation. */
+const withBoundary = (node, boundary) => {
+    if (!node) return node;
+    node.boundary = boundary;
+    withBoundary(node.operand, boundary); withBoundary(node.left, boundary); withBoundary(node.right, boundary);
+    return node;
+};
+
+/** The AST every consumer builds: parsed, then expanded under the scope's macros and stamped with its boundary. `scope` is read for
+ *  those two only; a scope caches the result by the raw key. */
+export const buildAst = (raw, scope = defaultScope) => withBoundary(expandAst(parse(tokenize(raw)), scope.macros), scope.boundary);
 
 /** Whether the key matches a text holding none of its terms: an optional node does, a NOT of what does not, an AND of two
  *  that do, an OR of one, an XOR of exactly one. Such a key fires on almost every message. */
@@ -494,25 +479,25 @@ export function validateSmartKey(raw) {
 const SCAN_CACHE_MAX = 8;
 
 /** One key as one node, by countKey's three-way split: `? …` splices in with its own per-term flags, `/re/` is a REGEX, anything else a TERM carrying the entry's flags. No escaping. */
-const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight = 1) => {
+const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight = 1, scope = defaultScope) => {
     const s = String(raw ?? '').trim();
     if (!s) return null;
-    if (s.startsWith('?')) return buildAst(s);
-    if (isRegexKey(s)) return { type: 'REGEX', value: expandRegex(s), weight };
-    return { type: 'TERM', value: expandMacros(s), isExact: !!wholeWords, isCaseSensitive: !!caseSensitive, quoted: true, weight };
+    if (s.startsWith('?')) return buildAst(s, scope);
+    if (isRegexKey(s)) return { type: 'REGEX', value: expandRegex(s, scope.macros), weight };
+    return { type: 'TERM', value: expandMacros(s, scope.macros), isExact: !!wholeWords, isCaseSensitive: !!caseSensitive, quoted: true, weight, boundary: scope.boundary };
 };
 
 /** Core's `(key, keysecondary, selectiveLogic)` as one AST per primary key, `flags` being the entry's resolved match flags:
  *    AND_ANY  AND(p, OR(s1, s2))    AND_ALL  AND(p, AND(s1, s2))    NOT_ANY  AND(AND(p, NOT(s1)), NOT(s2))    NOT_ALL  AND(p, NOT(AND(s1, s2)))
  *  A non-blank secondary that parses to nothing stays as a null child: evaluate reads null as "did not match", which is core's answer. */
-export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {}) {
-    const p = keyNode(primary, flags, 1);
+export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {}, scope = defaultScope) {
+    const p = keyNode(primary, flags, 1, scope);
     if (!p) return null;
 
     const sec = [];
     for (const k of Array.isArray(secondaries) ? secondaries : []) {
         if (!String(k ?? '').trim()) continue;   // blanks are dropped before the logic, as core does
-        sec.push(keyNode(k, flags, 1));
+        sec.push(keyNode(k, flags, 1, scope));
     }
     if (!sec.length) return p;                   // no secondaries: the condition is vacuously true
 
@@ -525,13 +510,20 @@ export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {})
     }
 }
 
-/** One matching context: the term registry, the automaton, the AST cache and the per-text scans. Scoped, not global: registerTerms stamps a scope-local index onto each TERM. */
-export function createScanScope() {
-    // variantIdx: raw key -> its variants' pattern indices, filled once every variant is interned; the hot path is then a map read.
-    return { termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), scanMax: SCAN_CACHE_MAX, astCache: new Map(), variantIdx: new Map(), typedIdx: new Map(), keysByIdx: null };
+/** One matching context: what keys match under — `macros` (`{{token}}` -> value) and the `wordBoundary` mode — and every cache
+ *  built under it: the term registry, the automaton, the AST cache and the per-text scans. The caches are the context's, so a
+ *  context never changes under them; a caller wanting another context makes another scope. */
+export function createScanScope({ macros = {}, boundary = 'strict' } = {}) {
+    return {
+        macros: Object.freeze(Object.fromEntries(Object.entries(macros ?? {}).map(([k, v]) => [k, String(v ?? '')]))),
+        boundary: String(boundary ?? 'strict'),
+        // variantIdx: raw key -> its variants' pattern indices, filled once every variant is interned; the hot path is then a map read.
+        termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), scanMax: SCAN_CACHE_MAX, astCache: new Map(), variantIdx: new Map(), typedIdx: new Map(), keysByIdx: null,
+    };
 }
 
-const defaultScope = createScanScope();
+/** The scope a call without one matches in: no macros, the strict boundary. */
+export const defaultScope = createScanScope();
 
 function internLiteral(scope, folded) {
     let idx = scope.termIndex.get(folded);
@@ -593,13 +585,13 @@ const pool = (id, units) => (units.length
 const boostOf = units => units.reduce((a, u) => a + u.wsum, 0);
 
 /** A TERM's compiled pattern, cached on the node: the forms and the escape do not change, and compiling per evaluation
- *  was the cost countKey's own wholeWordRe removes. Keyed by boundary mode, which setBoundaryMode can move under us. */
+ *  was the cost countKey's own wholeWordRe removes. Keyed by boundary mode, for a hand-built node the build did not stamp. */
 const termRegex = node => {
-    const mode = `${node.isExact ? boundaryBefore() : ''}`;
+    const mode = `${node.isExact ? boundaryBefore(node.boundary) : ''}`;
     if (node._reMode !== mode) {
         const forms = keyVariants(node.value).map(v => node.isCaseSensitive ? normalizeOrthography(v) : fold(v));
         let pattern = forms.length > 1 ? `(?:${forms.map(escapeRegex).join('|')})` : escapeRegex(forms[0]);
-        if (node.isExact) pattern = `${boundaryBefore()}${pattern}${boundaryAfter()}`;
+        if (node.isExact) pattern = `${boundaryBefore(node.boundary)}${pattern}${boundaryAfter(node.boundary)}`;
         node._re = new RegExp(pattern, 'gu');
         node._reMode = mode;
     }
@@ -672,11 +664,14 @@ function evaluateNode(node, text, acHits) {
     }
 }
 
-const wordRuns = () => new RegExp(`${wordChar()}+`, 'gu');
-const wordsIn = s => (s.match(wordRuns()) ?? []).length;
+const wordsIn = (s, mode) => (s.match(new RegExp(`${wordChar(mode)}+`, 'gu')) ?? []).length;
 const byAt = (a, b) => a.at - b.at || a.to - b.to;
 /** Words strictly between two spans; 0 when they touch or overlap. */
-const between = (src, a, b) => { if (a.at > b.at) [a, b] = [b, a]; return b.at > a.to ? wordsIn(src.slice(a.to, b.at)) : 0; };
+const between = (src, a, b, mode) => { if (a.at > b.at) [a, b] = [b, a]; return b.at > a.to ? wordsIn(src.slice(a.to, b.at), mode) : 0; };
+
+/** A neutral scope per boundary mode, for excerpting a leaf whose value is already expanded. */
+const leafScopes = new Map();
+const leafScope = mode => { let s = leafScopes.get(mode); if (!s) leafScopes.set(mode, s = createScanScope({ boundary: mode })); return s; };
 
 const leaves = (node, out = []) => {
     if (!node) return out;
@@ -689,7 +684,7 @@ const leaves = (node, out = []) => {
 function leafSpans(node, text, acHits) {
     if (!evaluateNode(node, text, acHits).matched) return [];
     const isRegex = node.type === 'REGEX';
-    return keyExcerpts(String(node.value), text, !isRegex && !!node.isCaseSensitive, !isRegex && !!node.isExact, 0, Infinity).map(e => ({ at: e.at, to: e.to }));
+    return keyExcerpts(String(node.value), text, !isRegex && !!node.isCaseSensitive, !isRegex && !!node.isExact, 0, Infinity, leafScope(node.boundary)).map(e => ({ at: e.at, to: e.to }));
 }
 
 /** The ways a group can be satisfied, each `{ reqs, vetoes }`: one span list per conjunct — an alternation of leaves pools into one,
@@ -720,11 +715,11 @@ function alternativesOf(node, text, acHits, top = false) {
 /** Leftmost minimal windows over every alternative's spans at once: a window counts when some alternative has one span per conjunct
  *  in it with at most `slack` words between neighbours, is shrunk to what that alternative needs, and is consumed as found; a
  *  `vetoed` one consumes nothing, the sweep moving on from its first span. */
-function sweep(alts, slack, src, vetoed) {
+function sweep(alts, slack, src, vetoed, mode) {
     const live = alts.filter(a => a.reqs.length && a.reqs.every(r => r.length));
     if (!live.length) return [];
     // Widened to the words it sits in, so a substring hit is as near as its word and the tail of a word is not a word between.
-    const isWord = new RegExp(wordChar(), 'u');
+    const isWord = new RegExp(wordChar(mode), 'u');
     const snap = ({ at, to }) => {
         while (at > 0 && isWord.test(src[at - 1])) at--;
         while (to < src.length && isWord.test(src[to])) to++;
@@ -748,7 +743,7 @@ function sweep(alts, slack, src, vetoed) {
     let s = 0;
     const reset = i => { s = i; count.forEach(m => m.clear()); have.fill(0); };
     for (let e = 0; e < spans.length; e++) {
-        if (e > s && between(src, spans[e - 1], spans[e]) > slack) reset(e);
+        if (e > s && between(src, spans[e - 1], spans[e], mode) > slack) reset(e);
         add(e);
         for (let a = covered(); a >= 0; a = covered()) {
             while (!needed(a, s)) drop(s++);
@@ -770,12 +765,12 @@ function clusters(node, text, acHits) {
     const occurrences = v => { let o = occ.get(v); if (!o) occ.set(v, o = clusters(v.near !== undefined ? v : { ...v, near: Infinity }, text, acHits)); return o; };
     const inReach = (v, c) => {
         if (!v) return false;
-        if (v.near !== undefined || v.type === 'TERM' || v.type === 'REGEX') return occurrences(v).some(o => between(src, c, o) <= node.near);
+        if (v.near !== undefined || v.type === 'TERM' || v.type === 'REGEX') return occurrences(v).some(o => between(src, c, o, node.boundary) <= node.near);
         if (v.type === 'NOT') return !inReach(v.operand, c);
         const l = inReach(v.left, c), r = inReach(v.right, c);
         return v.type === 'AND' ? l && r : v.type === 'OR' ? l || r : l !== r;
     };
-    return sweep(alternatives(node, text, acHits, true), node.near, src, (vetoes, c) => vetoes.some(v => inReach(v, c)));
+    return sweep(alternatives(node, text, acHits, true), node.near, src, (vetoes, c) => vetoes.some(v => inReach(v, c)), node.boundary);
 }
 
 /** A `~N` group is one thing, seen once per cluster: leaf weights are not read, the group's own applies in evaluate(), and a lone
@@ -807,7 +802,7 @@ export function evaluateAst(id, build, text, scope = defaultScope) {
 
 /** Full pipeline for one `?` key, which is its own cache id. */
 export function evaluateSmartKey(rawKey, text, scope = defaultScope) {
-    return evaluateAst(astId(rawKey), () => buildAst(rawKey), text, scope);
+    return evaluateAst(rawKey, () => buildAst(rawKey, scope), text, scope);
 }
 
 /** Registers keys with the scope's automaton without scanning; once per pass, before any scoring — a new key mid-pass dirties the automaton and discards every cached scan. */
@@ -818,12 +813,12 @@ export function registerKeys(rawKeys, scope = defaultScope) {
         if (raw.startsWith('?')) {
             // Fed raw stashes too, not only usableKeys' output: a key the grammar refuses is skipped here, and countKey answers 0 for it.
             try {
-                ensureAst(scope, astId(raw), () => buildAst(raw));
+                ensureAst(scope, raw, () => buildAst(raw, scope));
             } catch {
                 // Refused at parse — validateSmartKey is the author's answer.
             }
         } else {
-            for (const v of keyVariants(expandMacros(raw))) internLiteral(scope, fold(v));
+            for (const v of keyVariants(expandMacros(raw, scope.macros))) internLiteral(scope, fold(v));
         }
     }
 }
@@ -841,10 +836,10 @@ export function primeScan(rawKeys, text, scope = defaultScope) {
 export function hitLiterals(scope, text, literals) {
     // Primed here if it is not: the caller means this text to be scanned, and "every literal" is a guess, not an answer.
     const hit = ensureScan(scope, text);
-    if (!scope.keysByIdx || scope.keysByIdx.over !== literals || scope.keysByIdx.stamp !== macroStamp) {
+    if (!scope.keysByIdx || scope.keysByIdx.over !== literals) {
         const map = new Map();
         for (const key of literals) {
-            for (const v of keyVariants(expandMacros(key))) {
+            for (const v of keyVariants(expandMacros(key, scope.macros))) {
                 const i = scope.termIndex.get(fold(v));
                 if (i === undefined) continue;
                 let list = map.get(i);
@@ -852,7 +847,7 @@ export function hitLiterals(scope, text, literals) {
                 list.push(key);
             }
         }
-        scope.keysByIdx = { over: literals, map, stamp: macroStamp };
+        scope.keysByIdx = { over: literals, map };
     }
     const out = new Set();
     for (const [i, n] of hit) if (n) for (const key of scope.keysByIdx.map.get(i) ?? []) out.add(key);
@@ -868,17 +863,16 @@ export function cachedCount(raw, text, scope = defaultScope, expand = true) {
     // The indices are folded and looked up once per key per scope: this runs once per key per segment per entry, and the
     // fold is the audit's whole cost when it runs here (R7 is scan cost; this was the rest).
     const memo = expand ? scope.variantIdx : scope.typedIdx;
-    const id = astId(raw);
-    let idx = memo?.get(id);
+    let idx = memo?.get(raw);
     if (idx === undefined) {
         idx = [];
-        const lit = expandMacros(raw);
+        const lit = expandMacros(raw, scope.macros);
         for (const v of (expand ? keyVariants(lit) : [normalizeOrthography(lit)])) {
             const i = scope.termIndex.get(fold(v));
             if (i === undefined) return undefined;
             idx.push(i);
         }
-        memo?.set(id, idx);
+        memo?.set(raw, idx);
     }
     let total = 0;
     for (const i of idx) total += counts.get(i) ?? 0;

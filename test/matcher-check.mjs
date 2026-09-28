@@ -1,11 +1,11 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
 import { countKey, dropTags, keyExcerpts, segment, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
-import { keyVariants, setMacros, validateSmartKey } from '../extension/smartkeys.mjs';
+import { createScanScope, keyVariants, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 // keywordScore with the production defaults injected; k1 is 2 here, and passing a cfg to this wrapper does nothing.
-const keywordScore = (e, t, k) => rankKeywordScore(e, t, k, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
+const keywordScore = (e, t, k, o = {}) => rankKeywordScore(e, t, k, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false, ...o });
 const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
 
 // --- secondary keys gate the SCORE, not only activation
@@ -116,7 +116,7 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(sc('? (moon OR rocket::0)', 'moon rocket'), 1, '...and does not drag its group\'s mean down');
 
     // The author's weights as an odds multiplier (keywordScore `logWeight`): intent, so neither counts nor the curve reach it.
-    const odds = (keys, text) => Number(Math.exp(keywordScore({ key: keys }, text, keys).logWeight).toFixed(6));
+    const odds = (keys, text, scope) => Number(Math.exp(keywordScore({ key: keys }, text, keys, { scope }).logWeight).toFixed(6));
     eq(odds(['? (Picard OR Janeway::2) Borg'], 'Janeway fought the Borg'), 2, 'a matched ::2 multiplies the odds by exactly 2');
     eq(odds(['? (Picard OR Janeway::2) Borg'], 'Picard fought the Borg'), 1, '...and the unweighted alternative leaves them alone');
     eq(odds(['? (Picard OR Janeway::2) Borg'], 'Picard, Picard, Picard and Janeway fought the Borg'), 2, '...nor dilutes the weighted one it pools with');
@@ -130,11 +130,8 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(odds(['? (Janeway::2 Borg::3) OR Picard'], 'Janeway fought the Borg'), 6, 'an OR takes its matched alternative whole, conjuncts multiplied');
     eq(odds(['? (Janeway::2 Borg::3) OR Picard::4'], 'Janeway and Picard fought the Borg'), 6, '...the strongest one when both match');
     eq(odds(['? Janeway (Borg)::0'], 'Janeway fought the Borg'), 1, 'a ::0 group is a gate too');
-    setMacros({ '{{user}}': 'Sally' });
-    eq(odds(['? {{user}}~0::2 astronaut'], 'Sally the astronaut'), 2, 'a one-word macro keeps its weight beside ~N');
-    setMacros({ '{{user}}': 'Neil Armstrong' });
-    eq(odds(['? {{user}}::2 astronaut'], 'Neil Armstrong the astronaut'), 2, '...and a many-word one weighs once, not per word');
-    setMacros({});
+    eq(odds(['? {{user}}~0::2 astronaut'], 'Sally the astronaut', createScanScope({ macros: { '{{user}}': 'Sally' } })), 2, 'a one-word macro keeps its weight beside ~N');
+    eq(odds(['? {{user}}::2 astronaut'], 'Neil Armstrong the astronaut', createScanScope({ macros: { '{{user}}': 'Neil Armstrong' } })), 2, '...and a many-word one weighs once, not per word');
     eq(odds(['? (Janeway::2)~3 Borg'], 'Janeway fought the Borg'), 2, '...as a literal lone term does');
     eq(sc('? (moon::2)~3', 'moon'), 2 * sc('? (moon)~3', 'moon'), '...which its score reads too');
 

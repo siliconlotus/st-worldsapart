@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { addMessageHits, astId, buildAst, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, buildAst, buildAutomaton, cachedCount, createScanScope, defaultScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -10,16 +10,13 @@ const BOUNDARY_CLASSES = {
     permissive: '[\\p{L}\\p{N}\\p{M}]',
     strict: '[\\p{L}\\p{N}\\p{M}\\-\'’]',
 };
-let boundaryMode = 'strict';
-
-/** Injects the resolved `wordBoundary` setting. Object.hasOwn, not `in`: 'constructor' would resolve wordChar() to a Function. */
-export const setBoundaryMode = mode => { boundaryMode = Object.hasOwn(BOUNDARY_CLASSES, mode) ? mode : 'strict'; };
-
-export const wordChar = () => BOUNDARY_CLASSES[boundaryMode];
+/** The word-character class of a `wordBoundary` mode, `strict` for anything unknown. Object.hasOwn, not `in`: 'constructor'
+ *  would resolve to a Function. */
+export const wordChar = mode => BOUNDARY_CLASSES[Object.hasOwn(BOUNDARY_CLASSES, mode) ? mode : 'strict'];
 
 /** Whole-word assertions: the neighbour is not a word character, or is `--` (a folded dash). Zero-width: run under `g` to count, and keyExcerpts reads the offsets. */
-export const boundaryBefore = () => `(?:(?<!${wordChar()})|(?<=--))`;
-export const boundaryAfter = () => `(?:(?!${wordChar()})|(?=--))`;
+export const boundaryBefore = mode => `(?:(?<!${wordChar(mode)})|(?<=--))`;
+export const boundaryAfter = mode => `(?:(?!${wordChar(mode)})|(?=--))`;
 
 /** Scripts written without word separators, in test order: kana before Han, so a Japanese key is named Japanese. */
 const SPACELESS_SCRIPTS = [
@@ -373,15 +370,18 @@ const chatAutomaton = folded => {
     return chatAut;
 };
 
-export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false, hitIndex = false } = {}) {
+/** `macros` and `boundary` are the match context, as createScanScope takes them. */
+export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false, hitIndex = false, macros = {}, boundary = 'strict' } = {}) {
     // Test like we fight: the units are what the matcher matches a conjunction within, so a `?` key whose terms sit in
     // adjacent messages counts under `scan` and not under `message`, as it matches. `messagesWith`/`messages` keep their
     // names and count units; `unit` says which.
     messages = chatUnits(messages, { matchWindow, depth, includeNames });
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
+    // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
+    const scope = createScanScope({ macros, boundary });
     // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
-    const folded = [...new Set(literals.flatMap(k => keyVariants(expandMacros(k)).map(fold)))];
+    const folded = [...new Set(literals.flatMap(k => keyVariants(expandMacros(k, scope.macros)).map(fold)))];
     const idxOf = new Map(folded.map((f, i) => [f, i]));
     // Memoised on the folded list: the plugin calls this once per chat FILE with one book's keys, and rebuilding the
     // trie per file was the whole cost of a multi-chat scan.
@@ -389,15 +389,13 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     const counts = new Map();
     const messagesWith = new Map(rest.map(k => [k, 0]));
     // A key whose forms could both land in one message is counted by union; summing its indices would count it twice.
-    const varIdx = new Map(literals.map(k => [k, keyVariants(expandMacros(k)).map(v => idxOf.get(fold(v)))]));
-    const typedIdx = new Map(literals.map(k => [k, idxOf.get(fold(expandMacros(k)))]));
+    const varIdx = new Map(literals.map(k => [k, keyVariants(expandMacros(k, scope.macros)).map(v => idxOf.get(fold(v)))]));
+    const typedIdx = new Map(literals.map(k => [k, idxOf.get(fold(expandMacros(k, scope.macros)))]));
     const expanded = [...varIdx].filter(([, idx]) => idx.length > 1);
     for (const [k] of expanded) messagesWith.set(k, 0);
     // `hitIndex`: which units each key hit, for a caller scanning one chat under several maps and taking the union.
     const hitsBy = hitIndex ? new Map(all.map(k => [k, new Set()])) : null;
     const typedBy = hitIndex ? new Map(literals.map(k => [k, new Set()])) : null;
-    // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
-    const scope = createScanScope();
     let seen = 0;
     for (const msg of messages) {
         const u = seen++;
@@ -424,11 +422,11 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
 /** The whole-word pattern for a needle, compiled once: a batch verifies every reported hit under this, and the runtime
  *  scorer every entry with the flag, and compiling per call was the cost. Bounded; the boundary mode is part of the key. */
 const wholeWordRe = new Map();
-function wholeWordRegex(needle) {
-    const id = `${boundaryBefore()}${needle}`;
+function wholeWordRegex(needle, mode) {
+    const id = `${boundaryBefore(mode)}${needle}`;
     let re = wholeWordRe.get(id);
     if (!re) {
-        re = new RegExp(`${boundaryBefore()}${escapeRegex(needle)}${boundaryAfter()}`, 'gu');
+        re = new RegExp(`${boundaryBefore(mode)}${escapeRegex(needle)}${boundaryAfter(mode)}`, 'gu');
         if (wholeWordRe.size >= 4096) wholeWordRe.clear();
         wholeWordRe.set(id, re);
     }
@@ -436,7 +434,8 @@ function wholeWordRegex(needle) {
     return re;
 }
 
-export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = null) {
+/** `scope` is the match context and its caches (createScanScope); without one the key matches under no macros and the strict boundary. */
+export function countKey(key, text, caseSensitive, wholeWords, scope = defaultScope, gateAst = null) {
     const raw = String(key ?? '').trim();
 
     if (!raw || !text) {
@@ -460,7 +459,7 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
         return sk.matched ? (sk.scoreBoost > 0 ? sk.scoreBoost : 1) : 0;
     }
 
-    if (isRegexKey(raw)) return countRegexKey(expandRegex(raw), text);
+    if (isRegexKey(raw)) return countRegexKey(expandRegex(raw, scope.macros), text);
 
     // Aho-Corasick fast path: 0 is final under any flags; a positive count is final only for plain substring semantics.
     const cached = cachedCount(raw, text, scope);
@@ -470,13 +469,13 @@ export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = 
     // Must match smartkeys' fold exactly, or the trie and this walk disagree.
     const hay = foldedHay(text, caseSensitive);
     let count = 0;
-    for (const variant of keyVariants(expandMacros(raw))) {
+    for (const variant of keyVariants(expandMacros(raw, scope.macros))) {
         const needle = caseSensitive ? normalizeOrthography(variant) : fold(variant);
         if (!needle) continue;
         if (wholeWords) {
             try {
                 // Lookaround, not `\b`: a key may start or end with punctuation, and adjacent occurrences all count.
-                count += (hay.match(wholeWordRegex(needle)) ?? []).length;
+                count += (hay.match(wholeWordRegex(needle, scope.boundary)) ?? []).length;
             } catch {
                 return 0;
             }
@@ -495,7 +494,7 @@ export const markExcerptText = ex => (ex
     : null);
 
 /** Every place a key matched, up to `limit`, as excerpts with match offsets; display only. A compound SmartKey returns nothing; a single-term one uses its own flags. */
-export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20) {
+export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, scope = defaultScope) {
     const out = [];
     let raw = String(key ?? '').trim();
     if (!raw || limit < 1) return out;
@@ -504,9 +503,9 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
     let literalOnly = false;
     if (raw.startsWith('?')) {
         let node = null;
-        try { node = buildAst(raw); } catch { return out; }
+        try { node = buildAst(raw, scope); } catch { return out; }
         if (!node) return out;
-        if (node.type !== 'TERM' && node.type !== 'REGEX') return compoundExcerpts(node, text, context, limit);
+        if (node.type !== 'TERM' && node.type !== 'REGEX') return compoundExcerpts(node, text, context, limit, scope);
         raw = String(node.value ?? '').trim();
         if (!raw) return out;
         literalOnly = node.type === 'TERM';
@@ -514,7 +513,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         wholeWords = node.type === 'REGEX' ? wholeWords : !!node.isExact;
     }
     // A bare key expands within its kind: a pattern escaped, a literal as text. A `?` key's node values are expanded already.
-    else raw = isRegexKey(raw) ? expandRegex(raw) : expandMacros(raw);
+    else raw = isRegexKey(raw) ? expandRegex(raw, scope.macros) : expandMacros(raw, scope.macros);
     // Folded -> source offset, folding one character at a time; the source must be NFC first or offsets drift.
     // Prefix sums, built once per segment: srcIndex runs twice per match and `limit` is Infinity on the proximity path.
     let sumsFor = null, sums = null;
@@ -583,7 +582,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
             if (!needle) continue;
             if (wholeWords) {
                 try {
-                    const re = wholeWordRegex(needle);
+                    const re = wholeWordRegex(needle, scope.boundary);
                     for (let m = re.exec(hay); m; m = re.exec(hay)) {
                         if (!m[0]) { re.lastIndex += 1; continue; }
                         if (push(segment, m.index, m[0].length)) return out;
@@ -609,18 +608,18 @@ function leafNodes(node, negated = false, out = []) {
 }
 
 /** One leaf's occurrences in `text` under its own flags; a REGEX leaf carries its flags in the pattern. */
-const leafCount = (id, text) => {
+const leafCount = (id, text, scope) => {
     const v = String(id?.value ?? '');
     const cs = id?.type !== 'REGEX' && !!id?.isCaseSensitive, ww = id?.type !== 'REGEX' && !!id?.isExact;
     // A TERM shaped like a pattern is still a literal (`? "/re/"`), so it is re-quoted rather than handed to countKey bare.
     const literal = id?.type !== 'REGEX' && isRegexKey(v) && !v.includes('"');
-    return countKey(literal ? `? ${ww ? '=' : ''}${cs ? '^' : ''}"${v}"` : v, text, cs, ww);
+    return countKey(literal ? `? ${ww ? '=' : ''}${cs ? '^' : ''}"${v}"` : v, text, cs, ww, scope);
 };
 
 /** One excerpt per leaf that matched, at its first occurrence, ordered by position: `term` is the leaf's value and `n` its
  *  occurrences in that segment. Reports leaves whatever the key's verdict — a false key's leaves come off the AST, since
  *  evaluate returns no units then. A negated leaf is reported with `negated` set, and at n 0 carries no offsets. */
-function compoundExcerpts(node, text, context, limit) {
+function compoundExcerpts(node, text, context, limit, scope) {
     const out = [];
     const leaves = leafNodes(node);
     for (const segment of Array.isArray(text) ? text : [text]) {
@@ -632,19 +631,19 @@ function compoundExcerpts(node, text, context, limit) {
         const positive = credited.length
             ? credited
             : leaves.filter(l => !l.negated)
-                .map(l => ({ id: l.node, n: leafCount(l.node, segment) }))
+                .map(l => ({ id: l.node, n: leafCount(l.node, segment, scope) }))
                 .filter(u => u.n > 0);
         const found = [];
         for (const { id, n } of positive) {
             const isRegex = id?.type === 'REGEX';
-            const [ex] = keyExcerpts(String(id?.value ?? ''), segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1);
+            const [ex] = keyExcerpts(String(id?.value ?? ''), segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1, scope);
             if (ex) found.push({ ...ex, term: String(id?.value ?? ''), n });
         }
         for (const { node: id } of leaves.filter(l => l.negated)) {
             const isRegex = id?.type === 'REGEX';
             const value = String(id?.value ?? '');
-            const n = leafCount(id, segment);
-            const [ex] = n ? keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1) : [];
+            const n = leafCount(id, segment, scope);
+            const [ex] = n ? keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1, scope) : [];
             // No hit, no offset: sorted last.
             found.push({ ...(ex ?? { at: Number.MAX_SAFE_INTEGER, to: Number.MAX_SAFE_INTEGER }), term: value, n, negated: true });
         }
@@ -659,14 +658,14 @@ function compoundExcerpts(node, text, context, limit) {
 
 /** `key -> AST` for a `{ keys, logic }` gate, or `key -> null` without one. One node per key, as keyUnits builds one per
  *  primary; applies to `?` and `/re/` keys too. */
-const gateNodeFor = (gate, caseSensitive, wholeWords) => {
+const gateNodeFor = (gate, caseSensitive, wholeWords, scope) => {
     const sec = (Array.isArray(gate?.keys) ? gate.keys : []).map(k => String(k ?? '').trim()).filter(Boolean);
     if (!sec.length) return () => null;
     const logic = Number(gate?.logic ?? WI_LOGIC.AND_ANY);
     return key => {
         // A gate list a caller did not run through secondaryKeys can hold a key the grammar refuses: it gates nothing rather than aborting.
         try {
-            return synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords });
+            return synthesizeSecondary(key, sec, logic, { caseSensitive, wholeWords }, scope);
         } catch {
             return null;
         }
@@ -674,22 +673,22 @@ const gateNodeFor = (gate, caseSensitive, wholeWords) => {
 };
 
 /** The leaves of the key's AST, or one synthetic TERM branch for a plain key with no gate. */
-const branchesOf = (key, node, caseSensitive, wholeWords) => (node
+const branchesOf = (key, node, caseSensitive, wholeWords, scope) => (node
     ? leafNodes(node).map(l => ({ id: l.node, negated: l.negated }))
-    : [{ id: { type: 'TERM', value: expandMacros(key), isCaseSensitive: caseSensitive, isExact: wholeWords }, negated: false }]);
+    : [{ id: { type: 'TERM', value: expandMacros(key, scope.macros), isCaseSensitive: caseSensitive, isExact: wholeWords, boundary: scope.boundary }, negated: false }]);
 
 /** Every place one branch landed in `text`, under its own flags; a REGEX branch carries its flags in the pattern. */
-const branchExcerpts = (id, text, context, limit) => {
+const branchExcerpts = (id, text, context, limit, scope) => {
     const isRegex = id?.type === 'REGEX';
-    return keyExcerpts(String(id?.value ?? ''), text, !isRegex && !!id?.isCaseSensitive, !isRegex && !!id?.isExact, context, limit);
+    return keyExcerpts(String(id?.value ?? ''), text, !isRegex && !!id?.isCaseSensitive, !isRegex && !!id?.isExact, context, limit, scope);
 };
 
 /** The AST a key is matched by: its gate's if it has one, its own if it is a `?` key, and none at all if it is a plain term. */
-const astFor = (key, gateOf) => {
+const astFor = (key, gateOf, scope) => {
     const gated = gateOf(key);
     if (gated) return gated;
     if (!key.startsWith('?')) return null;
-    try { return buildAst(key); } catch { return null; }
+    try { return buildAst(key, scope); } catch { return null; }
 };
 
 /** Overlapping spans folded to one, in source order: the first to start keeps its extent and every span it swallowed is
@@ -704,15 +703,15 @@ export function mergeSpans(spans) {
     return out;
 }
 
-export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan', gate } = {}) {
+export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan', gate, scope = defaultScope } = {}) {
     const segs = textSegments(text, matchWindow);
-    const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
+    const gateOf = gateNodeFor(gate, caseSensitive, wholeWords, scope);
     const spans = (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
         .flatMap(key => {
-            const branches = branchesOf(key, astFor(key, gateOf), caseSensitive, wholeWords);
+            const branches = branchesOf(key, astFor(key, gateOf, scope), caseSensitive, wholeWords, scope);
             return segs.flatMap(sg => {
-                const found = branches.flatMap(b => branchExcerpts(b.id, sg.text, 0, limit)
+                const found = branches.flatMap(b => branchExcerpts(b.id, sg.text, 0, limit, scope)
                     .map(e => ({ key, term: String(b.id?.value ?? ''), negated: b.negated, start: e.at + sg.at, end: e.to + sg.at })));
                 // As keyHits: no positive branch in the window, nothing marked in it.
                 return found.some(e => !e.negated) ? found : [];
@@ -727,31 +726,31 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
  *  verdict there, `leaves` every branch with that window's count and a `negated` flag, `excerpts` one per branch that matched
  *  (every occurrence when the key is a single positive branch), whose `at`/`to` index `text`. `count` sums the key's own
  *  occurrences over matched windows. `gate` is `{ keys, logic }`, applied to every key as keysecondary gates a primary. */
-export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate } = {}) {
+export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate, scope = defaultScope } = {}) {
     const segs = textSegments(text, matchWindow);
-    const gateOf = gateNodeFor(gate, caseSensitive, wholeWords);
+    const gateOf = gateNodeFor(gate, caseSensitive, wholeWords, scope);
     return (Array.isArray(keys) ? keys : [])
         .map(k => String(k ?? '').trim()).filter(Boolean)
         .map(key => {
             const bad = key.startsWith('?') ? validateSmartKey(key).find(v => v.severity === 'error') : null;
             if (bad) return { key, message: bad.message, segments: [] };
 
-            const ast = astFor(key, gateOf);
-            const branches = branchesOf(key, ast, caseSensitive, wholeWords);
+            const ast = astFor(key, gateOf, scope);
+            const branches = branchesOf(key, ast, caseSensitive, wholeWords, scope);
             const single = branches.length === 1 && !branches[0].negated;
 
             const segments = [];
             let count = 0;
             for (const sg of segs) {
-                const matched = countKey(key, sg.text, caseSensitive, wholeWords, undefined, ast) > 0;
-                if (matched) count += countKey(key, sg.text, caseSensitive, wholeWords);
-                const leaves = branches.map(b => ({ term: String(b.id?.value ?? ''), n: leafCount(b.id, sg.text), negated: b.negated }));
+                const matched = countKey(key, sg.text, caseSensitive, wholeWords, scope, ast) > 0;
+                if (matched) count += countKey(key, sg.text, caseSensitive, wholeWords, scope);
+                const leaves = branches.map(b => ({ term: String(b.id?.value ?? ''), n: leafCount(b.id, sg.text, scope), negated: b.negated }));
                 // No positive branch in this window: skipped, whatever its negatives count.
                 if (!leaves.some(l => l.n > 0 && !l.negated)) continue;
                 // First occurrence per branch, except for a single-positive-branch key, which carries every occurrence.
                 const excerpts = [];
                 for (const b of branches) {
-                    for (const ex of branchExcerpts(b.id, sg.text, context, single ? limit : 1)) {
+                    for (const ex of branchExcerpts(b.id, sg.text, context, single ? limit : 1, scope)) {
                         excerpts.push({ ...ex, term: String(b.id?.value ?? ''), negated: b.negated });
                     }
                 }
@@ -786,38 +785,38 @@ const excludeKeys = entry =>
 
 /** `node` with one NOT per excluded key ANDed on. synthesizeSecondary with no secondaries IS keyNode, so a key
  *  becomes a leaf whatever it holds — never serialised into an expression that would re-lex its quotes or sigils. */
-const withExclusions = (node, excl, flags) => excl.reduce(
-    (acc, k) => ({ type: 'AND', left: acc, right: { type: 'NOT', operand: synthesizeSecondary(k, [], WI_LOGIC.AND_ANY, flags) } }),
+const withExclusions = (node, excl, flags, scope) => excl.reduce(
+    (acc, k) => ({ type: 'AND', left: acc, right: { type: 'NOT', operand: synthesizeSecondary(k, [], WI_LOGIC.AND_ANY, flags, scope) } }),
     node);
 
 /** One primary key under the entry's selective logic, as one synthesised expression whose gate nodes carry weight 0.
  *  The cache id must join every input the tree depends on (US): registerTerms stamps scope-local indices onto it. */
-function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec) {
+function selectiveEval(entry, key, text, caseSensitive, wholeWords, sec, scope) {
     const logic = entry?.selectiveLogic ?? WI_LOGIC.AND_ANY;
     const excl = excludeKeys(entry);
     const flags = { caseSensitive, wholeWords };
     // sec.length separates the two lists in the id, or [a,b]+[] and [a]+[b] would share a cached tree.
-    const id = astId([key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, sec.length, ...sec, ...excl].join(SELECTIVE_SEP));
-    return evaluateAst(id, () => withExclusions(synthesizeSecondary(key, sec, logic, flags), excl, flags), text);
+    const id = [key, logic, caseSensitive ? 1 : 0, wholeWords ? 1 : 0, sec.length, ...sec, ...excl].join(SELECTIVE_SEP);
+    return evaluateAst(id, () => withExclusions(synthesizeSecondary(key, sec, logic, flags, scope), excl, flags, scope), text, scope);
 }
 
 const NO_UNITS = { units: [], logWeight: 0 };
 /** One key's scoring units against one segment, with the matched expression's `logWeight`; a plain key is one unit seen n times,
  *  and a matched expression with no units, every term weighted 0, is one unit at weight 0: a hit that scores nothing. */
-function keyUnits(entry, key, text, caseSensitive, wholeWords, sec) {
+function keyUnits(entry, key, text, caseSensitive, wholeWords, sec, scope) {
     const raw = String(key ?? '').trim();
     if (!raw || !text) return NO_UNITS;
 
     const gated = Boolean(sec?.length) || excludeKeys(entry).length > 0;
     if (gated || raw.startsWith('?')) {
         const { matched, units, logWeight = 0 } = gated
-            ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec ?? [])
-            : evaluateSmartKey(raw, text);
+            ? selectiveEval(entry, raw, text, caseSensitive, wholeWords, sec ?? [], scope)
+            : evaluateSmartKey(raw, text, scope);
         if (!matched) return NO_UNITS;
         return { units: units.length ? units : [{ id: raw, wsum: 0, n: 1 }], logWeight };
     }
 
-    const n = countKey(raw, text, caseSensitive, wholeWords);
+    const n = countKey(raw, text, caseSensitive, wholeWords, scope);
     return n > 0 ? { units: [{ id: raw, wsum: n, n }], logWeight: 0 } : NO_UNITS;
 }
 
@@ -831,7 +830,7 @@ export function repeatCurveOf(n, k1, curve = 'presence-log', R = 1) {
 
 /** BM25-style keyword score for one entry over one segment or scanSegments() output; the defaults are ST's world_info_case_sensitive and world_info_match_whole_words, the entry overriding.
  *  `logWeight` is the author's term weights as a log-odds offset, smartkeys `evaluate`'s, the strongest over every key and segment that matched. */
-export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault, repeatCurve = 'presence-log', repeatR = 1 } = {}) {
+export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault, repeatCurve = 'presence-log', repeatR = 1, scope = defaultScope } = {}) {
     if (!Array.isArray(keys) || !keys.length) {
         return { score: 0, hits: [], logWeight: 0 };
     }
@@ -848,7 +847,7 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
 
     // Prime secondaries with the primaries, not on first use: interning mid-loop dirties the automaton and discards every cached scan.
     const sec = secondaryKeys(entry);
-    if (segments.length) primeScan(sec.length ? [...keys, ...sec] : keys, segments);
+    if (segments.length) primeScan(sec.length ? [...keys, ...sec] : keys, segments, scope);
 
     let score = 0;
     const hits = [];
@@ -859,7 +858,7 @@ export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveD
         if (!segment) continue;
 
         for (const key of keys) {
-            const { units, logWeight: keyLog } = keyUnits(entry, key, segment, caseSensitive, wholeWords, sec);
+            const { units, logWeight: keyLog } = keyUnits(entry, key, segment, caseSensitive, wholeWords, sec, scope);
             if (!units.length) continue;
             logWeight = Math.max(logWeight, keyLog);
             let pooled = byKey.get(key);
