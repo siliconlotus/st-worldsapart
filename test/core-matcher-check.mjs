@@ -4,13 +4,16 @@ import { coreReadsAsRegex, countKey, decoratorArg, hasDecorator, hasPromoteDecor
 import { createScanScope, synthesizeSecondary, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
+
 const { AND_ANY, NOT_ALL, NOT_ANY, AND_ALL } = WI_LOGIC;
 const CURLY = String.fromCharCode(0x2019);
 
 /** The primary's count as the shipped path reports it, under the given entry-level match flags. */
 const count = (primary, secondaries, logic, text, flags = {}) => {
     const entry = { key: [primary], keysecondary: secondaries, selectiveLogic: logic, ...flags };
-    const hit = keywordScore(entry, text, entry.key, { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false })
+    const hit = keywordScore(entry, text, entry.key, { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false })
         .hits.find(h => h.key === primary);
     return hit ? hit.count : 0;
 };
@@ -113,15 +116,15 @@ run([
 
 // --- the builder's own contract --------------------------------------------------------------------
 {
-    eq(synthesizeSecondary('', ['a'], AND_ANY), null, 'a blank primary has nothing to synthesise');
-    eq(synthesizeSecondary('k', [], AND_ANY).type, 'TERM', 'no secondaries: the tree is just the primary');
-    eq(synthesizeSecondary('k', ['a'], AND_ANY).type, 'AND', 'a gate is ANDed onto the primary under every logic');
-    eq(synthesizeSecondary('k', ['a'], NOT_ANY).right.type, 'NOT', 'NOT_ANY negates each secondary');
-    eq(synthesizeSecondary('k', ['a', 'b'], NOT_ALL).right.type, 'NOT', 'NOT_ALL negates their conjunction');
-    eq(synthesizeSecondary('k', ['a', 'b'], AND_ANY).right.type, 'OR', 'AND_ANY joins them with OR');
-    eq(synthesizeSecondary('k', ['a', 'b'], AND_ALL).right.type, 'AND', 'AND_ALL joins them with AND');
-    eq(synthesizeSecondary('k', ['a'], AND_ALL).right.weight, 1, 'a secondary node carries weight 1, like any term');
-    eq(synthesizeSecondary('k', ['a'], AND_ALL).left.weight, 1, '...the same as the primary');
+    eq(synthesizeSecondary('', ['a'], AND_ANY, {}, NEUTRAL), null, 'a blank primary has nothing to synthesise');
+    eq(synthesizeSecondary('k', [], AND_ANY, {}, NEUTRAL).type, 'TERM', 'no secondaries: the tree is just the primary');
+    eq(synthesizeSecondary('k', ['a'], AND_ANY, {}, NEUTRAL).type, 'AND', 'a gate is ANDed onto the primary under every logic');
+    eq(synthesizeSecondary('k', ['a'], NOT_ANY, {}, NEUTRAL).right.type, 'NOT', 'NOT_ANY negates each secondary');
+    eq(synthesizeSecondary('k', ['a', 'b'], NOT_ALL, {}, NEUTRAL).right.type, 'NOT', 'NOT_ALL negates their conjunction');
+    eq(synthesizeSecondary('k', ['a', 'b'], AND_ANY, {}, NEUTRAL).right.type, 'OR', 'AND_ANY joins them with OR');
+    eq(synthesizeSecondary('k', ['a', 'b'], AND_ALL, {}, NEUTRAL).right.type, 'AND', 'AND_ALL joins them with AND');
+    eq(synthesizeSecondary('k', ['a'], AND_ALL, {}, NEUTRAL).right.weight, 1, 'a secondary node carries weight 1, like any term');
+    eq(synthesizeSecondary('k', ['a'], AND_ALL, {}, NEUTRAL).left.weight, 1, '...the same as the primary');
 }
 
 console.log('ok   core parity: keysecondary\'s four logics, entry flags, literals, no refusals');
@@ -129,9 +132,7 @@ console.log('ok   core parity: keysecondary\'s four logics, entry flags, literal
 // --- `selective: false` turns the list off; core reads the field, and character cards are what write it
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
-    const on = (sel, logic, text) => keywordScore(
-        { key: ['cosmonaut'], keysecondary: ['apollo'], selectiveLogic: logic, ...(sel === undefined ? {} : { selective: sel }) },
-        text, undefined, cfg).score > 0;
+    const on = (sel, logic, text) => keywordScore({ key: ['cosmonaut'], keysecondary: ['apollo'], selectiveLogic: logic, ...(sel === undefined ? {} : { selective: sel }) }, text, undefined, { ...cfg, scope: NEUTRAL }).score > 0;
 
     // The NOT_* rows carry the secondary: an exclusion fails on PRESENCE, so that is what proves the list went unread.
     eq(on(false, 0, 'the cosmonaut waited'), true, 'selective false: AND_ANY does not gate on a missing secondary');
@@ -149,43 +150,43 @@ console.log('ok   core parity: keysecondary\'s four logics, entry flags, literal
 }
 
 // --- countKey parity: substring, whole-word, case, regex
-eq(countKey('Jubilee', 'the Jubilees arrived', false, false), 1, 'substring: Jubilee inside Jubilees (whole-word off)');
-eq(countKey('Jubilee', 'the Jubilees arrived', false, true), 0, 'whole-word on: not inside a larger word');
-eq(countKey('Jubilee', 'Jubilee met Jubilee', false, true), 2, 'whole-word counts standalone occurrences');
-eq(countKey('cat', 'cat cats scatter', false, false), 3, 'substring counts every occurrence');
-eq(countKey('cat', 'cat cats scatter', false, true), 1, 'whole-word counts only the standalone');
-eq(countKey('v2', 'the v2 model', false, true), 1, 'single token with a digit, whole-word');
-eq(countKey('caf', 'the caf\u00e9 was busy', false, true), 0, 'whole-word: ASCII prefix does not match into an accented word');
-eq(countKey('caf\u00e9', 'the caf\u00e9 was busy', false, true), 1, 'whole-word: the accented word itself still matches');
-eq(countKey('\u041c\u0430\u0440\u0438', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 0, 'whole-word: Cyrillic prefix does not leak');
-eq(countKey('\u041c\u0430\u0440\u0438\u044e', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true), 1, 'whole-word: the Cyrillic word itself matches');
-eq(countKey('caf', 'the caf\u00e9 was busy', false, false), 1, 'substring mode is unaffected');
-eq(countKey('hot tub', 'in the hot tub', false, true), 1, 'multi-word key, whole-word, standing alone');
-eq(countKey('Kyle', 'kyle KYLE Kyle', false, false), 3, 'case-insensitive by default');
-eq(countKey('Kyle', 'kyle KYLE', true, false), 0, 'case-sensitive when asked');
-eq(countKey('/jubi\\w+/i', 'the Jubilees came', false, true), 1, 'regex key with flags overrides options');
-eq(countKey('nope', 'nothing here', false, false), 0, 'no match is zero');
+eq(countKey('Jubilee', 'the Jubilees arrived', false, false, NEUTRAL), 1, 'substring: Jubilee inside Jubilees (whole-word off)');
+eq(countKey('Jubilee', 'the Jubilees arrived', false, true, NEUTRAL), 0, 'whole-word on: not inside a larger word');
+eq(countKey('Jubilee', 'Jubilee met Jubilee', false, true, NEUTRAL), 2, 'whole-word counts standalone occurrences');
+eq(countKey('cat', 'cat cats scatter', false, false, NEUTRAL), 3, 'substring counts every occurrence');
+eq(countKey('cat', 'cat cats scatter', false, true, NEUTRAL), 1, 'whole-word counts only the standalone');
+eq(countKey('v2', 'the v2 model', false, true, NEUTRAL), 1, 'single token with a digit, whole-word');
+eq(countKey('caf', 'the caf\u00e9 was busy', false, true, NEUTRAL), 0, 'whole-word: ASCII prefix does not match into an accented word');
+eq(countKey('caf\u00e9', 'the caf\u00e9 was busy', false, true, NEUTRAL), 1, 'whole-word: the accented word itself still matches');
+eq(countKey('\u041c\u0430\u0440\u0438', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true, NEUTRAL), 0, 'whole-word: Cyrillic prefix does not leak');
+eq(countKey('\u041c\u0430\u0440\u0438\u044e', '\u0432\u0441\u0442\u0440\u0435\u0442\u0438\u043b \u041c\u0430\u0440\u0438\u044e', false, true, NEUTRAL), 1, 'whole-word: the Cyrillic word itself matches');
+eq(countKey('caf', 'the caf\u00e9 was busy', false, false, NEUTRAL), 1, 'substring mode is unaffected');
+eq(countKey('hot tub', 'in the hot tub', false, true, NEUTRAL), 1, 'multi-word key, whole-word, standing alone');
+eq(countKey('Kyle', 'kyle KYLE Kyle', false, false, NEUTRAL), 3, 'case-insensitive by default');
+eq(countKey('Kyle', 'kyle KYLE', true, false, NEUTRAL), 0, 'case-sensitive when asked');
+eq(countKey('/jubi\\w+/i', 'the Jubilees came', false, true, NEUTRAL), 1, 'regex key with flags overrides options');
+eq(countKey('nope', 'nothing here', false, false, NEUTRAL), 0, 'no match is zero');
 // --- markup is masked for a literal key, where core matches inside a tag: a named divergence, not parity
-eq(countKey('size', '<div style="font-size:13px;">a minotaur</div>', false, false), 0,
+eq(countKey('size', '<div style="font-size:13px;">a minotaur</div>', false, false, NEUTRAL), 0,
     'a literal key does not match inside a tag — core would count this 1');
-eq(countKey('div', '<div>a minotaur</div>', false, false), 0, 'nor the tag name itself');
-eq(countKey('minotaur', '<div style="font-size:13px;">a minotaur</div>', false, false), 1, 'the text between tags matches as ever');
-eq(countKey('/font-size/', '<div style="font-size:13px;">a minotaur</div>', false, false), 1,
+eq(countKey('div', '<div>a minotaur</div>', false, false, NEUTRAL), 0, 'nor the tag name itself');
+eq(countKey('minotaur', '<div style="font-size:13px;">a minotaur</div>', false, false, NEUTRAL), 1, 'the text between tags matches as ever');
+eq(countKey('/font-size/', '<div style="font-size:13px;">a minotaur</div>', false, false, NEUTRAL), 1,
     'a regex key is the opt-in and sees the raw text');
-eq(countKey('gfx', '<!-- GFX_START -->', false, false), 0, 'a comment is markup too');
+eq(countKey('gfx', '<!-- GFX_START -->', false, false, NEUTRAL), 0, 'a comment is markup too');
 
 // --- Match Whole Words: multi-word keys included, and the boundary class is the wordBoundary setting ------
 {
-    eq(countKey('satyr camp', 'the satyr camps burned', false, true), 0, 'a multi-word key is NOT exempt from whole-word');
-    eq(countKey('satyr camp', 'the satyr camp burned', false, true), 1, '...and still matches standing alone');
-    eq(countKey('satyr camp', 'the satyr camps burned', false, false), 1, 'substring mode is where the plural still counts');
-    eq(countKey('hot tub', 'unhot tub', false, true), 0, 'the LEFT edge of a multi-word key is bounded too');
+    eq(countKey('satyr camp', 'the satyr camps burned', false, true, NEUTRAL), 0, 'a multi-word key is NOT exempt from whole-word');
+    eq(countKey('satyr camp', 'the satyr camp burned', false, true, NEUTRAL), 1, '...and still matches standing alone');
+    eq(countKey('satyr camp', 'the satyr camps burned', false, false, NEUTRAL), 1, 'substring mode is where the plural still counts');
+    eq(countKey('hot tub', 'unhot tub', false, true, NEUTRAL), 0, 'the LEFT edge of a multi-word key is bounded too');
 
-    eq(countKey('Joe', '_Joe_ arrived', false, true), 1, 'underscore is a boundary, so emphasis does not hide a word');
-    eq(countKey('Joe', 'Joe_Bloggs', false, true), 1, '...in both directions, including an identifier');
+    eq(countKey('Joe', '_Joe_ arrived', false, true, NEUTRAL), 1, 'underscore is a boundary, so emphasis does not hide a word');
+    eq(countKey('Joe', 'Joe_Bloggs', false, true, NEUTRAL), 1, '...in both directions, including an identifier');
 
     // x + U+0301 has no precomposed form, so it survives the fold's NFC pass as a real mark; e + U+0301 would not.
-    eq(countKey('x', 'the x\u0301 mark', false, true), 0, 'a combining mark is inside the word, not a boundary');
+    eq(countKey('x', 'the x\u0301 mark', false, true, NEUTRAL), 0, 'a combining mark is inside the word, not a boundary');
 
     const permissive = createScanScope({ boundary: 'permissive' });
     eq(countKey('Joe', "that is Joe's coat", false, true, permissive), 1, 'permissive: an apostrophe is a boundary, so a possessive matches');
@@ -199,7 +200,7 @@ eq(countKey('gfx', '<!-- GFX_START -->', false, false), 0, 'a comment is markup 
     eq(countKey('Joe', 'Joe arrived', false, true, strict), 1, 'strict still matches a word standing alone');
     eq(countKey("Joe's", "that is Joe's coat", false, true, strict), 1, '...and the affixed form is reachable by keying it');
     eq(countKey('/\\bJoe\\b/', "that is Joe's coat", false, true, strict), 1, 'a \\b regex key recovers permissive behaviour');
-    eq(countKey('Joe', "that is Joe's coat", false, true), 0, 'without a scope the boundary is strict');
+    eq(countKey('Joe', "that is Joe's coat", false, true, NEUTRAL), 0, 'without a scope the boundary is strict');
 
     eq(countKey('Joe', "that is Joe's coat", false, true, createScanScope({ boundary: 'nonsense' })), 0, 'an unknown mode falls back to the default');
     eq(countKey('Joe', 'Joe arrived', false, true, createScanScope({ boundary: 'constructor' })), 1, 'a prototype property name is not a mode');
@@ -258,32 +259,32 @@ console.log('ok   doubled hyphen: an em dash is a boundary, a compound hyphen is
 
 // --- apostrophe and orthographic normalisation ------------------------------------------------------
 
-eq(countKey("Cap'n Joe", `the ${CURLY}n is silent at Cap${CURLY}n Joe${CURLY}s`, false, false), 1, 'straight key matches curly text');
-eq(countKey(`Cap${CURLY}n Joe`, "docked at Cap'n Joe's", false, false), 1, 'curly key matches straight text');
-eq(countKey("Kyle's heat", `${CURLY}bout Kyle${CURLY}s heat again`, false, false), 1, 'possessive key, curly text');
-eq(countKey(`Jeffrey${CURLY}s watch`, "Jeffrey's watch stopped", false, false), 1, 'curly possessive key, straight text');
-eq(countKey("Cap'n Joe", `Cap${CURLY}n Joe`, true, false), 1, 'case-sensitive still normalises apostrophes');
-eq(countKey("cap'n joe", `Cap${CURLY}n Joe`, true, false), 0, 'case-sensitive still respects CASE');
-eq(countKey("don't", `I don${CURLY}t think so`, false, true), 1, 'whole-word matching normalises too');
+eq(countKey("Cap'n Joe", `the ${CURLY}n is silent at Cap${CURLY}n Joe${CURLY}s`, false, false, NEUTRAL), 1, 'straight key matches curly text');
+eq(countKey(`Cap${CURLY}n Joe`, "docked at Cap'n Joe's", false, false, NEUTRAL), 1, 'curly key matches straight text');
+eq(countKey("Kyle's heat", `${CURLY}bout Kyle${CURLY}s heat again`, false, false, NEUTRAL), 1, 'possessive key, curly text');
+eq(countKey(`Jeffrey${CURLY}s watch`, "Jeffrey's watch stopped", false, false, NEUTRAL), 1, 'curly possessive key, straight text');
+eq(countKey("Cap'n Joe", `Cap${CURLY}n Joe`, true, false, NEUTRAL), 1, 'case-sensitive still normalises apostrophes');
+eq(countKey("cap'n joe", `Cap${CURLY}n Joe`, true, false, NEUTRAL), 0, 'case-sensitive still respects CASE');
+eq(countKey("don't", `I don${CURLY}t think so`, false, true, NEUTRAL), 1, 'whole-word matching normalises too');
 for (const [name, ch] of [['left single quote', '‘'], ['modifier letter', 'ʼ'], ['prime', '′'], ['acute', '´'], ['grave', '`'],
     ['modifier letter prime', 'ʹ'], ['low-9 quote', '‚'], ['high-reversed-9 quote', '‛'],
     ['left single guillemet', '‹'], ['right single guillemet', '›']]) {
-    eq(countKey("Cap'n", `Cap${ch}n`, false, false), 1, `${name} normalises`);
+    eq(countKey("Cap'n", `Cap${ch}n`, false, false, NEUTRAL), 1, `${name} normalises`);
 }
 for (const [name, ch] of [['double prime', '″'], ['modifier letter double prime', 'ʺ'], ['low-9 double', '„'],
     ['high-reversed-9 double', '‟'], ['left guillemet', '«'], ['right guillemet', '»']]) {
-    eq(countKey('6" pipe', `a 6${ch} pipe`, false, false), 1, `${name} normalises`);
+    eq(countKey('6" pipe', `a 6${ch} pipe`, false, false, NEUTRAL), 1, `${name} normalises`);
 }
-eq(countKey(`5'10"`, '5′10″ barefoot', false, false), 1, 'both primes fold, so a height key matches typeset prose');
-eq(countKey('"title"', '《title》', false, false), 0, 'CJK angle brackets are NOT folded');
-eq(countKey('"spoken"', '「spoken」', false, false), 0, 'CJK corner brackets are NOT folded');
-eq(countKey('a-b', 'a–b', false, false), 1, 'en dash normalises to hyphen');
-eq(countKey('"quoted"', '“quoted”', false, false), 1, 'curly double quotes normalise');
-eq(countKey('wait--no', 'wait—no', false, false), 1, 'em dash normalises to TWO hyphens');
-eq(countKey('wait-no', 'wait—no', false, false), 0, 'em dash does NOT collapse onto a single hyphen');
-eq(countKey('a...b', 'a…b', false, false), 1, 'ellipsis normalises');
-eq(countKey('a b', 'a b', false, false), 1, 'non-breaking space normalises');
-eq(countKey('three-inch', 'three inch', false, false), 1, 'DIVERGENCE: a key expands hyphen <-> space, where core matches neither way');
+eq(countKey(`5'10"`, '5′10″ barefoot', false, false, NEUTRAL), 1, 'both primes fold, so a height key matches typeset prose');
+eq(countKey('"title"', '《title》', false, false, NEUTRAL), 0, 'CJK angle brackets are NOT folded');
+eq(countKey('"spoken"', '「spoken」', false, false, NEUTRAL), 0, 'CJK corner brackets are NOT folded');
+eq(countKey('a-b', 'a–b', false, false, NEUTRAL), 1, 'en dash normalises to hyphen');
+eq(countKey('"quoted"', '“quoted”', false, false, NEUTRAL), 1, 'curly double quotes normalise');
+eq(countKey('wait--no', 'wait—no', false, false, NEUTRAL), 1, 'em dash normalises to TWO hyphens');
+eq(countKey('wait-no', 'wait—no', false, false, NEUTRAL), 0, 'em dash does NOT collapse onto a single hyphen');
+eq(countKey('a...b', 'a…b', false, false, NEUTRAL), 1, 'ellipsis normalises');
+eq(countKey('a b', 'a b', false, false, NEUTRAL), 1, 'non-breaking space normalises');
+eq(countKey('three-inch', 'three inch', false, false, NEUTRAL), 1, 'DIVERGENCE: a key expands hyphen <-> space, where core matches neither way');
 
 // --- macro keys: core substitutes the whole key and substring-matches it; WA the same for a plain key. A pattern diverges.
 {
@@ -293,21 +294,21 @@ eq(countKey('three-inch', 'three inch', false, false), 1, 'DIVERGENCE: a key exp
     eq(countKey('/{{char}}/', 'Dr. Brown', false, false, scope), 1, 'a pattern takes the value');
     eq(countKey('/{{char}}/', 'DrX Brown', false, false, scope), 0, 'DIVERGENCE: the value is inserted escaped, where core inserts it raw and its dot would match here');
 }
-eq(countKey('three inch', 'three-inch', false, false), 0, 'one way only: a spaces-only key interns no hyphenated form');
-eq(countKey('wait-no', 'wait\u2014no', false, false), 0, 'the expansion is not the fold: an em-dash stays two hyphens and no variant reaches it');
-eq(countKey('Bose\u2013Einstein', 'the Bose Einstein condensate', false, false), 1, 'an en-dash key expands as the hyphen it folds to');
-eq(countKey('Jos\u00e9', `Jose\u0301 Navarro`, false, false), 1, 'decomposed text matches a precomposed key');
-eq(countKey(`Jose\u0301`, 'Jos\u00e9 Navarro', false, false), 1, 'precomposed text matches a decomposed key');
-eq(countKey(`Jose\u0301`, `Jose\u0301 Navarro`, false, false), 1, 'decomposed both sides still matches');
-eq(countKey("Cap'n", `Cap'n and Cap${CURLY}n and Capʼn`, false, false), 3, 'mixed forms all counted');
+eq(countKey('three inch', 'three-inch', false, false, NEUTRAL), 0, 'one way only: a spaces-only key interns no hyphenated form');
+eq(countKey('wait-no', 'wait\u2014no', false, false, NEUTRAL), 0, 'the expansion is not the fold: an em-dash stays two hyphens and no variant reaches it');
+eq(countKey('Bose\u2013Einstein', 'the Bose Einstein condensate', false, false, NEUTRAL), 1, 'an en-dash key expands as the hyphen it folds to');
+eq(countKey('Jos\u00e9', `Jose\u0301 Navarro`, false, false, NEUTRAL), 1, 'decomposed text matches a precomposed key');
+eq(countKey(`Jose\u0301`, 'Jos\u00e9 Navarro', false, false, NEUTRAL), 1, 'precomposed text matches a decomposed key');
+eq(countKey(`Jose\u0301`, `Jose\u0301 Navarro`, false, false, NEUTRAL), 1, 'decomposed both sides still matches');
+eq(countKey("Cap'n", `Cap'n and Cap${CURLY}n and Capʼn`, false, false, NEUTRAL), 3, 'mixed forms all counted');
 console.log('ok   apostrophe normalisation: straight/curly interchangeable, orthographic variants folded, meaning-bearing characters untouched');
 
 // --- markdown in the scan text: in-word emphasis is a recorded limit (countKey's docblock)
-eq(countKey('sister', "She's my *sister*, Tim", false, false), 1, 'emphasis around a whole word: substring matches');
-eq(countKey('sister', "She's my *sister*, Tim", false, true), 1, '...and whole-word matches, since * is a boundary');
-eq(countKey('sisterhood', 'It is called *sister*hood', false, false), 0, 'in-word emphasis BREAKS a substring match');
-eq(countKey('sister', 'It is called *sister*hood', false, true), 1, 'in-word emphasis CREATES a false word boundary');
-eq(countKey('sister', 'It is called sisterhood', false, true), 0, '...which the unemphasised control correctly does not');
+eq(countKey('sister', "She's my *sister*, Tim", false, false, NEUTRAL), 1, 'emphasis around a whole word: substring matches');
+eq(countKey('sister', "She's my *sister*, Tim", false, true, NEUTRAL), 1, '...and whole-word matches, since * is a boundary');
+eq(countKey('sisterhood', 'It is called *sister*hood', false, false, NEUTRAL), 0, 'in-word emphasis BREAKS a substring match');
+eq(countKey('sister', 'It is called *sister*hood', false, true, NEUTRAL), 1, 'in-word emphasis CREATES a false word boundary');
+eq(countKey('sister', 'It is called sisterhood', false, true, NEUTRAL), 0, '...which the unemphasised control correctly does not');
 console.log('ok   markdown in the scan text: whole-word emphasis fine, in-word emphasis is a known limit');
 
 // --- `@@promote`, under core's decorator grammar (parseDecorators, world-info.js): leading `@@` lines only, `@@@` fallback
@@ -390,15 +391,15 @@ console.log('ok   @@ignore_on_max_context closes the @@@ chain');
 {
     // Core's own list (`parseRegexFromString`): g i m s u y. `d` and `v` postdate it.
     for (const f of ['', 'i', 'gi', 'm', 's', 'u', 'y']) {
-        eq(countKey(`/ca[t]/${f}`, 'the cat', false, false), f === 'y' ? 0 : 1, `core's own flag "${f}" runs in WA too`);
+        eq(countKey(`/ca[t]/${f}`, 'the cat', false, false, NEUTRAL), f === 'y' ? 0 : 1, `core's own flag "${f}" runs in WA too`);
         eq(coreReadsAsRegex(`/ca[t]/${f}`), true, `...and core reads it as a pattern`);
     }
     for (const f of ['d', 'v', 'iv']) {
-        eq(countKey(`/ca[t]/${f}`, 'the cat', false, false), 1, `DIVERGENCE: WA runs the post-2021 flag "${f}"`);
+        eq(countKey(`/ca[t]/${f}`, 'the cat', false, false, NEUTRAL), 1, `DIVERGENCE: WA runs the post-2021 flag "${f}"`);
         eq(coreReadsAsRegex(`/ca[t]/${f}`), false, `...where core reads the whole thing as literal text`);
     }
     // u and v are mutually exclusive, so the pattern never compiles — refused, not silently run.
-    eq(countKey('/ca[t]/uv', 'the cat', false, false), 0, 'uv together is an invalid regex, so it counts 0');
+    eq(countKey('/ca[t]/uv', 'the cat', false, false, NEUTRAL), 0, 'uv together is an invalid regex, so it counts 0');
     eq(validateSmartKey('/ca[t]/uv')[0]?.code, 'regex-invalid', '...and is reported as one');
     // The same divergence the unescaped slash is: WA runs what JS runs, and the Studio says core will not.
     eq(validateSmartKey('/ca[t]/v')[0]?.code, 'regex-core-refuses', 'a v key warns that core refuses it');

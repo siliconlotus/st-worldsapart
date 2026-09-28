@@ -1,8 +1,12 @@
 // lab-check.mjs — lab.mjs: entryGate, entryFlags, runBook, runSpans, labScan. Self-checking; run with no arguments.
 
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { entryFlags, entryGate, labMessages, labScan, runBook, runSpans, windowTip } from '../extension/lab.mjs';
 import { WI_LOGIC } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
+
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
 
 
 const text = 'His breath is fast.\n\nHe looks slowly.\n\nHis breath hitches before slowly leveling out.';
@@ -30,7 +34,7 @@ const entries = [
     { uid: 5, world: 'B', key: ['breath'], disable: true },
     { uid: 6, world: 'B', key: [] },
 ];
-const run = runBook(entries, text, para);
+const run = runBook(entries, text, { ...para, scope: NEUTRAL });
 eq(run.scanned, 4, 'a disabled entry and an unkeyed one are not scanned');
 eq(run.entries.map(h => h.entry.uid).join(), '1,2,3', 'the entries that matched, in the order given');
 eq(run.entries[1].rows[0].count, 1, 'a gated entry matches only where its secondary is in the same window');
@@ -38,33 +42,33 @@ eq(run.books.join(), 'B,C', 'the books scanned, deduped in encounter order');
 eq(run.keyList.join(), 'breath,slow', 'the run\'s distinct keys — one key two entries found is one term to colour');
 // Core keyword-matches a vectorized entry, so skipVectorized is a filter the caller asks for, not a default.
 const withVec = [...entries, { uid: 7, world: 'B', key: ['breath'], vectorized: true }];
-eq(runBook(withVec, text, para).scanned, 5, 'a vectorized entry is scanned like any other by default');
-eq(runBook(withVec, text, { ...para, skipVectorized: true }).scanned, 4, 'and left out when the reader is tuning keys');
-eq(runBook(withVec, text, { ...para, skipVectorized: true }).entries.some(h => h.entry.uid === 7), false,
+eq(runBook(withVec, text, { ...para, scope: NEUTRAL }).scanned, 5, 'a vectorized entry is scanned like any other by default');
+eq(runBook(withVec, text, { scope: NEUTRAL, ...para, skipVectorized: true }).scanned, 4, 'and left out when the reader is tuning keys');
+eq(runBook(withVec, text, { scope: NEUTRAL, ...para, skipVectorized: true }).entries.some(h => h.entry.uid === 7), false,
     'so it cannot appear among the hits either');
-eq(runBook(entries, 'a quiet room', para).entries.length, 0, 'a text no key matches yields no entries...');
-eq(runBook(entries, 'a quiet room', para).scanned, 4, '...and still reports what was scanned');
+eq(runBook(entries, 'a quiet room', { ...para, scope: NEUTRAL }).entries.length, 0, 'a text no key matches yields no entries...');
+eq(runBook(entries, 'a quiet room', { ...para, scope: NEUTRAL }).scanned, 4, '...and still reports what was scanned');
 
 // --- a run's override: the Lab's boxes, set over every entry's own flags, so on and off can be compared on one run
 {
     const strict = [{ uid: 8, world: 'B', key: ['Breath'], caseSensitive: true }, { uid: 9, world: 'B', key: ['slow'], matchWholeWords: true }];
-    eq(runBook(strict, text, para).entries.map(h => h.entry.uid).join(), '', 'as written, the case-sensitive key misses lowercase and the whole-word key misses "slowly"');
-    eq(runBook(strict, text, { ...para, override: { caseSensitive: false, wholeWords: false } }).entries.map(h => h.entry.uid).join(), '8,9', 'an override replaces each entry\'s flag for the run');
-    eq(runBook(strict, text, { ...para, override: { caseSensitive: false } }).entries.map(h => h.entry.uid).join(), '8', '...and only the flag it names');
-    const run = runBook(strict, text, { ...para, override: { wholeWords: false } });
-    eq(runSpans(run, text, { ...para, override: { wholeWords: false } }).length > 0, true, 'the spans follow the same override');
-    eq(labScan({ hay: text, run, matchWindow: 'paragraph', override: { wholeWords: false } }).spans.length > 0, true, '...through labScan too');
+    eq(runBook(strict, text, { ...para, scope: NEUTRAL }).entries.map(h => h.entry.uid).join(), '', 'as written, the case-sensitive key misses lowercase and the whole-word key misses "slowly"');
+    eq(runBook(strict, text, { scope: NEUTRAL, ...para, override: { caseSensitive: false, wholeWords: false } }).entries.map(h => h.entry.uid).join(), '8,9', 'an override replaces each entry\'s flag for the run');
+    eq(runBook(strict, text, { scope: NEUTRAL, ...para, override: { caseSensitive: false } }).entries.map(h => h.entry.uid).join(), '8', '...and only the flag it names');
+    const run = runBook(strict, text, { scope: NEUTRAL, ...para, override: { wholeWords: false } });
+    eq(runSpans(run, text, { scope: NEUTRAL, ...para, override: { wholeWords: false } }).length > 0, true, 'the spans follow the same override');
+    eq(labScan({ scope: NEUTRAL, hay: text, run, matchWindow: 'paragraph', override: { wholeWords: false } }).spans.length > 0, true, '...through labScan too');
 }
 
 // --- runSpans: one fold over the union, not one per entry
-const spans = runSpans(run, text, para);
+const spans = runSpans(run, text, { ...para, scope: NEUTRAL });
 eq(spans.map(sp => text.slice(sp.start, sp.end)).join(' '), 'breath slow breath slow',
     'every entry\'s hits, in source order — including the window its gate refused, which is where the branch still matched');
 eq(spans[0].keys.length, 3, 'a word several entries reached is one span naming them all: two keys here, and one gate\'s term');
 
 // --- labScan: the same shape in both modes, so a caller cannot read a field that only one branch has
-const typed = labScan({ hay: text, keys: 'breath', sec: 'slow', logic: WI_LOGIC.NOT_ANY, ...para });
-const applied = labScan({ hay: text, run, ...para });
+const typed = labScan({ scope: NEUTRAL, hay: text, keys: 'breath', sec: 'slow', logic: WI_LOGIC.NOT_ANY, ...para });
+const applied = labScan({ scope: NEUTRAL, hay: text, run, ...para });
 eq(Object.keys(typed).sort().join(), 'gate,keys,rows,spans', 'a typed list returns keys, rows, gate and spans');
 eq(Object.keys(applied).sort().join(), 'gate,keys,rows,spans', 'and an applied run returns the same four');
 eq(typed.keys.join(), 'breath', 'the typed keys are what a typed list colours by');
@@ -136,16 +140,16 @@ eq(windowTip(win('short', [{ at: 0, to: 5 }]), { at: 0, to: 5 }), '«short»', '
     const a = 'Alice waved.', b = 'Bob waved.';
     const hay = `${a}\n\n${b}`;
     const parts = [{ text: a, at: 0, macros: { '{{char}}': 'Alice' } }, { text: b, at: a.length + 2, macros: { '{{char}}': 'Bob' } }];
-    const r = labScan({ hay, keys: '{{char}}', matchWindow: 'paragraph', parts });
+    const r = labScan({ scope: NEUTRAL, hay, keys: '{{char}}', matchWindow: 'paragraph', parts });
     eq(r.rows.length, 1, 'one row per key over all the parts');
     eq(r.rows[0].count, 2, 'each part matches under its own map');
     eq(r.rows[0].segments.map(sg => sg.at).join(), `0,${a.length + 2}`, 'segments carry their offset into the joined text');
     eq(r.spans.map(sp => hay.slice(sp.start, sp.end)).join('|'), 'Alice|Bob', 'spans land on the joined text');
     const entries = [{ uid: 1, world: 'B', key: ['{{char}}'] }, { uid: 2, world: 'B', key: ['nothing'] }];
-    const run = runBook(entries, hay, { matchWindow: 'paragraph', parts });
+    const run = runBook(entries, hay, { scope: NEUTRAL, matchWindow: 'paragraph', parts });
     eq(run.entries.map(h => h.entry.uid).join(), '1', 'a run merges per part too');
     eq(run.entries[0].rows[0].count, 2, '...summing a key\'s count across the parts');
     eq(run.scanned, 2, '...and counts each entry once');
-    eq(runSpans(run, hay, { matchWindow: 'paragraph', parts }).length, 2, 'a run\'s spans follow the parts');
-    eq(labScan({ hay, keys: '{{char}}', matchWindow: 'paragraph' }).rows[0]?.count ?? 0, 0, 'without parts the map in force is used, and a parts scan left it as it was: nothing');
+    eq(runSpans(run, hay, { scope: NEUTRAL, matchWindow: 'paragraph', parts }).length, 2, 'a run\'s spans follow the parts');
+    eq(labScan({ scope: NEUTRAL, hay, keys: '{{char}}', matchWindow: 'paragraph' }).rows[0]?.count ?? 0, 0, 'without parts the map in force is used, and a parts scan left it as it was: nothing');
 }

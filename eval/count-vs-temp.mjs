@@ -4,9 +4,13 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { mean, arg as sharedArg } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
+
+/** No macros and the strict boundary: what these counts are taken under. */
+const SCOPE = createScanScope();
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
@@ -90,7 +94,7 @@ for (const [arm, M] of Object.entries(arms)) {
             let hit = 0;
             for (const x of c) if (refs.has(x)) hit++;
             prec.push(hit / c.size);
-            att.push([...c].filter(x => countKey(x, TEXT[id] ?? '', false, false) > 0).length / c.size);
+            att.push([...c].filter(x => countKey(x, TEXT[id] ?? '', false, false, SCOPE) > 0).length / c.size);
         }
         const u = new Set(sets.flatMap(s => [...s]));
         uni.push(u.size); uniRef.push(share(u));

@@ -3,9 +3,13 @@
 import { readFileSync } from 'node:fs';
 import * as matcher from '../extension/matcher.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { openBundle } from '../extension/grading.mjs';
 import { isConstant } from '../extension/layout.mjs';
 import { gradeValue } from './lib/metrics.mjs';
+
+/** No macros and the strict boundary: what these counts are taken under. */
+const SCOPE = createScanScope();
 
 const files = process.argv.slice(2);
 if (!files.length) {
@@ -52,7 +56,7 @@ for (const file of files) {
     for (const e of entries) {
         if (matched.has(Number(e.uid)) || e.disable || isConstant(e) || (e.vectorized && suppress)) continue;
         eligible++;
-        const hits = (e.key ?? []).filter(k => countKey(k, sceneText, e.caseSensitive, e.matchWholeWords) > 0);
+        const hits = (e.key ?? []).filter(k => countKey(k, sceneText, e.caseSensitive, e.matchWholeWords, SCOPE) > 0);
         if (hits.length) {
             misses++;
             console.log(`  WINDOW MISS uid=${e.uid} "${(e.comment ?? '').slice(0, 40)}" — in WA window: ${hits.slice(0, 4).join(', ')}`);

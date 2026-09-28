@@ -1,7 +1,11 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, rekeyLatches, firedUpTo, latchActive, latchSuppressed, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
+
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
 
@@ -74,44 +78,32 @@ console.log('ok   refusals: unparseable, out of range, and not implemented');
 // --- @@activate_only_after counts ASSISTANT messages. WA gates activation on it directly; it is not
 // mapped onto core's `delay`, which counts chat length.
 const winA = () => () => ['the villa burned'];
-const after = (n, assistantCount) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_after ${n}\nx` }],
-    winA(), { assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const after = (n, assistantCount) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_after ${n}\nx` }], winA(), { scope: NEUTRAL, assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(after(2, 1), 0, 'one assistant message of two required: not activated');
 eq(after(2, 2), 1, 'the count is reached: activated');
 eq(after(2, 9), 1, 'and stays activated after it');
 eq(after(0, 0), 1, 'zero is no gate at all');
-eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@activate_only_after abc\nx' }],
-    winA(), { assistantCount: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@activate_only_after abc\nx' }], winA(), { scope: NEUTRAL, assistantCount: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'an unparseable count is ignored, so the entry is ungated');
-eq(activationAdds([{ uid: 3, world: 'W', key: ['villa'], content: '@@activate_only_after 5\nx' }],
-    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 3, world: 'W', key: ['villa'], content: '@@activate_only_after 5\nx' }], winA(), { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'no assistantCount in opts at all leaves the gate off, as before');
 console.log('ok   @@activate_only_after gates activation on the assistant message count');
 
 // --- @@is_greeting gates on WHICH greeting is active: message 0's swipe_id, since getFirstMessage builds
 // swipes as [first_mes, ...alternate_greetings] (script.js `getFirstMessage`).
-const greet = (n, greetingIndex) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@is_greeting ${n}\nx` }],
-    winA(), { greetingIndex, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const greet = (n, greetingIndex) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@is_greeting ${n}\nx` }], winA(), { scope: NEUTRAL, greetingIndex, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(greet(0, 0), 1, 'greeting 0 is first_mes, and the entry asks for it');
 eq(greet(1, 0), 0, 'the entry asks for the first alternate, but first_mes is active');
 eq(greet(1, 1), 1, 'the first alternate is active');
 eq(greet(2, 1), 0, 'a different alternate is active');
-eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_greeting 1\nx' }],
-    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_greeting 1\nx' }], winA(), { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'no greetingIndex in opts at all leaves the gate off, as before');
 console.log('ok   @@is_greeting gates on the active greeting index');
 
 // --- @@activate_only_every: no remainder, and it reuses the count @@activate_only_after needs.
-const every = (n, assistantCount) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_every ${n}\nx` }],
-    winA(), { assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const every = (n, assistantCount) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_every ${n}\nx` }], winA(), { scope: NEUTRAL, assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(every(3, 3), 1, 'three of three: no remainder, activated');
 eq(every(3, 6), 1, 'six of three: likewise');
@@ -120,15 +112,11 @@ eq(every(0, 4), 1, 'a zero divisor is refused, so the entry is ungated');
 console.log('ok   @@activate_only_every gates on the remainder');
 
 // --- @@is_user_icon compares the active persona name, ST's name1.
-const icon = (want, personaName) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@is_user_icon ${want}\nx` }],
-    winA(), { personaName, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const icon = (want, personaName) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@is_user_icon ${want}\nx` }], winA(), { scope: NEUTRAL, personaName, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(icon('Mara', 'Mara'), 1, 'the active persona matches');
 eq(icon('Mara', 'Juno'), 0, 'a different persona does not');
-eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_user_icon Mara\nx' }],
-    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_user_icon Mara\nx' }], winA(), { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'no personaName in opts at all leaves the gate off, as before');
 console.log('ok   @@is_user_icon gates on the active persona name');
 
@@ -136,9 +124,9 @@ console.log('ok   @@is_user_icon gates on the active persona name');
 // the ST half writes at onEntriesLoaded. Without it @@is_greeting would silently never fire.
 const parsed = { uid: 1, world: 'W', key: ['villa'], decorators: [], content: 'The villa',
     waDecorators: ['@@is_greeting 1'] };
-eq(activationAdds([parsed], winA(), { greetingIndex: 1, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([parsed], winA(), { scope: NEUTRAL, greetingIndex: 1, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'a parsed entry gates off waDecorators, its content having been stripped');
-eq(activationAdds([parsed], winA(), { greetingIndex: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 0,
+eq(activationAdds([parsed], winA(), { scope: NEUTRAL, greetingIndex: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 0,
     '...and is gated out when the greeting does not match');
 console.log('ok   the gates read the stash on a parsed entry');
 
@@ -197,7 +185,7 @@ const PAIR = '@@additional_keys storm,rain\n@@exclude_keys dream,fog\nThe villa'
 const gated = (key, text) => {
     const e = { key: [key], content: PAIR };
     Object.assign(e, decoratorFields(e, { chatLength: 0 }));
-    return keywordScore(e, text, e.key, { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).hits.length > 0;
+    return keywordScore(e, text, e.key, { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).hits.length > 0;
 };
 
 for (const k of ['villa', 'the house', 'HP::100', '=weird', 'the "windy" city', 'a||b', 'Xor']) {
@@ -225,7 +213,7 @@ console.log('ok   ? keys splice in, and an unusable exclusion does not take the 
 const US = String.fromCharCode(0x1F);
 const win = () => () => ['the villa burned'];
 const opts = fired => ({ fired, chatLength: 99, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false });
-const adds = (entries, fired) => activationAdds(entries, win(), opts(fired)).map(e => e.uid).join(',');
+const adds = (entries, fired) => activationAdds(entries, win(), { ...opts(fired), scope: NEUTRAL }).map(e => e.uid).join(',');
 // waDecorators, not decorators: decoratorFor reads the stash, never core's own `decorators` field.
 const ent = (uid, waDecorators) => ({ uid, world: 'W', key: ['villa'], waDecorators, content: 'x' });
 
@@ -239,7 +227,7 @@ eq(adds([ent(3, ['@@keep_activate_after_match'])], { [`W${US}3`]: 1 }), '3',
     'a latched-on entry activates');
 
 // It must activate with no keyword hit at all — that is the whole point.
-const noMatch = activationAdds([ent(4, ['@@keep_activate_after_match'])], () => ['nothing here'], opts({ [`W${US}4`]: 1 }));
+const noMatch = activationAdds([ent(4, ['@@keep_activate_after_match'])], () => ['nothing here'], { ...opts({ [`W${US}4`]: 1 }), scope: NEUTRAL });
 eq(noMatch.length, 1, 'a latched-on entry activates with no keyword hit');
 
 eq(adds([ent(5, ['@@dont_activate_after_match', '@@keep_activate_after_match'])], { [`W${US}5`]: 1 }), '5',
@@ -250,7 +238,7 @@ eq(adds([ent(6, ['@@dont_activate_after_match'])], undefined), '6',
 // The delay guard must run above the latch hoist: core drops a matched entry for an unarrived delay
 // before WA's own emit ever reaches it, so the hoist must not exempt a latched-on entry from it.
 const delayed = { ...ent(7, ['@@keep_activate_after_match']), delay: 50 };
-eq(activationAdds([delayed], win(), { ...opts(new Set([`W${US}7`])), chatLength: 10 }).length, 0,
+eq(activationAdds([delayed], win(), { scope: NEUTRAL, ...opts(new Set([`W${US}7`])), chatLength: 10 }).length, 0,
     'a latched-on entry whose delay has not arrived is not emitted');
 console.log('ok   the latch decorators, read from WA\'s own record');
 

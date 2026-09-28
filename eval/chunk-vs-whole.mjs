@@ -6,9 +6,13 @@ import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { splitRecursive } from '../extension/chunking.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { mean, fmt3 as fmt, arg as sharedArg, signTest } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
+
+/** No macros and the strict boundary: what these counts are taken under. */
+const SCOPE = createScanScope();
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const CACHE_PATH = `${HERE}eval-data/chunk-vs-whole-cache.json`;
@@ -65,7 +69,7 @@ for (const [slug, file] of BOOKS) {
                 calls, yield: set.size,
                 agreeOfRef: refs.size ? hit / refs.size : NaN,
                 agreeOfCand: set.size ? hit / set.size : NaN,
-                attested: set.size ? [...set].filter(t => countKey(t, content, false, false) > 0).length / set.size : NaN,
+                attested: set.size ? [...set].filter(t => countKey(t, content, false, false, SCOPE) > 0).length / set.size : NaN,
             };
         };
         try {

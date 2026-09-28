@@ -271,7 +271,7 @@ const withBoundary = (node, boundary) => {
 
 /** The AST every consumer builds: parsed, then expanded under the scope's macros and stamped with its boundary. `scope` is read for
  *  those two only; a scope caches the result by the raw key. */
-export const buildAst = (raw, scope = defaultScope) => withBoundary(expandAst(parse(tokenize(raw)), scope.macros), scope.boundary);
+export const buildAst = (raw, scope) => withBoundary(expandAst(parse(tokenize(raw)), matchScope(scope, 'buildAst').macros), scope.boundary);
 
 /** Whether the key matches a text holding none of its terms: an optional node does, a NOT of what does not, an AND of two
  *  that do, an OR of one, an XOR of exactly one. Such a key fires on almost every message. */
@@ -479,7 +479,7 @@ export function validateSmartKey(raw) {
 const SCAN_CACHE_MAX = 8;
 
 /** One key as one node, by countKey's three-way split: `? …` splices in with its own per-term flags, `/re/` is a REGEX, anything else a TERM carrying the entry's flags. No escaping. */
-const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight = 1, scope = defaultScope) => {
+const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight = 1, scope) => {
     const s = String(raw ?? '').trim();
     if (!s) return null;
     if (s.startsWith('?')) return buildAst(s, scope);
@@ -490,7 +490,8 @@ const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight
 /** Core's `(key, keysecondary, selectiveLogic)` as one AST per primary key, `flags` being the entry's resolved match flags:
  *    AND_ANY  AND(p, OR(s1, s2))    AND_ALL  AND(p, AND(s1, s2))    NOT_ANY  AND(AND(p, NOT(s1)), NOT(s2))    NOT_ALL  AND(p, NOT(AND(s1, s2)))
  *  A non-blank secondary that parses to nothing stays as a null child: evaluate reads null as "did not match", which is core's answer. */
-export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {}, scope = defaultScope) {
+export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {}, scope) {
+    matchScope(scope, 'synthesizeSecondary');
     const p = keyNode(primary, flags, 1, scope);
     if (!p) return null;
 
@@ -521,8 +522,13 @@ export function createScanScope({ macros = {}, boundary = 'strict' } = {}) {
     };
 }
 
-/** The scope a call without one matches in: no macros, the strict boundary. */
-export const defaultScope = createScanScope();
+/** `scope`, or a throw naming `where` when it is not one: a matching call never falls back to a context of its own. */
+export const matchScope = (scope, where) => {
+    if (!scope || typeof scope !== 'object' || !('macros' in scope) || !('boundary' in scope)) {
+        throw new TypeError(`${where}: a match scope is required (createScanScope)`);
+    }
+    return scope;
+};
 
 function internLiteral(scope, folded) {
     let idx = scope.termIndex.get(folded);
@@ -794,18 +800,20 @@ function ensureAst(scope, id, build) {
 
 /** Pass 1 (automaton, cached per text) -> build (cached per `id`) -> evaluate. `id` must capture everything the tree depends on:
  *  registerTerms stamps a scope-local index onto each TERM, and a mis-keyed hit evaluates the wrong expression. */
-export function evaluateAst(id, build, text, scope = defaultScope) {
+export function evaluateAst(id, build, text, scope) {
+    matchScope(scope, 'evaluateAst');
     const ast = ensureAst(scope, id, build);
     return evaluate(ast, text, ensureScan(scope, text));
 }
 
 /** Full pipeline for one `?` key, which is its own cache id. */
-export function evaluateSmartKey(rawKey, text, scope = defaultScope) {
+export function evaluateSmartKey(rawKey, text, scope) {
     return evaluateAst(rawKey, () => buildAst(rawKey, scope), text, scope);
 }
 
 /** Registers keys with the scope's automaton without scanning; once per pass, before any scoring — a new key mid-pass dirties the automaton and discards every cached scan. */
-export function registerKeys(rawKeys, scope = defaultScope) {
+export function registerKeys(rawKeys, scope) {
+    matchScope(scope, 'registerKeys');
     for (const key of rawKeys) {
         const raw = String(key ?? '').trim();
         if (!raw || isRegexKey(raw)) continue;
@@ -823,7 +831,7 @@ export function registerKeys(rawKeys, scope = defaultScope) {
 }
 
 /** Registers keys and scans each segment once, raising the cache to hold all of them so no segment is evicted mid-pass. */
-export function primeScan(rawKeys, text, scope = defaultScope) {
+export function primeScan(rawKeys, text, scope) {
     registerKeys(rawKeys, scope);
     const segments = Array.isArray(text) ? text : [text];
     scope.scanMax = Math.max(scope.scanMax, segments.length + SCAN_CACHE_MAX);
@@ -833,6 +841,7 @@ export function primeScan(rawKeys, text, scope = defaultScope) {
 /** The literal keys among `literals` whose variants the primed scan of `text` found — the automaton's own answer to which
  *  keys a segment can possibly count, so a caller need run countKey for those alone. The reverse map (pattern index -> keys) is built once per interned set and per `literals` list, by identity. */
 export function hitLiterals(scope, text, literals) {
+    matchScope(scope, 'hitLiterals');
     // Primed here if it is not: the caller means this text to be scanned, and "every literal" is a guess, not an answer.
     const hit = ensureScan(scope, text);
     if (!scope.keysByIdx || scope.keysByIdx.over !== literals) {
@@ -855,7 +864,8 @@ export function hitLiterals(scope, text, literals) {
 
 /** A plain key's count from a primed scan, or undefined when the cache cannot answer (unscanned text, unregistered key, pending
  *  rebuild). A 0 is authoritative under any flags: no folded-substring hit means no case-sensitive or whole-word hit. */
-export function cachedCount(raw, text, scope = defaultScope, expand = true) {
+export function cachedCount(raw, text, scope, expand = true) {
+    matchScope(scope, 'cachedCount');
     if (scope.dirty || scope.automaton === null) return undefined;
     const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
@@ -879,7 +889,8 @@ export function cachedCount(raw, text, scope = defaultScope, expand = true) {
 }
 
 /** Drops every registered key, cached AST and scan; called on chat switch so the automaton tracks the active books' vocabulary. */
-export function resetSmartKeys(scope = defaultScope) {
+export function resetSmartKeys(scope) {
+    matchScope(scope, 'resetSmartKeys');
     scope.termIndex.clear();
     scope.variantIdx?.clear();
     scope.typedIdx?.clear();

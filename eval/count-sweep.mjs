@@ -4,9 +4,13 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { mean, arg as sharedArg } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
+
+/** No macros and the strict boundary: what these counts are taken under. */
+const SCOPE = createScanScope();
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434';
@@ -74,7 +78,7 @@ for (const p of prompts) {
             yield: c.size,
             ref: refs.size ? hit / refs.size : NaN,
             prec: c.size ? hit / c.size : NaN,
-            att: c.size ? [...c].filter(x => countKey(x, p.prompt, false, false) > 0).length / c.size : NaN,
+            att: c.size ? [...c].filter(x => countKey(x, p.prompt, false, false, SCOPE) > 0).length / c.size : NaN,
             refCount: refs.size,
         };
         if (++done % 20 === 0) process.stdout.write(`  ${done}/${total}\n`);

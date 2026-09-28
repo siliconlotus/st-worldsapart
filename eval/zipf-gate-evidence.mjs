@@ -6,6 +6,10 @@ import { basename } from 'node:path';
 import { buildKeySuggest, STUDIO_SUGGEST_OPTS as OPTS } from '../extension/keyword-suggest.mjs';
 import { KEY_CHAT_COMMON } from '../extension/keyword-audit.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
+
+/** No macros and the strict boundary: what these counts are taken under. */
+const SCOPE = createScanScope();
 
 // --dump <file> writes {pair: killed terms} for a table-vs-table diff.
 const argv = process.argv.slice(2);
@@ -33,7 +37,7 @@ for (let i = 0; i < args.length; i += 2) {
         .filter(m => typeof m === 'string' && m.trim());
     const on = run(data, msgs, true), off = run(data, msgs, false);
     const killed = [...off.values()].filter(r => !on.has(r.term.toLowerCase()));
-    for (const r of killed) { let n = 0; for (const m of msgs) if (countKey(r.term, m, false, false) > 0) n++; r.hits = n; r.share = n / msgs.length; }
+    for (const r of killed) { let n = 0; for (const m of msgs) if (countKey(r.term, m, false, false, SCOPE) > 0) n++; r.hits = n; r.share = n / msgs.length; }
     const common = killed.filter(r => r.share >= KEY_CHAT_COMMON);
     const dead = killed.filter(r => r.hits === 0);
     const rare = killed.filter(r => r.hits >= 1 && r.hits <= 3);

@@ -14,7 +14,7 @@ import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { chatUser, macroMap, validateSmartKey } from '../extension/smartkeys.mjs';
+import { chatUser, createScanScope, macroMap, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
@@ -222,7 +222,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
             t, translate,
             matchWindow: settings().matchWindow,
-            macros: macrosOf(), boundary: settings().wordBoundary,
+            scope: createScanScope({ macros: macrosOf(), boundary: settings().wordBoundary }),
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
             chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs, unit: chatUnit } : undefined,
         });
@@ -2290,13 +2290,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 let messages = 0, unit;
                 const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
                 for (const name of members) {
-                    const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true, macros: { ...chatMap, '{{char}}': name }, boundary: settings().wordBoundary });
+                    const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true, scope: createScanScope({ macros: { ...chatMap, '{{char}}': name }, boundary: settings().wordBoundary }) });
                     messages = r.messages; unit = r.unit;
                     union(by, r.hitsBy); union(typedBy, r.typedBy);
                 }
                 add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
             } else {
-                add(countChatHits(keys, got, { ...unitOpts, macros: chatMap, boundary: settings().wordBoundary }));
+                add(countChatHits(keys, got, { ...unitOpts, scope: createScanScope({ macros: chatMap, boundary: settings().wordBoundary }) }));
             }
             via = via ? 'server + browser' : 'browser';
         }
@@ -2752,7 +2752,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             matchWindow: labWindow,
             context: 30,
             override: labFlagOverride,
-            parts: labPartsFor(base), macros: labMacroMap(base), boundary: settings().wordBoundary,
+            parts: labPartsFor(base), scope: createScanScope({ macros: labMacroMap(base), boundary: settings().wordBoundary }),
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
             skipVectorized: labSkipVector,
         });
@@ -2971,7 +2971,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const scanLab = (base = labBaseMap()) => {
         const r = labScan({
             parts: labPartsFor(base),
-            macros: labMacroMap(base), boundary: settings().wordBoundary,
+            scope: createScanScope({ macros: labMacroMap(base), boundary: settings().wordBoundary }),
             hay: labHay,
             keys: labKeys,
             sec: labSec,

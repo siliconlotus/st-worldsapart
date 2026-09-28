@@ -1124,7 +1124,7 @@ async function scanWindowFor(chat) {
 
 /** Match defaults for both activation passes — live settings and ST globals, so it stays a function read at call time. */
 const activationOpts = () => ({
-    scope: runState.matchScope ?? undefined,
+    scope: runState.matchScope,
     messageDepth: settings().messageDepth,
     fallbackDepth: world_info_depth,
     caseSensitiveDefault: world_info_case_sensitive,
@@ -1183,7 +1183,7 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
     repeatR: settings().repeatR,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
-    scope: runState.matchScope ?? undefined,
+    scope: runState.matchScope,
 });
 
 /** Stable per-character (or per-group) key for the priority order; null with nothing selected. */
@@ -1508,7 +1508,7 @@ async function rankOwnedScan(activated, args, skip) {
             item.keywordWhy = runState.verboseRun
                 ? scored.hits.slice(0, 4).map(h => {
                     // Every place it landed; `excerpt` is contexts[0], not a second call, so the line and the hover cannot disagree.
-                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords, 28, 20, runState.matchScope ?? undefined);
+                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords, 28, 20, runState.matchScope);
                     return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
                 })
                 : undefined;

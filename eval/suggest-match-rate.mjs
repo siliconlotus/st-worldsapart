@@ -5,6 +5,10 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { buildKeySuggest, STUDIO_SUGGEST_OPTS as OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
+
+/** No macros and the strict boundary: what these counts are taken under. */
+const SCOPE = createScanScope();
 
 const args = process.argv.slice(2);
 if (!args.length || args.length % 2) {
@@ -28,7 +32,7 @@ const firesIn = (key, msgs, [cs, ww] = [false, false]) => {
     const ck = `${key}${cs}${ww}`;
     if (fireCache.has(ck)) return fireCache.get(ck);
     let n = 0;
-    for (const m of msgs) if (countKey(key, m, cs, ww) > 0) n++;
+    for (const m of msgs) if (countKey(key, m, cs, ww, SCOPE) > 0) n++;
     fireCache.set(ck, n);
     return n;
 };

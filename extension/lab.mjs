@@ -2,13 +2,13 @@
 // injects the settings.
 
 import { dropTags, keyHits, keySpans, mergeSpans, scanSegments, secondaryKeys, splitKeys, usableKeys, WI_LOGIC } from './matcher.mjs';
-import { createScanScope } from './smartkeys.mjs';
+import { createScanScope, matchScope } from './smartkeys.mjs';
 
-/** `fn(text, at, scope)` over each part in a scope of its own macros, or once over `hay` in one of `macros`; always a list. A part
- *  is `{ text, at, macros }`, `at` its offset into the joined text the caller shows. */
-const perPart = (parts, hay, fn, { macros = {}, boundary = 'strict' } = {}) => {
-    if (!parts?.length) return [fn(hay, 0, createScanScope({ macros, boundary }))];
-    return parts.map(p => fn(String(p.text ?? ''), Number(p.at) || 0, createScanScope({ macros: p.macros ?? {}, boundary })));
+/** `fn(text, at, scope)` over each part in a scope of its own macros under `scope`'s boundary, or once over `hay` in `scope`; always a
+ *  list. A part is `{ text, at, macros }`, `at` its offset into the joined text the caller shows. */
+const perPart = (parts, hay, fn, scope) => {
+    if (!parts?.length) return [fn(hay, 0, scope)];
+    return parts.map(p => fn(String(p.text ?? ''), Number(p.at) || 0, createScanScope({ macros: p.macros ?? {}, boundary: scope.boundary })));
 };
 const shiftSpans = (spans, at) => (at ? spans.map(sp => ({ ...sp, start: sp.start + at, end: sp.end + at, keys: (sp.keys ?? []).map(k => ({ ...k, start: k.start + at, end: k.end + at })) })) : spans);
 const shiftRows = (rows, at) => (at ? rows.map(r => ({ ...r, segments: r.segments.map(sg => ({ ...sg, at: sg.at + at })) })) : rows);
@@ -43,13 +43,14 @@ export const entryFlags = (entry, { caseSensitive = false, wholeWords = false } 
  *  its own gate and flags. Skips `disable`, and `vectorized` when `skipVectorized` — core keyword-matches those. Models no
  *  other gate core applies: probability, inclusion groups, delay, cooldown, character and tag filters, decorators,
  *  recursion. `scanned` counts the entries tested, `books` their worlds, `keyList` their hit keys deduped. */
-export function runBook(entries, text, { matchWindow = 'scan', context = 28, defaults, skipVectorized = false, override = {}, parts, macros = {}, boundary = 'strict', scope } = {}) {
+export function runBook(entries, text, { matchWindow = 'scan', context = 28, defaults, skipVectorized = false, override = {}, parts, scope } = {}) {
+    matchScope(scope, 'runBook');
     if (parts?.length) {
         // Each part under its own map, then one run: an entry's rows merged per key, the tallies those of one scan.
         const runs = perPart(parts, text, (t, at, partScope) => {
             const r = runBook(entries, t, { matchWindow, context, defaults, skipVectorized, override, scope: partScope });
             return { ...r, entries: r.entries.map(h => ({ entry: h.entry, rows: shiftRows(h.rows, at) })) };
-        }, { boundary });
+        }, scope);
         const hits = new Map();
         for (const r of runs) for (const h of r.entries) {
             const prev = hits.get(h.entry);
@@ -58,7 +59,6 @@ export function runBook(entries, text, { matchWindow = 'scan', context = 28, def
         const out = [...hits.values()];
         return { entries: out, scanned: runs[0].scanned, books: [...new Set(runs.flatMap(r => r.books))], keyList: [...new Set(out.flatMap(h => h.rows.map(r => r.key)))] };
     }
-    scope ??= createScanScope({ macros, boundary });
     const keyed = (entries ?? [])
         .filter(e => e && !e.disable && usableKeys(e.key).length)
         .filter(e => !(skipVectorized && e.vectorized));
@@ -80,30 +80,31 @@ export function runBook(entries, text, { matchWindow = 'scan', context = 28, def
 
 /** A run's spans over `text`, merged across its entries in one pass. Per-entry merging would leave two spans on a word two
  *  entries both hit, which cannot nest in markup. */
-export function runSpans(run, text, { matchWindow = 'scan', defaults, override = {}, parts, macros = {}, boundary = 'strict' } = {}) {
+export function runSpans(run, text, { matchWindow = 'scan', defaults, override = {}, parts, scope } = {}) {
+    matchScope(scope, 'runSpans');
     const one = (t, at, scope) => shiftSpans(mergeSpans((run?.entries ?? []).flatMap(({ entry }) => {
         const { caseSensitive, wholeWords } = { ...entryFlags(entry, defaults), ...override };
         return keySpans(usableKeys(entry.key), t, caseSensitive, wholeWords, { matchWindow, gate: entryGate(entry), scope });
     })), at);
-    return perPart(parts, text, one, { macros, boundary }).flat().sort(byStart);
+    return perPart(parts, text, one, scope).flat().sort(byStart);
 }
 
 /** `{ keys, rows, gate, spans }` for either mode. With `run` set, `rows` is empty (a run's rows are per entry, on the run)
  *  and `gate` is null (each entry carries its own). Both fields are present either way: a caller destructures one shape.
- *  `macros` and `boundary` are the match context of a part-less scan; `parts` carry their own macros. */
+ *  `scope` is the match context of a part-less scan; `parts` carry their own macros under its boundary. */
 export function labScan({ hay = '', keys = '', sec = '', logic = WI_LOGIC.AND_ANY, matchWindow = 'scan',
-    caseSensitive = false, wholeWords = false, context = 28, run = null, defaults, override = {}, parts, macros = {}, boundary = 'strict' } = {}) {
+    caseSensitive = false, wholeWords = false, context = 28, run = null, defaults, override = {}, parts, scope } = {}) {
+    matchScope(scope, 'labScan');
     if (run) {
-        return { keys: run.keyList, rows: [], gate: null, spans: runSpans(run, hay, { matchWindow, defaults, override, parts, macros, boundary }) };
+        return { keys: run.keyList, rows: [], gate: null, spans: runSpans(run, hay, { matchWindow, defaults, override, parts, scope }) };
     }
     const keyList = splitKeys(keys);
     const gate = { keys: splitKeys(sec), logic: Number(logic) };
-    const ctx = { macros, boundary };
     return {
         keys: keyList,
-        rows: mergeRows(perPart(parts, hay, (t, at, scope) => shiftRows(keyHits(keyList, t, caseSensitive, wholeWords, { context, matchWindow, gate, scope }), at), ctx)),
+        rows: mergeRows(perPart(parts, hay, (t, at, s) => shiftRows(keyHits(keyList, t, caseSensitive, wholeWords, { context, matchWindow, gate, scope: s }), at), scope)),
         gate,
-        spans: perPart(parts, hay, (t, at, scope) => shiftSpans(keySpans(keyList, t, caseSensitive, wholeWords, { matchWindow, gate, scope }), at), ctx).flat().sort(byStart),
+        spans: perPart(parts, hay, (t, at, s) => shiftSpans(keySpans(keyList, t, caseSensitive, wholeWords, { matchWindow, gate, scope: s }), at), scope).flat().sort(byStart),
     };
 }
 

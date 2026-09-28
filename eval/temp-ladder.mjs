@@ -8,9 +8,13 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { buildKeySuggest, buildKeyPrompt, parseKeyList, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { countKey } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { mean, fmt3 as fmt, arg as sharedArg, signTest } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
+
+/** No macros and the strict boundary: what these counts are taken under. */
+const SCOPE = createScanScope();
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const CACHE_PATH = `${HERE}eval-data/temp-ladder-cache.json`;
@@ -102,8 +106,8 @@ function scoreArm(book, runs) {
                 yield: c.size,
                 agreeOfRef: refs.size ? hit / refs.size : NaN,
                 agreeOfCand: c.size ? hit / c.size : NaN,
-                attested: c.size ? [...c].filter(t => countKey(t, e.text, false, false) > 0).length / c.size : NaN,
-                grounded: c.size ? ([...c].some(t => countKey(t, e.text, false, false) > 0) ? 1 : 0) : 0,
+                attested: c.size ? [...c].filter(t => countKey(t, e.text, false, false, SCOPE) > 0).length / c.size : NaN,
+                grounded: c.size ? ([...c].some(t => countKey(t, e.text, false, false, SCOPE) > 0) ? 1 : 0) : 0,
             });
         }
         for (let i = 0; i < reps.length; i++) {
@@ -274,7 +278,7 @@ if (has('paired')) {
         if (key === 'unionRef') return share(new Set(sets.flatMap(s => [...s])));
         if (key === 'unionYield') return new Set(sets.flatMap(s => [...s])).size;
         const per = sets.map(c => (key === 'agreeOfRef' ? share(c)
-            : key === 'attested' ? (c.size ? [...c].filter(t => countKey(t, text, false, false) > 0).length / c.size : NaN)
+            : key === 'attested' ? (c.size ? [...c].filter(t => countKey(t, text, false, false, SCOPE) > 0).length / c.size : NaN)
                 : c.size));
         return mean(per.filter(Number.isFinite));
     };

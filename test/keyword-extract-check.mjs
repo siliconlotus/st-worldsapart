@@ -1,8 +1,11 @@
 // Guards buildKeyPruneScan / buildKeySuggest (keyword-audit.mjs, keyword-suggest.mjs) on a tiny synthetic book.
 import assert from 'node:assert';
 import { buildKeyPruneScan, KEY_MIN_LENGTH, KEY_MIN_SHARED_ENTRIES } from '../extension/keyword-audit.mjs';
-import { KEY_ALERTS } from '../extension/smartkeys.mjs';
+import { createScanScope, KEY_ALERTS } from '../extension/smartkeys.mjs';
 import { buildKeySuggest, classifyLlmCand } from '../extension/keyword-suggest.mjs';
+
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
 
 // --- buildKeyPruneScan ---------------------------------------------------------------------------
 // Four entries so df ratios are meaningful: classify priority is english-common -> dead -> df-too-common -> short, so
@@ -15,7 +18,7 @@ const pruneBook = { entries: {
 } };
 const pruneOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false,
     pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,     minLength: KEY_MIN_LENGTH };
-const ps = buildKeyPruneScan(pruneBook, pruneOpts, new Set());
+const ps = buildKeyPruneScan(pruneBook, pruneOpts, new Set(), { scope: NEUTRAL });
 assert.strictEqual(ps.entries.length, 4, 'all keyword entries scanned');
 const flagsOf = uid => Object.fromEntries(ps.classifyEntry(pruneBook.entries[uid]).map(r => [r.key, r.flag]));
 const f0 = flagsOf(0);
@@ -30,7 +33,7 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
         1: { uid: 1, comment: 'Clean', content: 'apollo flew', key: ['apollo'], keysecondary: [] },
         2: { uid: 2, comment: 'Portable', content: 'the a/b path', key: ['/a/b/'], keysecondary: [] },
     } };
-    const scan = buildKeyPruneScan(book, pruneOpts, new Set());
+    const scan = buildKeyPruneScan(book, pruneOpts, new Set(), { scope: NEUTRAL });
     const prim = scan.classifyEntry(book.entries[0]);
     assert.deepStrictEqual(prim.map(f => `${f.key}:${f.flag}:${f.code ?? ''}`),
         ['? -zebra:unusable:negation-only', '/[/:unusable:regex-invalid'],
@@ -56,7 +59,7 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
 
 assert.ok(!('zzzznope' in flagsOfIgnored()), 'a whitelisted key is skipped');
 function flagsOfIgnored() {
-    const p = buildKeyPruneScan(pruneBook, pruneOpts, new Set(['zzzznope']));
+    const p = buildKeyPruneScan(pruneBook, pruneOpts, new Set(['zzzznope']), { scope: NEUTRAL });
     return Object.fromEntries(p.classifyEntry(pruneBook.entries[0]).map(r => [r.key, r.flag]));
 }
 
@@ -64,10 +67,10 @@ function flagsOfIgnored() {
 // `chat common`. With a chat, ubiquity in entry text is a fact about the story, not the key, and draws nothing.
 const mkBook = (n, hits, key) => ({ entries: Object.fromEntries(Array.from({ length: n }, (_, i) =>
     [i, { uid: i, key: i === 0 ? [key] : [], content: i < hits ? `A ${key} appears here.` : 'Nothing notable here.' }])) });
-const gateFlag = (n, hits) => { const p = buildKeyPruneScan(mkBook(n, hits, 'widgetron'), pruneOpts, new Set()); return Object.fromEntries(p.classifyEntry(p.entries[0]).map(r => [r.key, r.flag])).widgetron; };
+const gateFlag = (n, hits) => { const p = buildKeyPruneScan(mkBook(n, hits, 'widgetron'), pruneOpts, new Set(), { scope: NEUTRAL }); return Object.fromEntries(p.classifyEntry(p.entries[0]).map(r => [r.key, r.flag])).widgetron; };
 assert.strictEqual(gateFlag(10, 10), 'book common', 'a key in every entry\'s text is book common while no chat is scanned');
 {
-    const withChat = buildKeyPruneScan(mkBook(10, 10, 'widgetron'), pruneOpts, new Set(), { chatScan: { messagesWith: new Map([['widgetron', 0]]), messages: 50 } });
+    const withChat = buildKeyPruneScan(mkBook(10, 10, 'widgetron'), pruneOpts, new Set(), { scope: NEUTRAL, chatScan: { messagesWith: new Map([['widgetron', 0]]), messages: 50 } });
     assert.strictEqual(withChat.classifyEntry(mkBook(10, 10, 'widgetron').entries[0])[0], undefined, '...and with a chat that does not bear it out, nothing: ubiquity in entry text is a fact about the story');
 }
 
@@ -203,7 +206,7 @@ const sharedBook = { entries: Object.fromEntries([...Array(12)].map((_, i) => [i
 }])) };
 const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, minLength: KEY_MIN_LENGTH, bookShared: 0.75 };
 {
-    const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set());
+    const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set(), { scope: NEUTRAL });
     const row = s.classifyEntry(sharedBook.entries[5]).find(r => r.key === 'astronaut');
     assert.ok(row, '"astronaut" flagged though it appears in only one entry\'s text');
     assert.strictEqual(row.flag, 'book shared', 'flagged on how many entries LIST it, not on its content df');
@@ -212,14 +215,14 @@ const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true
     assert.ok(!s.classifyEntry(sharedBook.entries[0]).some(r => r.key === 'moonwalk' && r.flag === 'book shared'), 'a key on one entry is not over-shared');
 }
 {
-    const off = buildKeyPruneScan(sharedBook, { ...sharedOpts, pruneShared: false }, new Set());
+    const off = buildKeyPruneScan(sharedBook, { ...sharedOpts, pruneShared: false }, new Set(), { scope: NEUTRAL });
     assert.ok(!off.classifyEntry(sharedBook.entries[5]).length, 'the flag is disableable');
 }
 {
-    const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, bookShared: 1 }, new Set());
+    const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, bookShared: 1 }, new Set(), { scope: NEUTRAL });
     assert.strictEqual(hi.reasonOf(hi.classifyEntry(sharedBook.entries[5])[0]).severity, 'severe', '100% share at threshold 100% is severe');
     const tiny = { entries: Object.fromEntries([...Array(9)].map((_, i) => [i, { uid: i, key: ['astronaut'], content: 'x' }])) };
-    const small = buildKeyPruneScan(tiny, sharedOpts, new Set());
+    const small = buildKeyPruneScan(tiny, sharedOpts, new Set(), { scope: NEUTRAL });
     assert.ok(!small.classifyEntry(tiny.entries[0]).some(r => r.flag === 'book shared'), 'skipped below KEY_MIN_SHARED_ENTRIES');
 }
 
@@ -232,7 +235,7 @@ const scopeBook = { entries: {
 } };
 const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, minLength: 4 };
 const scoped = (over) => {
-    const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set());
+    const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set(), { scope: NEUTRAL });
     return Object.values(scopeBook.entries).filter(e => s.classifyEntry(e).length).map(e => e.uid);
 };
 assert.deepStrictEqual(scoped({}), [0, 1, 2, 3], 'all classes flagged when all are in scope');

@@ -1,11 +1,15 @@
 // Stage-2 activation verdicts (matcher.mjs activationAdds): candidacy, depth resolution, scanDepth 0, segmentation, the recursion rematch window.
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { activationAdds, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
+
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
 
 const OPTS = { messageDepth: 4, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
 const win = text => () => (Array.isArray(text) ? text : [text]);
 const addedUids = (entries, text, o = {}) =>
-    activationAdds(entries, win(text), { ...OPTS, ...o }).map(e => e.uid).join(',');
+    activationAdds(entries, win(text), { scope: NEUTRAL, ...OPTS, ...o }).map(e => e.uid).join(',');
 
 // Union candidacy: who may be force-activated, and on which keys.
 {
@@ -51,20 +55,19 @@ const addedUids = (entries, text, o = {}) =>
     activationAdds([
         { uid: 1, key: ['cosmonaut'], scanDepth: 7, content: 'x' },
         { uid: 2, key: ['cosmonaut'], content: 'x' },
-    ], recorder, { ...OPTS });
+    ], recorder, { scope: NEUTRAL, ...OPTS });
     eq(seen.join(','), '7,4', 'scanDepth beats messageDepth; messageDepth is the shared default');
     seen.length = 0;
-    activationAdds([{ uid: 3, key: ['cosmonaut'], content: 'x' }], recorder,
-        { ...OPTS, messageDepth: 0 });
+    activationAdds([{ uid: 3, key: ['cosmonaut'], content: 'x' }], recorder, { scope: NEUTRAL, ...OPTS, messageDepth: 0 });
     eq(seen.join(','), '2', 'unset messageDepth falls back to the injected core depth');
     seen.length = 0;
-    activationAdds([{ uid: 4, key: ['cosmonaut'], scanDepth: 0, content: 'x' }], recorder, { ...OPTS });
+    activationAdds([{ uid: 4, key: ['cosmonaut'], scanDepth: 0, content: 'x' }], recorder, { scope: NEUTRAL, ...OPTS });
     eq(seen.join(','), '0', 'scanDepth 0 is authored (core: match nothing from chat), not unset');
     seen.length = 0;
     activationAdds([
         { uid: 5, key: ['cosmonaut'], content: 'x' },
         { uid: 6, key: ['cosmonaut'], scanDepth: 7, content: 'x' },
-    ], recorder, { ...OPTS, depthSkew: 2 });
+    ], recorder, { scope: NEUTRAL, ...OPTS, depthSkew: 2 });
     eq(seen.join(','), '6,7', 'depthSkew (min-activations) widens the default window only — authored scanDepth never skews');
     console.log('ok   activationAdds: depth resolves as stage 3 rules it, 0 included');
 }
@@ -76,21 +79,18 @@ const addedUids = (entries, text, o = {}) =>
     eq(scanSegments(chat, { depth: 1 }).join('|'), 'A: the cosmonaut waited', 'depth 1 unchanged');
 
     const zero = { uid: 1, key: ['cosmonaut'], scanDepth: 0, content: 'x' };
-    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message' }), { ...OPTS }).length, 0,
+    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message' }), { scope: NEUTRAL, ...OPTS }).length, 0,
         'scanDepth-0 entry cannot activate from chat');
-    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: true }] }),
-        { ...OPTS }).length, 1,
+    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: true }] }), { scope: NEUTRAL, ...OPTS }).length, 1,
     'scanDepth-0 entry still activates from an ambient inject');
-    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: false, depth: 4 }] }),
-        { ...OPTS }).length, 0,
+    eq(activationAdds([zero], makeWindowFor(chat, { matchWindow: 'message', injects: [{ text: 'cosmonaut log', ambient: false, depth: 4 }] }), { scope: NEUTRAL, ...OPTS }).length, 0,
     'scanDepth-0 entry does NOT activate from an inject placed in the chat');
 
     const flagged = { uid: 2, key: ['stardust'], scanDepth: 0, matchScenario: true, content: 'x' };
     const sources = { scenario: 'stardust over the pale city' };
-    eq(activationAdds([flagged], makeWindowFor(chat, { matchWindow: 'message', sources }), { ...OPTS }).length, 1,
+    eq(activationAdds([flagged], makeWindowFor(chat, { matchWindow: 'message', sources }), { scope: NEUTRAL, ...OPTS }).length, 1,
         'an opted-in match source carries the activation');
-    eq(activationAdds([{ ...flagged, matchScenario: false }],
-        makeWindowFor(chat, { matchWindow: 'message', sources }), { ...OPTS }).length, 0,
+    eq(activationAdds([{ ...flagged, matchScenario: false }], makeWindowFor(chat, { matchWindow: 'message', sources }), { scope: NEUTRAL, ...OPTS }).length, 0,
     'sources are per-entry opt-in — no flag, no source text');
     console.log('ok   scanDepth 0 + makeWindowFor: scan-nothing honoured, injects and sources still matchable');
 }
@@ -114,14 +114,13 @@ const addedUids = (entries, text, o = {}) =>
     const compose = (texts, matchWindow) =>
         withExtraTexts(makeWindowFor(chat, { matchWindow }), texts, matchWindow);
 
-    eq(activationAdds([{ uid: 1, key: ['moonbase'], content: 'x' }],
-        compose(['the moonbase hummed'], 'message'), OPTS).map(e => e.uid).join(','), '1',
+    eq(activationAdds([{ uid: 1, key: ['moonbase'], content: 'x' }], compose(['the moonbase hummed'], 'message'), { ...OPTS, scope: NEUTRAL }).map(e => e.uid).join(','), '1',
     'recursion text carries an activation');
 
     const conj = { uid: 2, key: ['? cosmonaut moonbase'], content: 'x' };
-    eq(activationAdds([conj], compose(['the moonbase hummed'], 'message'), OPTS).length, 0,
+    eq(activationAdds([conj], compose(['the moonbase hummed'], 'message'), { ...OPTS, scope: NEUTRAL }).length, 0,
         'a conjunction may not span the chat/recursion seam under a segmented window');
-    eq(activationAdds([conj], compose(['the moonbase hummed'], 'scan'), OPTS).map(e => e.uid).join(','), '2',
+    eq(activationAdds([conj], compose(['the moonbase hummed'], 'scan'), { ...OPTS, scope: NEUTRAL }).map(e => e.uid).join(','), '2',
         'at scan the buffer is one segment — core\'s own cross-pass semantics');
     console.log('ok   withExtraTexts: recursion content matchable, seam scoped by the match window');
 }

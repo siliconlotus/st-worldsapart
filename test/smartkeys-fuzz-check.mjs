@@ -1,8 +1,11 @@
 // Seeded SmartKeys from the grammar, each tried against every text built from its own terms: a key that can match
 // nothing, or matches with none of its terms present, must not get past the validator unflagged.
 import { countKey } from '../extension/matcher.mjs';
-import { validateSmartKey } from '../extension/smartkeys.mjs';
+import { createScanScope, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
+
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
 
 const N = 20000;
 let seed = 1;
@@ -40,7 +43,7 @@ const judge = key => {
         const alerts = validateSmartKey(key);
         if (alerts.some(a => a.severity === 'error')) return { kind: 'refused' };
         const flagged = alerts.some(a => a.severity === 'warn');
-        const hits = TEXTS.map(t => countKey(key, t, false, true));
+        const hits = TEXTS.map(t => countKey(key, t, false, true, NEUTRAL));
         if (hits.some(h => !Number.isFinite(h) || h < 0)) return { fail: 'a count that is not a finite, non-negative number' };
         if (hits.every(h => h === 0)) return flagged ? { kind: 'flagged' } : { fail: 'matches no text built from its own terms, unflagged' };
         if (hits[0] > 0 && !flagged) return { fail: 'matches a text holding none of its terms, unflagged' };

@@ -1,7 +1,11 @@
 // matchWindow — the unit a key has to match within: scan, message, paragraph.
+import { createScanScope } from '../extension/smartkeys.mjs';
 import { keywordScore, repeatCurveOf, scanSegments, scanWindow, segment } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 import { buildKeyPruneScan } from '../extension/keyword-audit.mjs';
+
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
 // One option set for every block below, so a block cannot silently differ.
 const opts = {
     scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
@@ -9,7 +13,7 @@ const opts = {
 };
 
 const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
-const score = (entry, text) => keywordScore(entry, text, entry.key, cfg).score;
+const score = (entry, text) => keywordScore(entry, text, entry.key, { ...cfg, scope: NEUTRAL }).score;
 
 // The two terms of a conjunction sit in different messages, and in different paragraphs of one message.
 const chat = [
@@ -41,8 +45,8 @@ const win = m => scanSegments(chat, { depth: 10, matchWindow: m });
 
 {
     const e = { key: ['? apollo astronauts', 'fire', 'drill'] };
-    const asString = keywordScore(e, scanWindow(chat, { depth: 10 }), e.key, cfg);
-    const asSegments = keywordScore(e, win('scan'), e.key, cfg);
+    const asString = keywordScore(e, scanWindow(chat, { depth: 10 }), e.key, { ...cfg, scope: NEUTRAL });
+    const asSegments = keywordScore(e, win('scan'), e.key, { ...cfg, scope: NEUTRAL });
     eq(asSegments.score, asString.score, 'scan segments score identically to the joined string');
     eq(JSON.stringify(asSegments.hits), JSON.stringify(asString.hits), '...and report the same hits');
 }
@@ -50,10 +54,10 @@ const win = m => scanSegments(chat, { depth: 10, matchWindow: m });
 {
     const e = { key: ['fire'] };
     const three = ['fire', 'fire', 'fire'];
-    eq(keywordScore(e, three, e.key, cfg).hits[0].count, 3, 'occurrences accumulate across segments');
+    eq(keywordScore(e, three, e.key, { ...cfg, scope: NEUTRAL }).hits[0].count, 3, 'occurrences accumulate across segments');
     // Against repeatCurveOf, not an inlined formula: the claim is about the COUNT reaching the curve, under any curve.
-    eq(keywordScore(e, three, e.key, cfg).score, repeatCurveOf(3, 1.2), '...and the curve sees a count of 3');
-    eq(keywordScore(e, three, e.key, cfg).score < 3 * repeatCurveOf(1, 1.2), true, '...saturating once, not three times');
+    eq(keywordScore(e, three, e.key, { ...cfg, scope: NEUTRAL }).score, repeatCurveOf(3, 1.2), '...and the curve sees a count of 3');
+    eq(keywordScore(e, three, e.key, { ...cfg, scope: NEUTRAL }).score < 3 * repeatCurveOf(1, 1.2), true, '...saturating once, not three times');
 }
 
 {
@@ -79,7 +83,7 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
         },
     };
     const flags = mw => {
-        const s = buildKeyPruneScan(book, opts, new Set(), { matchWindow: mw });
+        const s = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, matchWindow: mw });
         return Object.fromEntries(s.classifyEntry(book.entries[0]).map(f => [f.key, f.flag]));
     };
     eq(flags('scan')['? apollo astronauts'], undefined, 'scan: the query is attested across the entry');
@@ -97,7 +101,7 @@ console.log('ok   the audit segments like the runtime, and literals are slice-in
     const content = 'The pack gathers. Pack law is absolute.';
     const entries = {};
     for (let i = 0; i < 12; i++) entries[i] = { uid: i, key: ['Pack', 'pack'], content };
-    const s = buildKeyPruneScan({ entries }, { ...opts, pruneShared: true, bookShared: 0.75 }, new Set(), {});
+    const s = buildKeyPruneScan({ entries }, { ...opts, pruneShared: true, bookShared: 0.75 }, new Set(), { scope: NEUTRAL });
     const p = s.classifyEntry(entries[0]).find(x => x.key === 'Pack');
     eq(p?.bookContent, 12, 'df is the entry count, not once per variant');
     eq(p.bookContent <= 12, true, '...so it can never exceed the book');
@@ -112,7 +116,7 @@ console.log('ok   a key and its case variant count one entry once');
     // `mother` is in COMMON_WORDS; `zzznope` is in neither the book's text nor any word list.
     const book = { entries: { 0: { uid: 0, key: ['mother', 'zzznope'], content: 'Nothing relevant here.' } } };
     const run = chatScan => {
-        const s = buildKeyPruneScan(book, opts, new Set(), { chatScan });
+        const s = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, chatScan });
         return Object.fromEntries(s.classifyEntry(book.entries[0]).map(p => [p.key, { flag: p.flag, why: s.reasonOf(p).label, sev: s.severityOf(p) }]));
     };
     const none = run(undefined);
@@ -137,7 +141,7 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
 {
     const book = { entries: { 0: { uid: 0, key: ['zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
-        const s = buildKeyPruneScan(book, opts, new Set(), { chatScan });
+        const s = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, chatScan });
         return s.reasonOf(s.classifyEntry(book.entries[0])[0]).label;
     };
     eq(why({ messagesWith: new Map([['zzznope', 0]]), messages: 100 }), 'unattested (book/chat)',
@@ -151,20 +155,20 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
 {
     const { countChatHits } = await import('../extension/matcher.mjs');
     const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
-    const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs);
+    const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs, { scope: NEUTRAL });
     // Expansion reaches here too, or a hyphenated key reports fewer messages than countKey matches.
     // Test like we fight: a conjunction across two adjacent messages matches under `scan` and not under `message`.
     const split = ['the copper arrived', 'the pipe burst', 'nothing', 'nothing'];
-    eq(countChatHits(['? copper pipe'], split).messagesWith.get('? copper pipe'), 0, 'message unit: terms in different messages never co-occur');
-    const sc = countChatHits(['? copper pipe'], split, { matchWindow: 'scan', depth: 2 });
+    eq(countChatHits(['? copper pipe'], split, { scope: NEUTRAL }).messagesWith.get('? copper pipe'), 0, 'message unit: terms in different messages never co-occur');
+    const sc = countChatHits(['? copper pipe'], split, { scope: NEUTRAL, matchWindow: 'scan', depth: 2 });
     eq(`${sc.messagesWith.get('? copper pipe')}/${sc.messages} ${sc.unit}`, '1/2 window', 'scan unit: blocks of `depth` messages, and the conjunction co-occurs in one');
-    const pg = countChatHits(['? copper pipe'], ['copper here.\n\npipe there.'], { matchWindow: 'paragraph' });
+    const pg = countChatHits(['? copper pipe'], ['copper here.\n\npipe there.'], { scope: NEUTRAL, matchWindow: 'paragraph' });
     eq(`${pg.messagesWith.get('? copper pipe')}/${pg.messages} ${pg.unit}`, '0/2 paragraph', 'paragraph unit: one message, two paragraphs, no co-occurrence');
     // includeNames: the speaker's name is in the unit exactly when the live scan would put it there.
     const named = [{ name: 'Sentinel', mes: 'hello' }, { name: 'You', mes: 'hi' }];
-    eq(countChatHits(['Sentinel'], named, { includeNames: true }).messagesWith.get('Sentinel'), 1, 'with includeNames a key reaches the speaker');
-    eq(countChatHits(['Sentinel'], named).messagesWith.get('Sentinel'), 0, '...and not without, the default');
-    const hy = countChatHits(['copper-pipe'], ['a copper pipe', 'a copper-pipe', 'both copper pipe and copper-pipe', 'neither']);
+    eq(countChatHits(['Sentinel'], named, { scope: NEUTRAL, includeNames: true }).messagesWith.get('Sentinel'), 1, 'with includeNames a key reaches the speaker');
+    eq(countChatHits(['Sentinel'], named, { scope: NEUTRAL }).messagesWith.get('Sentinel'), 0, '...and not without, the default');
+    const hy = countChatHits(['copper-pipe'], ['a copper pipe', 'a copper-pipe', 'both copper pipe and copper-pipe', 'neither'], { scope: NEUTRAL });
     eq(hy.messagesWith.get('copper-pipe'), 3, 'both forms count, and a message holding both counts once');
     eq(got.messages, 4, 'the denominator is every message it was given');
     eq(got.messagesWith.get('copper'), 2, 'a literal is still the automaton pass');
@@ -174,7 +178,7 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
 
     const book = { entries: { 0: { uid: 0, key: ['? zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
-        const sc = buildKeyPruneScan(book, opts, new Set(), { chatScan });
+        const sc = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, chatScan });
         return sc.reasonOf(sc.classifyEntry(book.entries[0])[0]).label;
     };
     eq(why(undefined), 'never matches (book)', 'a dead query claims only what was checked');
