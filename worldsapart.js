@@ -714,7 +714,8 @@ async function retrieve(chat) {
     runState.lastQueryChat = [];
 
     // One substitution pass serves both the query and the /wa-grade stash: queryMessages must not run twice per generation.
-    const queryChat = query.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
+    // `||`, not `??`: 0 is unset and falls to core's depth, as the keyword window resolves it.
+    const queryChat = query.queryMessages(chat, { depth: settings().messageDepth || world_info_depth, substituteParams });
     const rawText = query.joinQueryMessages(queryChat);
 
     if (!rawText) {
@@ -723,7 +724,7 @@ async function retrieve(chat) {
     }
 
     const searchText = rawText;
-    dbg(`WorldsApart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
+    dbg(`WorldsApart: query is ${searchText.length} chars from ${queryChat.length} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
 
     // Before the empties below: a keyword-only scene is still gradeable against the query.
     runState.lastQuery = searchText;
@@ -1505,7 +1506,7 @@ async function rankOwnedScan(activated, args, skip) {
         }
 
         // The messages, not the joined window, so a reader can rebuild any window: `scanWindow(scanChat, {depth})`.
-        runState.lastScanChat = chat.slice(-Math.max(1, settings().messageDepth))
+        runState.lastScanChat = chat.slice(-(settings().messageDepth || world_info_depth))
             .map(x => ({ name: String(x?.name ?? ''), mes: String(x?.mes ?? '') }));
 
         if (runState.verboseRun) {
