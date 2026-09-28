@@ -593,6 +593,8 @@ console.log('ok   the docs/smartkeys.md worked example holds');
     eq(c('? (fire -drill)~0', 'firetruck drill'), 0, '...and the pad is measured from the word too');
     eq(countKey('? (copper pipe)~1', 'copper well-known pipe', false, false, createScanScope({ boundary: 'strict' })), 1, 'slack counts words off the boundary class: strict reads well-known as one');
     eq(countKey('? (copper pipe)~1', 'copper well-known pipe', false, false, createScanScope({ boundary: 'permissive' })), 0, '...and permissive as two');
+    eq(countKey("? (=Joe coat)~1", "Joe's coat", false, false, createScanScope({ boundary: 'strict' })), 0, 'a whole-word leaf inside a group reads its scope\'s boundary: strict keeps the apostrophe in the word');
+    eq(countKey("? (=Joe coat)~1", "Joe's coat", false, false, createScanScope({ boundary: 'permissive' })), 1, '...and permissive ends the word at it');
     const cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
     eq(keywordScore({ key: ['? (copper pipe)~1'] }, 'copper pipe', undefined, cfg).score, 1, 'a proximity group scores as one thing');
     eq(keywordScore({ key: ['? copper pipe'] }, 'copper pipe', undefined, cfg).score, 2, '...where the conjunction is two');
@@ -696,6 +698,8 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(countKey('? {{user}}', 'Nick', false, false, createScanScope({ macros: { '{{user}}': 'Nick' } })), 1, 'another context matches meanwhile...');
     eq(audit.classifyEntry(book.entries[0]).length, 0, '...and an audit built under Kyle still finds the key attested in the book');
     eq(buildKeyPruneScan(book, auditOpts, new Set(), { macros: { '{{user}}': 'Nick' } }).classifyEntry(book.entries[0])[0]?.flag, 'unattested', '...where one built under Nick finds it dead');
+    const ortho = { entries: { 0: { uid: 0, key: ['/{{char}}\u2019s/'], content: "Mara's coat hung there." }, 1: { uid: 1, key: ['x'], content: 'nothing' } } };
+    eq(buildKeyPruneScan(ortho, auditOpts, new Set(), { macros: { '{{char}}': 'Mara' } }).classifyEntry(ortho.entries[0])[0]?.where, 'book', 'the regex orthography check expands the pattern too, so it finds the straight form the book uses');
 }
 
 // --- optional terms: a trailing `?` never gates and scores when present, on a term, a phrase, a group or a pattern ------

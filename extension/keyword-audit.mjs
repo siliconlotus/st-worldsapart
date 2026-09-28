@@ -4,7 +4,7 @@ import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
 import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { isConstant } from './layout.mjs';
-import { buildAst, cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
+import { buildAst, cachedCount, createScanScope, expandRegex, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; common word still applies. */
@@ -90,14 +90,6 @@ const KEY_CHAT_SEVERE = 0.50;
  *  `chat common`. An assertion; 0.45 rather than a half so a book of few entries does not sit on the line. */
 const KEY_BOOK_COMMON = 0.45;
 
-/**
- * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
- * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
- * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
- * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
- * @param {object} [macros] `macros` and `boundary` are the match context every verdict is reached under (createScanScope)
- * @returns {{entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
- */
 /** The audit's three severities, by name. The colours they are drawn in belong to the display, and the order to RANK there. */
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
@@ -133,6 +125,14 @@ export function orthoAlternates(k) {
  *  message, so probing every key would cost more than the scan. */
 export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
+/**
+ * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
+ * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
+ * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
+ * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
+ * @param {object} [macros] `macros` and `boundary` are the match context every verdict is reached under (createScanScope)
+ * @returns {{entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
+ */
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain, translate = s => s, macros = {}, boundary = 'strict' } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     // The unit the chat scan counted, named for a chip: what a rate is a rate of.
@@ -299,7 +299,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             if (needEvidence) {
                 const chat = chatRateOf(a.alt), mine = chatRateOf(k) ?? 0;
                 const where = (chat !== undefined && chat > mine) ? 'chat'
-                    : contents.some(c => countRegexKey(a.alt, c) > countRegexKey(k, c)) ? 'book' : null;
+                    : contents.some(c => countRegexKey(expandRegex(a.alt, scanScope.macros), c) > countRegexKey(expandRegex(k, scanScope.macros), c)) ? 'book' : null;
                 if (where) return { flag: 'regex orthography', bookContent: 0, suggest: a.suggest, where, label: a.label };
                 continue;
             }

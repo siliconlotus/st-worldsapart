@@ -2747,12 +2747,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         labRunSource = { label, load };
         if (!keep) labFlagOverride = {};
         labRunEntries = await load();
+        const base = labBaseMap();
         const run = runBook(labRunEntries, labHay, {
             matchWindow: labWindow,
             context: 30,
             override: labFlagOverride,
-            parts: labPartsFor(),
-            macros: labMacroMap(), boundary: settings().wordBoundary,
+            parts: labPartsFor(base), macros: labMacroMap(base), boundary: settings().wordBoundary,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
             skipVectorized: labSkipVector,
         });
@@ -2963,15 +2963,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** Every token the typed keys and the book carry, at SillyTavern's value. */
     const labBaseMap = () => macroMap([labKeys, labSec, ...bookKeyTexts()], stSubstitute);
     /** The map the field shows and a part-less scan matches under: the Lab's overrides, else what the loaded chats agree on, else SillyTavern's value. */
-    const labMacroMap = () => Object.fromEntries(Object.entries(labBaseMap()).map(([tok, v]) => [tok, Object.hasOwn(labMacros, tok) ? labMacros[tok] : Object.hasOwn(labChatMacros, tok) ? labChatMacros[tok] : v]));
+    const labMacroMap = (base = labBaseMap()) => Object.fromEntries(Object.entries(base).map(([tok, v]) => [tok, Object.hasOwn(labMacros, tok) ? labMacros[tok] : Object.hasOwn(labChatMacros, tok) ? labChatMacros[tok] : v]));
     /** The loaded chats as parts for the model, each under its own values with the Lab's overrides on top; null without a load. */
-    const labPartsFor = () => labParts?.map(p => ({ ...p, macros: { ...labBaseMap(), ...p.macros, ...labMacros } })) ?? null;
+    const labPartsFor = (base = labBaseMap()) => labParts?.map(p => ({ ...p, macros: { ...base, ...p.macros, ...labMacros } })) ?? null;
 
     /** The Lab's result plus the colour to draw it in, from whatever the panes hold now. */
-    const scanLab = () => {
+    const scanLab = (base = labBaseMap()) => {
         const r = labScan({
-            parts: labPartsFor(),
-            macros: labMacroMap(), boundary: settings().wordBoundary,
+            parts: labPartsFor(base),
+            macros: labMacroMap(base), boundary: settings().wordBoundary,
             hay: labHay,
             keys: labKeys,
             sec: labSec,
@@ -3131,8 +3131,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Its own line above the haystack; redrawn on every repaint, since the typed keys decide which tokens show.
         const macroRow = document.createElement('div');
         macroRow.style.cssText = 'flex:0 0 auto;display:none;flex-wrap:wrap;gap:6px 12px;align-items:center;opacity:0.8;font-size:0.9em;padding:2px 0;';
-        const renderMacroRow = () => {
-            const map = labMacroMap();
+        const renderMacroRow = base => {
+            const map = labMacroMap(base);
             const tokens = Object.keys(map);
             macroRow.innerHTML = '';
             macroRow.style.display = tokens.length ? 'flex' : 'none';
@@ -3233,9 +3233,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         right.style.cssText = 'flex:2 1 0;display:flex;flex-direction:column;min-width:0;min-height:0;';
         right.append(tools, out);
         const repaint = () => {
-            renderMacroRow();
+            // One pass over the book's tokens per repaint: the macro row, the parts and the part-less map all read it.
+            const base = labBaseMap();
+            renderMacroRow(base);
             renderFlagState();
-            const { ink, rows, spans } = scanLab();
+            const { ink, rows, spans } = scanLab(base);
             const digestTop = out.scrollTop;   // an edit repaints the digest, and the row acted on is wherever it was
             out.innerHTML = labRun
                 ? labRunHtml()

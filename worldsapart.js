@@ -755,9 +755,8 @@ async function retrieve(chat) {
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
 }
 
-/** Sets this scan's match scope: the macro map over every key the entries carry, evaluated now ({{char}} moves per speaker in a
- *  group), and the wordBoundary setting. The scope in use is kept, caches and all, while it already holds every value this map
- *  does: a key expands only its own tokens. */
+/** Sets this scan's match scope from the macros the entries' keys carry, evaluated now, and the wordBoundary setting, keeping the
+ *  scope in use when it already holds every value. */
 function applyMacros(entries) {
     const keys = entries.flatMap(e => [...(e.key ?? []), ...(e.keysecondary ?? []), ...(e.waKeys ?? []), ...(e.waSecondary ?? [])]);
     runState.lastMacros = macroMap(keys, substituteParams);

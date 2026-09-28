@@ -510,9 +510,8 @@ export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {},
     }
 }
 
-/** One matching context: what keys match under — `macros` (`{{token}}` -> value) and the `wordBoundary` mode — and every cache
- *  built under it: the term registry, the automaton, the AST cache and the per-text scans. The caches are the context's, so a
- *  context never changes under them; a caller wanting another context makes another scope. */
+/** A match context — `macros` (`{{token}}` -> value) and the `wordBoundary` mode — with every cache built under it: the term
+ *  registry, the automaton, the AST cache and the per-text scans. */
 export function createScanScope({ macros = {}, boundary = 'strict' } = {}) {
     return {
         macros: Object.freeze(Object.fromEntries(Object.entries(macros ?? {}).map(([k, v]) => [k, String(v ?? '')]))),
