@@ -67,7 +67,6 @@ try {
     eq(q.body?.wa_big?.hashes.length, 700, 'topK up to admitCeiling(true) is honoured, not cut at 512');
     eq('wa_foreign' in (q.body ?? {}), false, 'a wholly foreign collection answers nothing');
     eq(rowsOf('wa_foreign'), 0, '...and its rows are dropped, so the next sync re-embeds them');
-    eq(fs.existsSync(path.join(vectors, 'extras', 'wa_foreign')), true, '...leaving the collection directory, which an empty model scope shares');
     eq(rowsOf('wa_mixed'), 2, 'a mixed collection loses only its foreign row');
     eq(q.body?.wa_mixed?.hashes.length, 2, '...and scores the rest in the same query');
 

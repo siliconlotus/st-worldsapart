@@ -181,15 +181,10 @@ async function dropForeignRows(indexPath, name, loaded, dim) {
     if (loaded.checkedDim === dim) return loaded;
     const foreign = loaded.items.filter(it => rowDim(it?.vector) !== dim);
     if (!foreign.length) { loaded.checkedDim = dim; return loaded; }
-    if (foreign.length === loaded.items.length) {
-        // The file, not vectra's deleteIndex: that removes the folder, which under an empty model scope is the collection dir.
-        await fs.promises.rm(path.join(indexPath, 'index.json'), { force: true });
-    } else {
-        const index = new LocalIndex(indexPath);
-        await index.beginUpdate();
-        for (const it of foreign) await index.deleteItem(it.id);
-        await index.endUpdate();
-    }
+    const index = new LocalIndex(indexPath);
+    await index.beginUpdate();
+    for (const it of foreign) await index.deleteItem(it.id);
+    await index.endUpdate();
     console.warn(`[WorldsApart] ${name}: dropped ${foreign.length} of ${loaded.items.length} chunks that are not ${dim}-dimensional like the query; the next sync re-embeds them`);
     // Not marked checked: a write racing the delete is checked by the next query.
     return loadCentered(indexPath, name);
@@ -430,7 +425,7 @@ export async function init(router) {
             const sourceDir = path.join(dirs.vectors, sanitize(String(source)));
             const wanted = new Set(hashes.map(Number));
             const found = new Map();
-            // Unknown until this model directory has been queried since startup; then any vector is taken.
+            // Undefined until this model directory is queried after startup, and while undefined any vector is taken.
             const dim = queryDims.get(scopeKey(dirs, source, model));
             // getIndexPath per sibling, not a fixed depth: an empty model scope (llamacpp, extras) puts index.json in the collection dir itself.
             // Newest first and capped: each sibling not in meanCache costs a whole index.json parse.
