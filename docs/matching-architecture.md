@@ -65,13 +65,7 @@ core, whose match semantics would then flicker between two rule sets. A failure 
 the toast stays until dismissed, and the scan ships only what never needed a decision (constants,
 `@@activate`, armed stickies — `delivery.dropUndecided`). An undecided selection never ships.
 
-The pipeline is generation-scoped. Every interceptor entry takes the next `scanToken`, and a
-continuation whose token is no longer current — an aborted generation, or one a newer generation
-displaced — bails at its next await instead of writing scan state or emitting activations into
-someone else's prompt. A `quiet` generation never displaces one the user has in flight: it stands
-down and runs core-native. A scan ranks only while its generation is the armed one (`armedToken`).
-ST labels no scans, so two generations interleaving inside one arming window are one limitation WA
-accepts; the token bounds it to a single degraded turn.
+The pipeline is generation-scoped. A run lasts from a generation's interceptor to its armed scan's last loop, and only one is in progress at a time: an interceptor entry, `quiet` generations and `/wa-dry` included, waits for the run in progress to finish, then takes the next `scanToken`. A continuation whose token is no longer current bails at its next await instead of writing scan state or emitting activations into someone else's prompt. Only two things supersede a run: a stop, and a run that has armed but not finished its scan `RUN_WAIT_MS` later, which WA takes to be blocked on the newcomer itself — an interceptor after WA's awaiting a generation — and supersedes with a toast. A scan ranks only while its generation is the armed one (`armedToken`), and the last loop disarms it. Only a scan WA took over (`waOwnsScan`) has core's budget stood down, so a superseded or unarmed scan runs core in full, budget included. A `quiet` generation is owned like any other but is not a chat turn: it records no latches and leaves the delivery panel alone.
 
 ## The decorator desugar
 

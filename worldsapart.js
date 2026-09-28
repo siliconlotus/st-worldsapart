@@ -6,7 +6,6 @@ import {
     event_types,
     getRequestHeaders,
     getMaxPromptTokens,
-    is_send_press,
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
@@ -863,28 +862,69 @@ async function selectAndActivate(chat, token) {
     runState.waOwnsScan = true;
 }
 
+/** How long a newcomer waits on a run that has armed but not finished its scan. Past it, the run is taken to be blocked on
+ *  the newcomer itself — an interceptor after WA's awaiting a generation — and the newcomer supersedes it. */
+const RUN_WAIT_MS = 15_000;
+
+/** The WA run in progress, from a generation's interceptor to its armed scan's last loop: `{ token, armed, done }`. */
+let currentRun = null;
+
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+
+/** Waits out the run in progress, then starts one and returns its token. Only a run still unfinished RUN_WAIT_MS after
+ *  arming is superseded. */
+async function takeRun() {
+    while (currentRun) {
+        const prior = currentRun;
+        await prior.armed.promise;
+        const finished = await Promise.race([prior.done.promise, new Promise(r => setTimeout(r, RUN_WAIT_MS))]);
+        if (finished || currentRun !== prior) continue;
+        console.warn(`WorldsApart: the previous generation had not finished its World Info scan ${RUN_WAIT_MS / 1000} s after WA armed it — superseding it`);
+        toastr.warning(t`A new generation started while the previous one was still scanning World Info. WorldsApart moved to the new one, and the previous one fell back to SillyTavern's own World Info.`, 'WorldsApart', { timeOut: 15000 });
+        break;
+    }
+    const token = ++runState.scanToken;
+    currentRun = { token, armed: deferred(), done: deferred() };
+    return token;
+}
+
+/** Ends the run `token` names, if it is still the current one. */
+function endRun(token) {
+    if (!currentRun || currentRun.token !== token) return;
+    currentRun.armed.resolve();
+    currentRun.done.resolve(true);
+    currentRun = null;
+}
+
+/** After selectAndActivate: an armed run lasts until its scan's last loop; one that did not arm ends now. */
+function settleRun(token) {
+    if (runState.armedToken === token) currentRun?.token === token && currentRun.armed.resolve();
+    else endRun(token);
+}
+
 // Hooks
 
 /** Generation interceptor. ST calls it (chat, contextSize, abort, type); `abort` is a setter that CANCELS the
  *  generation, never a reader, so it is not taken. Quiet generations scan like visible ones; ST skips its dry runs. */
 async function intercept(chat, _maxContext, _abort, type) {
-    // A quiet generation never displaces one the user has in flight: it stands down and runs core-native.
-    // is_send_press is the send lock the UI paths hold; Generate('quiet') sets it only later, at the prompt build.
-    if (type === 'quiet' && is_send_press) {
-        return;
-    }
-
+    const enabled = settings().enabled;
+    // Before anything is written: a waiting generation must not touch the state of the run it waits on.
+    const token = enabled ? await takeRun() : ++runState.scanToken;
+    runState.quietScan = type === 'quiet';
     // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
-    const token = ++runState.scanToken;
     runState.scanChat = chat.slice();
     // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
     runState.waOwnsScan = false;
 
-    if (!settings().enabled) {
+    if (!enabled) {
         return;
     }
 
-    await selectAndActivate(chat, token);
+    try {
+        await selectAndActivate(chat, token);
+    } finally {
+        settleRun(token);
+    }
 }
 
 
@@ -925,7 +965,7 @@ function onEntriesLoaded(loaded) {
     }
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
-    if (settings().enabled && !runState.generationIsDryRun) {
+    if (settings().enabled && runState.waOwnsScan && !runState.generationIsDryRun) {
         for (const entry of entries) {
             entry.waIgnoreBudget = Boolean(entry.ignoreBudget);   // always set, so authorIgnoreBudget's `??` falls through only on the ungated paths
             entry.ignoreBudget = true;
@@ -1340,6 +1380,12 @@ async function onScanDone(args) {
         reportFailure(t`activation error`,
             t`Only constant and sticky entries were included. Try again.`,
             error, { loud: true });
+    } finally {
+        // After rankOwnedScan, which may end the loop by clearing `next`. The next scan to rank must arm afresh.
+        if (isLastLoop(args)) {
+            endRun(runState.armedToken);
+            runState.armedToken = null;
+        }
     }
 }
 
@@ -1362,7 +1408,7 @@ async function rankOwnedScan(activated, args, skip) {
         skip('core activated nothing');
         runState.lastPromptOrder = [];
         runState.lastLayoutOrder = [];   // only written past this return, so without it the capture reads the PREVIOUS scan's population
-        renderDeliveryPanel([]);
+        if (!runState.quietScan) renderDeliveryPanel([]);
         return;
     }
 
@@ -1583,8 +1629,11 @@ async function rankOwnedScan(activated, args, skip) {
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
-    recordLatches(promptOrder.map(item => item.entry));
-    renderDeliveryPanel(runState.lastPromptOrder);
+    // A quiet generation is not a chat turn: nothing it activated has fired in the chat, and the panel shows the last turn.
+    if (!runState.quietScan) {
+        recordLatches(promptOrder.map(item => item.entry));
+        renderDeliveryPanel(runState.lastPromptOrder);
+    }
 
     if (runState.verboseRun) {
         // The pre-cut, pre-budget population, `cut`/`cutBy` recording which side each row fell on. candidates=N caps
@@ -1666,6 +1715,8 @@ async function dryRun(verbose = false) {
     const identity = await extensionIdentity();
     if (identity) console.log(`WorldsApart: ${identity}`);
 
+    // Before the flags below, which the run it waits on would read.
+    const token = await takeRun();
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
     // This scan is not ST's, and nothing else clears the flag: GENERATION_ENDED never fires for a dry Generate.
@@ -1684,9 +1735,9 @@ async function dryRun(verbose = false) {
 
     // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
-        // The dry run takes the next token: an in-flight generation's continuations stand down rather than interleave.
-        const token = ++runState.scanToken;
+        runState.quietScan = false;
         await selectAndActivate(chat, token);
+        settleRun(token);
 
         await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
@@ -1696,6 +1747,7 @@ async function dryRun(verbose = false) {
         runState.dryRunInProgress = false;
         // An exception before the scan's last loop would otherwise leave the takeover flag armed.
         runState.waOwnsScan = false;
+        endRun(token);
     }
 
     return '';
@@ -2437,7 +2489,7 @@ async function initBody() {
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
     eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
     // A stopped generation is superseded: the interceptor's `abort` cannot be read, so the token carries the stop.
-    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; });
+    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; endRun(currentRun?.token); });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 

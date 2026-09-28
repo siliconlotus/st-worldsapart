@@ -106,6 +106,7 @@
  "A key here is written in ${0}, a script without word boundaries. Whole-word matching is likely to work where it appears among Latin text or punctuation, but it can never match inside a wholly ${1} sentence.": "Un mot-clé est écrit ici en ${0}, une écriture sans frontières de mots. La correspondance par mots entiers fonctionnera sans doute là où il apparaît parmi du texte latin ou de la ponctuation, mais jamais à l’intérieur d’une phrase entièrement en ${1}.",
  "A lorebook named “${0}” already exists.": "Un lorebook nommé « ${0} » existe déjà.",
  "A lorebook with that name already exists.": "Un lorebook porte déjà ce nom.",
+ "A new generation started while the previous one was still scanning World Info. WorldsApart moved to the new one, and the previous one fell back to SillyTavern's own World Info.": "Une nouvelle génération a commencé alors que la précédente analysait encore le World Info. WorldsApart est passé à la nouvelle, et la précédente s’est rabattue sur le World Info de SillyTavern.",
  "A random anonymous ID your grades are signed with.": "Un identifiant anonyme aléatoire qui signe vos notes.",
  "A → Z": "A → Z",
  "Absolute token budget over all activated entries (0 = leave to core)": "Budget absolu en tokens sur toutes les entrées activées (0 = laisser au cœur)",

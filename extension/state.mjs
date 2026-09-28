@@ -77,7 +77,8 @@ export function ensureSettings(extensionSettings) {
 /** Cross-module mutable state. Stays a holder object: an imported `let` cannot be reassigned across modules. */
 export const runState = {
     scanToken: 0,                 // generations increment it at intercept; after every await a continuation compares and bails when superseded
-    armedToken: 0,                // the token selectAndActivate committed for; a SCAN_DONE ranks only while it is still the current one
+    armedToken: null,             // the token selectAndActivate committed for; a SCAN_DONE ranks only while it is still the current one, and its last loop disarms
+    quietScan: false,             // the current token's generation is a quiet one: it records no latches and leaves the delivery panel alone
     lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}` — core's format, not the US separator
     lastPromptOrder: [],          // the last scan's prompt order, post-cut
     lastQuery: '',                // last retrieval query text
