@@ -1,7 +1,8 @@
 // keyword-suggest.mjs — the key suggester: what to propose for an entry, from its own text (the TF-IDF ranker) and
 // from a model (the prompt, parser and post-filter). ST-free; docs/keyword-suggestions.md is the reference.
 import { table } from './lang.mjs';
-import { buildAutomaton, scanAutomaton } from './smartkeys.mjs';
+import { buildAutomaton, fold as matchFold, scanAutomaton } from './smartkeys.mjs';
+import { maskMarkup } from './matcher.mjs';
 import { FUNCTION_WORDS } from './keyword-audit.mjs';
 
 // Curly apostrophes to straight for a table lookup only (K14); the term keeps what it was written with.
@@ -190,15 +191,17 @@ export function buildKeySuggest(data, opts) {
     const DF = new Map();
     for (const s of seqs) for (const t of new Set(ngramsOf(s, true))) DF.set(t, (DF.get(t) ?? 0) + 1);
 
-    // Substring df, as countKey sees a key. dfCache is filled by the automaton warm-up below; the scan-on-miss path serves the ✨ path's terms.
+    // Substring df, as countKey sees a key: folded and markup-masked. dfCache is filled by the automaton warm-up below; the scan-on-miss path serves the ✨ path's terms.
+    // `contentsLc` is only lowercased: tallyForms indexes the raw text with it, and the fold can change a length.
     const contentsLc = entries.map(e => String(e.content ?? '').toLowerCase());
+    const contentsFolded = entries.map(e => matchFold(maskMarkup(String(e.content ?? ''))));
     const dfCache = new Map();
     const dfSubstr = t => {
-        const q = String(t).toLowerCase();
+        const q = matchFold(t);
         let m = dfCache.get(q);
         if (m === undefined) {
             m = 0;
-            for (const c of contentsLc) if (c.includes(q)) m++;
+            for (const c of contentsFolded) if (c.includes(q)) m++;
             dfCache.set(q, m);
         }
         return m;
@@ -276,7 +279,7 @@ export function buildKeySuggest(data, opts) {
     };
 
     // Warm dfCache in ONE automaton pass per document (S10); bgDocs pool into the idf denominator.
-    const bgLc = bgDocs.map(d => String(d).toLowerCase());
+    const bgLc = bgDocs.map(d => matchFold(maskMarkup(String(d))));
     const M = bgLc.length;
     const bgDF = new Map();
     {
@@ -285,14 +288,14 @@ export function buildKeySuggest(data, opts) {
             for (const [term, f] of tf) {
                 if (!admit(term, f)) continue;
                 if ((DF.get(term) ?? 1) / N > dfCeil) continue;   // the cheap gate that precedes it
-                wanted.add(term.toLowerCase());
+                wanted.add(matchFold(term));
             }
         }
         if (wanted.size) {
             const terms = [...wanted];
             const aut = buildAutomaton(terms);
             const hits = new Int32Array(terms.length);
-            for (const c of contentsLc) for (const idx of scanAutomaton(aut, c).keys()) hits[idx]++;
+            for (const c of contentsFolded) for (const idx of scanAutomaton(aut, c).keys()) hits[idx]++;
             terms.forEach((t, i) => dfCache.set(t, hits[i]));
             if (M) {
                 const bg = new Int32Array(terms.length);
@@ -306,7 +309,7 @@ export function buildKeySuggest(data, opts) {
     // ponytail: validated at n=3..4; a longer gram compares only its shoulders, which errs toward keeping it.
     const bgCache = new Map();
     const bgCount = t => {
-        const q = t.toLowerCase();
+        const q = matchFold(t);
         let v = bgCache.get(q);
         if (v === undefined) { v = 0; for (const c of bgLc) if (c.includes(q)) v++; bgCache.set(q, v); }
         return v;
@@ -367,7 +370,7 @@ export function buildKeySuggest(data, opts) {
             const rec = SUCC.get(term);
             if (n > 1 && rec && rec.n >= 2 && rec.s && rec.s !== '.') continue;
             rows.push({ term, display: displayOf(term, idx), present: existing.has(term), df, f, n,
-                score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (contentLen(term) - 1)) });
+                score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(matchFold(term)) ?? 0) + 0.5)) * (1 + 0.5 * (contentLen(term) - 1)) });
         }
         rows.sort((a, b) => b.score - a.score);
         // A plural adds nothing a substring key can use, so the singular stands alone.

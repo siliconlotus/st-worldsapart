@@ -87,7 +87,8 @@ sentence-initial; a tie goes to the quieter form, a shouted form defers to the b
 `onlyActive` (skip disabled entries), `llmChunk` 5000 characters. `englishGate: false` is the
 diagnostic's switch: every term passes the frequency gate at full weight.
 
-Warm-up: every admitted term's substring df over the book and the background documents is counted in
+Warm-up: every admitted term's substring df — on the matcher's fold, markup masked, as countKey sees the
+text — over the book and the background documents is counted in
 one automaton pass per document, not one scan per term: term-by-term df was 97% of build runtime on
 a 327-entry book (S10).
 
@@ -134,7 +135,8 @@ not segments — literal keys are slice-invariant, and eight segments against on
 A chat scan, when one was run, supplies per key the share of units holding it (message, paragraph or
 scan window, as the match window defines the unit), the share holding it as typed, and two kinds of
 probe: for a literal key over the chat-common gate, the key whole-word and — where it has a capital —
-case-sensitive; for a SmartKey, each path through its AST.
+case-sensitive, and the key under each combination of the two flags (`flagProbe`), whose share stands
+in for the bare one when the entry sets either flag; for a SmartKey, each path through its AST.
 
 **Scope.** Disabled entries with `includeInactive`; `constant`, `vectorized` and keyword entries by their
 own switches. df is over the whole book regardless.

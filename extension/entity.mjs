@@ -23,16 +23,10 @@ export function buildGazetteer(entries) {
 export function buildTermWeights(queryText, gazetteer, boost) {
     // Null-prototype: the keys are chat tokens, and `weights['constructor'] ?? 0` would otherwise read a Function and fold to NaN.
     const weights = Object.create(null);
-    // The split must stay lexical.tokenize's character class, or an accented query term shatters and matches nothing (K9).
-    const query = normalizeOrthography(queryText);
-    const properNouns = properNounsOf(query);
+    const properNouns = properNounsOf(normalizeOrthography(queryText));
 
-    for (const token of query.split(/[^\p{L}\p{N}\p{M}']+/u)) {
-        if (token.length < 2) {
-            continue;
-        }
-
-        const lower = token.toLowerCase();
+    // lexical.tokenize, so a query term is exactly the token the BM25 index holds (K9).
+    for (const lower of tokenize(queryText)) {
         const isProperNoun = properNouns.has(lower);
 
         if (!isProperNoun && !gazetteer.has(lower)) {

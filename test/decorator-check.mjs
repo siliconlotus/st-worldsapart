@@ -331,3 +331,5 @@ eq(hasLatch(ent(10, ['@@dont_activate_after_match', '@@keep_activate_after_match
 eq(hasLatch(ent(11, [])), false, 'no decorators carries no latch');
 eq(hasLatch(ent(12, ['@@activate'])), false, 'an unrelated decorator carries no latch');
 console.log('ok   hasLatch');
+eqDeep(rekeyLatches({ a: 1, b: 2 }, () => 'c'), { fired: { c: 1 }, dropped: { b: 2 } },
+    'two moved onto one target: the first keeps it and the second is dropped, where an undo can find it');

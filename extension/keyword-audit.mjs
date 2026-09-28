@@ -127,6 +127,11 @@ export function orthoAlternates(k) {
  *  message, so probing every key would cost more than the scan. */
 export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
+/** A literal key counted under its entry's match flags, or null when neither is set or the key holds a `"`. */
+export const flagProbe = (k, cs, ww) => (!(cs || ww) || !isLiteral(k) || k.includes('"') ? null : `? ${ww ? '=' : ''}${cs ? '^' : ''}"${k}"`);
+/** Every flagProbe a key can need; scanned beside it for the keys over the chat-common gate, as substringProbes are. */
+export const flagProbes = k => [flagProbe(k, false, true), flagProbe(k, true, false), flagProbe(k, true, true)].filter(Boolean);
+
 /**
  * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
  * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
@@ -329,8 +334,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const literal = !k.startsWith('?') && !isRegexKey(k);
         // The rate under the entry's OWN flags where that probe was scanned: countChatHits counts bare keys, so a
         // whole-word key must not read as chat-common on the strength of hits its flag refuses.
-        const flagProbe = literal && ww !== cs && !k.includes('"') ? `? ${ww ? '=' : '^'}"${k}"` : null;
-        const chatRate = (flagProbe ? chatRateOf(flagProbe) : undefined) ?? chatRateOf(k);
+        const probe = flagProbe(k, cs, ww);
+        const chatRate = (probe ? chatRateOf(probe) : undefined) ?? chatRateOf(k);
         const hits = scan(k, cs, ww);
         return { literal, chatRate, hits, bookContent: hits.df };
     };

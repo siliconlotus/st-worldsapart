@@ -1101,7 +1101,8 @@ export function rekeyLatches(record, rekey) {
         const to = rekey(k);
         if (to === undefined || to === k) { kept[k] = at; continue; }
         changed = true;
-        if (to === null) dropped[k] = at; else moved[to] = at;
+        // Two moved onto one target: the first keeps it, the second is dropped, so an undo can restore it.
+        if (to === null || Object.hasOwn(moved, to)) dropped[k] = at; else moved[to] = at;
     }
     if (!changed) return null;
     for (const k of Object.keys(moved)) if (k in kept) { dropped[k] = kept[k]; delete kept[k]; }

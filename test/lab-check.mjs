@@ -153,3 +153,6 @@ eq(windowTip(win('short', [{ at: 0, to: 5 }]), { at: 0, to: 5 }), '«short»', '
     eq(runSpans(run, hay, { scope: NEUTRAL, matchWindow: 'paragraph', parts }).length, 2, 'a run\'s spans follow the parts');
     eq(labScan({ scope: NEUTRAL, hay, keys: '{{char}}', matchWindow: 'paragraph' }).rows[0]?.count ?? 0, 0, 'without parts the map in force is used, and a parts scan left it as it was: nothing');
 }
+
+eq(windowTip({ text: 'the fire drake', excerpts: [{ at: 4, to: 8 }, { at: 4, to: 14 }] }, { at: 4, to: 14 }), 'the «fire drake»',
+    'an excerpt inside one already marked is not written twice');

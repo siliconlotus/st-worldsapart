@@ -3,6 +3,7 @@
 
 import { MINOR, MODERATE, SEVERE } from './keyword-audit.mjs';
 import { wiTitleOf } from './sort.mjs';
+import { isConstant } from './layout.mjs';
 
 /** Whether `e` matches the free-text query under `scope`; a scope with nothing ticked admits everything. */
 export const matchSearch = (e, query, scope) => {
@@ -18,8 +19,8 @@ export const matchSearch = (e, query, scope) => {
 /** One facet of the type filter. `scan` is buildKeyPruneScan's; without it the audit facets admit nothing. */
 export const facetMatch = (e, f, scan) => {
     switch (f) {
-        case 'keyword': return !e.constant && !e.vectorized;
-        case 'constant': return !!e.constant;
+        case 'keyword': return !isConstant(e) && !e.vectorized;
+        case 'constant': return isConstant(e);
         case 'vector': return !!e.vectorized;
         case 'enabled': return !e.disable;
         case 'disabled': return !!e.disable;

@@ -472,3 +472,15 @@ import { cleanupRows } from '../extension/keyword-audit.mjs';
         'a missing key list is empty, not a throw');
 }
 console.log('cleanupRows: ok');
+
+import { flagProbe, STUDIO_PRUNE_OPTS } from '../extension/keyword-audit.mjs';
+{
+    const curly = buildKeySuggest({ entries: { 0: { uid: 0, key: [], content: 'D’Arcy came home.' }, 1: { uid: 1, key: [], content: 'Rain.' } } },
+        { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30 });
+    assert.strictEqual(curly.dfSubstr("d'arcy"), 1, 'dfSubstr folds as countKey does: a straight apostrophe finds the curly one');
+    const both = { uid: 0, key: ['Eve'], content: 'x', caseSensitive: true, matchWholeWords: true };
+    assert.strictEqual(flagProbe('Eve', true, true), '? =^"Eve"', 'both flags make one probe');
+    const chatScan = { messagesWith: new Map([['Eve', 5], ['? =^"Eve"', 0]]), messages: 10, unit: 'message' };
+    const flags = buildKeyPruneScan({ entries: { 0: both } }, STUDIO_PRUNE_OPTS, new Set(), { chatScan, scope: createScanScope() }).classifyEntry(both).map(p => p.flag);
+    assert.ok(!flags.includes('chat common'), 'a key with both flags is rated by the probe under both, not by its bare hits');
+}

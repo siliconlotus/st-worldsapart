@@ -116,8 +116,9 @@ export function windowTip(sg, ex) {
     const from = wide ? Math.max(0, ex.at - 110) : 0;
     const to = wide ? Math.min(src.length, ex.to + 110) : src.length;
     let out = '', at = from;
-    for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at)) {
-        if (x.at < from || x.to > to) continue;
+    // Longest first at one start, so an excerpt inside one already marked is skipped rather than written twice.
+    for (const x of [...sg.excerpts].sort((a, b) => a.at - b.at || b.to - a.to)) {
+        if (x.at < from || x.to > to || x.at < at) continue;
         const [open, close] = x.negated ? ['»', '«'] : ['«', '»'];
         out += `${src.slice(at, x.at)}${open}${src.slice(x.at, x.to)}${close}`;
         at = x.to;

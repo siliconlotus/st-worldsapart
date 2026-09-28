@@ -55,15 +55,17 @@ export function standDown(lang) {
     return current;
 }
 
-/** The table for `lang`: the bundled pack for 'en', else the store's copy, else one fetch that is then stored; a failure stands down. */
+let request = 0;
+/** The table for `lang`: the bundled pack for 'en', else the store's copy, else one fetch that is then stored; a failure stands down. A call a later one has superseded changes nothing. */
 export async function setLanguage(lang, { fetchPack, store }) {
+    const mine = ++request;
     if (!lang || lang === 'en') return usePack(EN);
     let pack = await store.get(lang);
     if (!pack) {
         try { pack = await fetchPack(lang); await store.put(lang, pack); }
-        catch { return standDown(lang); }
+        catch { return mine === request ? standDown(lang) : current; }
     }
-    return usePack(pack);
+    return mine === request ? usePack(pack) : current;
 }
 
 /** The index for the dropdown; a stored pack whose hash the index has moved is refetched and replaced. Null when the index is unreachable. */

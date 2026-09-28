@@ -12,7 +12,7 @@ import { ensureStudioStyle, makeSortControl, pluginFallback, renderMessageHtml, 
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
+import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, flagProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
 import { chatUser, createScanScope, macroMap, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
@@ -2317,8 +2317,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Second pass, probes only for the keys over the gate: a probe is a SmartKey evaluated per message, and the gate
         // admits a handful of keys where the book has thousands.
         const gate = studioOpts.chatCommon ?? KEY_CHAT_COMMON;
-        // substring's whole-word and case probes, and a SmartKey's paths, so `chat common` can name the one that matches.
-        const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(k => [...substringProbes(k), ...pathProbes(k)]);
+        // substring's whole-word and case probes, the key under each flag combination, and a SmartKey's paths, so `chat common` can name the one that matches.
+        const probes = [...new Set(own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(k => [...substringProbes(k), ...flagProbes(k), ...pathProbes(k)]))];
         if (probes.length) {
             const second = await scanKeys(probes, picked);
             for (const [k, n] of second.totals) totals.set(k, n);

@@ -1,5 +1,5 @@
 // sort-check — the canonical grading-table order (sort.mjs gradeOrder), what /wa-grade and /wa-super-grade show first.
-import { gradeOrder, reconcileTiers, sortTiered } from '../extension/sort.mjs';
+import { gradeOrder, reconcileTiers, sortTiered, tierRank } from '../extension/sort.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 // One row per class, in the order onScanDone hands them over; do not reorder this fixture.
@@ -71,3 +71,4 @@ eq(sortTiered([ent(9, 1, { vectorized: true })], { sortKey: 'order-asc', tiered:
 const src = [ent(1, 2), ent(2, 1)];
 sortTiered(src, { sortKey: 'order-asc' });
 eq(src.map(e => e.uid).join(','), '1,2', 'the caller’s list is not sorted in place');
+eq(tierRank({ uid: 3, content: '@@activate\nx' }, reconcileTiers()), 0, 'an @@activate entry is in the constant tier, as layoutOrder files it');

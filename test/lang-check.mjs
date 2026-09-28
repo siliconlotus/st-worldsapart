@@ -71,4 +71,14 @@ eq(parsePacked('').size, 0, 'an empty packed string is an empty table');
     const big = JSON.stringify(BUNDLED) + 'Русский ' .repeat(1000);
     eq(Buffer.from(toBase64(big), 'base64').toString('utf8') === big, true, 'a pack-sized UTF-8 string round-trips through toBase64');
 }
+{
+    let release;
+    const slow = new Promise(r => { release = r; });
+    const store = { get: async () => null, put: async () => {} };
+    const pending = setLanguage('xx', { fetchPack: () => slow, store });
+    await setLanguage('en', { fetchPack: () => slow, store });
+    release(pack);
+    await pending;
+    eq(table().lang, 'en', 'a switch a later one superseded changes nothing when it resolves');
+}
 console.log(process.exitCode ? 'FAIL' : 'ok');

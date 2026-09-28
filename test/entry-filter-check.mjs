@@ -64,3 +64,5 @@ eq(rankBySearch(groups, 'moss', { keywords: true }).map(x => x.entry.uid).join('
     'a narrowed scope drops the bands it does not read');
 eq(rankBySearch(groups, 'moss', ALL).find(x => x.entry.uid === 1).rows.length, 1,
     'rows are never filtered, only the group is');
+eq(facetMatch({ content: '@@activate\nx' }, 'constant'), true, 'an @@activate entry is a constant');
+eq(facetMatch({ content: '@@activate\nx' }, 'keyword'), false, '...and not a keyword entry');

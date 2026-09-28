@@ -1,7 +1,7 @@
 // The sentinel fixture: a book and chat whose every audit verdict is written down, driven through the inputs the Studio uses.
 // Also importable into ST (install-sentinel.mjs), for the half node cannot see: chips, tooltips, colours.
 import fs from 'node:fs';
-import { buildKeyPruneScan, substringProbes, orthoAlternates } from '../extension/keyword-audit.mjs';
+import { buildKeyPruneScan, flagProbes, substringProbes, orthoAlternates } from '../extension/keyword-audit.mjs';
 import { createScanScope, ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
 import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor, withExtraTexts } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
@@ -28,7 +28,7 @@ const secondaries = [...new Set(entries.flatMap(e => e.keysecondary ?? []))];
 
 /** The chat scan through the function the Studio's client path calls. */
 // The substring probes ride along as the Studio's second pass would send them: a 23-key fixture needs no gate.
-const chatRate = () => countChatHits([...keys, ...secondaries, ...keys.flatMap(substringProbes)], msgs, { scope: createScanScope() });
+const chatRate = () => countChatHits([...keys, ...secondaries, ...new Set([...keys.flatMap(substringProbes), ...keys.flatMap(flagProbes)])], msgs, { scope: createScanScope() });
 
 const verdicts = (chat, matchWindow = 'scan') => {
     const s = buildKeyPruneScan(data, OPTS, new Set(), { scope: createScanScope(), chatScan: chat, matchWindow });
