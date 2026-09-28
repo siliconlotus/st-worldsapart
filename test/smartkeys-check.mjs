@@ -674,6 +674,13 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(matches('{{user}}', 'Parsons, Nick'), false);
     eq(matches('? {{nope}} x', '{{nope}} x'), true, 'an unknown token stays as written');
     eq(matches('? {{empty}} sword', 'a sword'), true, 'an empty value contributes no term');
+    // Through the primed path too: an empty literal interned into the automaton would count at every position.
+    const lone = k => ({ key: [k] }), kcfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    for (const k of ['{{empty}}', '{{user}}[3]', '? "{{empty}}"']) {
+        eq(keywordScore(lone(k), ['a sword'], [k], { ...kcfg, scope: createScanScope({ macros: M.macros }) }).hits.length, 0, `${k} expanding to nothing matches nothing, primed`);
+    }
+    eq(keywordScore({ key: ['sword'], keysecondary: ['{{empty}}'], selectiveLogic: 0 }, ['a sword'], ['sword'], { ...kcfg, scope: createScanScope({ macros: M.macros }) }).hits.length, 0, '...nor as a secondary it gates on');
+    eq(countChatHits(['{{empty}}'], ['a', 'b'], { scope: createScanScope({ macros: M.macros }) }).messagesWith.get('{{empty}}'), 0, '...nor in the chat scan');
     M = createScanScope({ macros: { '{{path}}': '/dev/null/' } });
     eq(matches('{{path}}', 'at /dev/null/ now'), true, 'a plain key whose value looks like a pattern is still a literal');
     eq(matches('{{path}}', 'dev'), false);

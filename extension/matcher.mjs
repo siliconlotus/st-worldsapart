@@ -90,7 +90,9 @@ export function splitKeys(input) {
         if (c === '\\') { cur += c + (src[i + 1] ?? ''); i++; continue; }
         if (c === '\n') { inRegex = false; quoteFam = null; push(); continue; }
         if (!inRegex && quoteFam) { if (quoteFam.includes(c)) quoteFam = null; }
-        else if (!inRegex && QUOTE_FAMILIES.some(f => f.includes(c))) quoteFam = QUOTE_FAMILIES.find(f => f.includes(c));
+        // Only where a term starts: a mark inside one (`6" sword`) is text, or it swallows every comma after it.
+        else if (!inRegex && QUOTE_FAMILIES.some(f => f.includes(c))
+            && (!cur.trim() || (cur.trim().startsWith('?') && /[\s(&|!+\-=^?]/.test(cur.at(-1))))) quoteFam = QUOTE_FAMILIES.find(f => f.includes(c));
         else if (c === '/' && !quoteFam && (inRegex || !cur.trim())) inRegex = !inRegex;
         else if (c === ',' && !inRegex && !quoteFam) { push(); continue; }
         cur += c;
@@ -391,7 +393,8 @@ export function countChatHits(keys, messages, { matchWindow = 'message', depth =
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
     requireScope(scope, 'countChatHits');
     // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
-    const folded = [...new Set(literals.flatMap(k => keyVariants(expandMacros(k, scope.macros)).map(fold)))];
+    // '' dropped: the automaton counts it at every position, where countKey counts nothing.
+    const folded = [...new Set(literals.flatMap(k => keyVariants(expandMacros(k, scope.macros)).map(fold)))].filter(Boolean);
     const idxOf = new Map(folded.map((f, i) => [f, i]));
     // Memoised on the folded list: the plugin calls this once per chat FILE with one book's keys, and rebuilding the
     // trie per file was the whole cost of a multi-chat scan.

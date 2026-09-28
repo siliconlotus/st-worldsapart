@@ -245,7 +245,7 @@ function expandAst(node, macros) {
         if (!HAS_MACRO.test(node.value)) return node;
         const { near, groupWeight, weight = 1, optional, ...leaf } = node;
         const text = expandMacros(node.value, macros);
-        const words = node.quoted ? [text] : text.split(/\s+/).filter(Boolean);
+        const words = (node.quoted ? [text] : text.split(/\s+/)).filter(Boolean);
         if (!words.length) return null;
         if (words.length === 1) return { ...node, value: words[0] };
         const out = words.map(w => ({ ...leaf, value: w, weight: 1 })).reduce((l, r) => ({ type: 'AND', left: l, right: r }));
@@ -484,7 +484,9 @@ const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight
     if (!s) return null;
     if (s.startsWith('?')) return buildAst(s, scope);
     if (isRegexKey(s)) return { type: 'REGEX', value: expandRegex(s, scope.macros), weight };
-    return { type: 'TERM', value: expandMacros(s, scope.macros), isExact: !!wholeWords, isCaseSensitive: !!caseSensitive, quoted: true, weight, boundary: scope.boundary };
+    const value = expandMacros(s, scope.macros);
+    if (!value) return null;
+    return { type: 'TERM', value, isExact: !!wholeWords, isCaseSensitive: !!caseSensitive, quoted: true, weight, boundary: scope.boundary };
 };
 
 /** Core's `(key, keysecondary, selectiveLogic)` as one AST per primary key, `flags` being the entry's resolved match flags:
@@ -530,7 +532,9 @@ export const requireScope = (scope, where) => {
     return scope;
 };
 
+/** undefined for '', which the automaton would count at every position. */
 function internLiteral(scope, folded) {
+    if (!folded) return undefined;
     let idx = scope.termIndex.get(folded);
     if (idx === undefined) {
         idx = scope.patterns.length;
@@ -548,7 +552,7 @@ function registerTerms(scope, node) {
         // No acIndex: a pattern is not a literal, so it skips pass 1.
     } else if (node.type === 'TERM') {
         // One index per variant: a single one would make the pass-1 zero authoritative for the typed form alone.
-        node.acIndex = keyVariants(node.value).map(v => internLiteral(scope, fold(v)));
+        node.acIndex = keyVariants(node.value).map(v => internLiteral(scope, fold(v))).filter(i => i !== undefined);
     } else if (node.type === 'NOT') {
         registerTerms(scope, node.operand);
     } else {

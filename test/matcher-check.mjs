@@ -351,6 +351,11 @@ eq(splitKeys('? "hot, tub", cat').join(' | '), '? "hot, tub" | cat', 'and so doe
 eq(splitKeys('and/or, cat').join(' | '), 'and/or | cat', 'a slash mid-token is an ordinary character, not a regex opening');
 eq(splitKeys('/unclosed,cat').join(' | '), '/unclosed | cat', 'a regex that never closes is split back up rather than left holding the comma');
 eq(splitKeys('a,,b\n\n').join(' | '), 'a | b', 'empty tokens are dropped, not kept as blanks');
+eq(splitKeys('Elara, 6" sword, Bob').join(' | '), 'Elara | 6" sword | Bob', 'a quote mark inside a term is text, not a phrase opening');
+eq(splitKeys('l«x, y').join(' | '), 'l«x | y', '...of any family');
+eq(splitKeys('? =^"a, b", c').join(' | '), '? =^"a, b" | c', 'a SmartKey phrase after its flags still opens');
+eq(splitKeys('? x&"a, b", c').join(' | '), '? x&"a, b" | c', '...and after an operator');
+eq(splitKeys('? 6" tall, c').join(' | '), '? 6" tall | c', '...but not inside a SmartKey term');
 eq(splitKeys('').length, 0, 'nothing in, nothing out');
 console.log('ok   splitKeys: comma and newline separate; regexes and quoted terms keep their commas');
 
