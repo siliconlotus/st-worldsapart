@@ -272,11 +272,16 @@ async function queryCollections(args) {
                 signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
             });
 
-            if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
-            const results = await response.json();
-            // Only what stage 1 reads: a scored metadata array per collection answered. Anything more is fine.
-            if (!results || typeof results !== 'object' || !Object.values(results).every(g => Array.isArray(g?.metadata) && g.metadata.every(x => typeof x?.score === 'number'))) throw new Error('unscored or missing metadata');
-            return results;
+            // 422: a source the plugin cannot embed; 502: the provider failed. Neither is skew, and the no-plugin path reports the provider's error.
+            if (response.status === 422 || response.status === 502) {
+                console.warn(`WorldsApart: the plugin could not embed the query (${response.status} ${await response.text()}), taking the no-plugin path`);
+            } else {
+                if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+                const results = await response.json();
+                // Only what stage 1 reads: a scored metadata array per collection answered. Anything more is fine.
+                if (!results || typeof results !== 'object' || !Object.values(results).every(g => Array.isArray(g?.metadata) && g.metadata.every(x => typeof x?.score === 'number'))) throw new Error('unscored or missing metadata');
+                return results;
+            }
         } catch (error) {
             pluginFallback('query-multi', error);
         }

@@ -55,10 +55,7 @@ const queryDims = new Map();
 const scopeKey = (directories, source, model) => `${path.join(directories.vectors, sanitize(String(source)))}\u001f${sanitize(String(model ?? ''))}`;
 
 const openAiish = (q, urlOverride = null) => getOpenAIVector(q.text, q.source, q.directories, String(q.s.model), urlOverride);
-// Vector Storage embeds these in the browser; thrown so the client falls back.
-const inBrowser = q => { throw new Error(`WorldsApart: source "${q.source}" embeds in the browser — the plugin cannot embed a query for it.`); };
-
-/** How the plugin embeds a QUERY per source — a mirror of ST's module-private `getVector` and `getSourceSettings`
+/** How the plugin embeds a QUERY per source, null for one Vector Storage embeds in the browser — a mirror of ST's module-private `getVector` and `getSourceSettings`
  *  (src/endpoints/vectors.js); test/embed-sources-check.mjs fails when ST's SOURCES outgrows it. A Map, not an object
  *  literal: the key is request input, and `toString` must not resolve to a route. */
 const EMBED_ROUTES = new Map([
@@ -77,19 +74,14 @@ const EMBED_ROUTES = new Map([
         const accountId = String(q.s.workers_ai_account_id || '').trim();
         return openAiish(q, accountId ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1` : null);
     }],
-    ...['webllm', 'koboldcpp'].map(name => [name, inBrowser]),
+    ...['webllm', 'koboldcpp'].map(name => [name, null]),
     ...['openai', 'togetherai', 'mistral', 'chutes', 'electronhub', 'nanogpt', 'openrouter'].map(name => [name, q => openAiish(q)]),
 ]);
 export const EMBED_SOURCES = [...EMBED_ROUTES.keys()];
 
-/** Embeds the QUERY for `source`. `request` is the plugin's own Express request, which Google's vectors read credentials off. */
+/** The QUERY's vector for `source`, which must have a route. `request` is the plugin's own Express request, which Google's vectors read credentials off. */
 async function embed(source, s, text, directories, request) {
-    const route = EMBED_ROUTES.get(source);
-    if (!route) {
-        throw new Error(`WorldsApart: no embedding route for source "${source}" — `
-            + 'the extension will fall back to stock vector search, which returns no scores, so stage 1 will have no cosine.');
-    }
-    return await route({ source, s, text, directories, request });
+    return await EMBED_ROUTES.get(source)({ source, s, text, directories, request });
 }
 
 /** The model scope ST wrote the collection under (`getSourceSettings(source).model`); several sources resolve it SERVER-SIDE, so the client's field alone names a directory ST never wrote. */
@@ -206,6 +198,11 @@ export async function init(router) {
                 return response.status(400).send({ error: 'searchText must be a string of at most 65536 characters' });
             }
 
+            // 422 and 502 are the provider's, never a version mismatch: the client falls back without reporting skew.
+            if (!EMBED_ROUTES.get(String(source))) {
+                return response.status(422).send({ error: `the plugin cannot embed a query for source "${source}"` });
+            }
+
             const topK = Math.min(admitCeiling(true), Math.max(1, Number(request.body.topK) || 10));
             const settings = { ...sourceSettings, model: modelScope(String(source), sourceSettings ?? {}) };
             // Lexical fields a client may still send (threshold, bm25K1, bm25B, termWeights, stopwordDf) are ignored; never reject them.
@@ -218,16 +215,22 @@ export async function init(router) {
             const indexPaths = collectionIds.map(collectionId => getIndexPath(request.user.directories, String(collectionId), String(source), settings.model));
             const loading = Promise.all(indexPaths.map((indexPath, i) => loadCentered(indexPath, String(collectionIds[i]))));
             loading.catch(() => {});   // surfaced by the await below; without this an embed failure leaves an unhandled rejection
-            const queryVector = await embed(String(source), settings, String(searchText), request.user.directories, request);
+            let queryVector;
+            try {
+                queryVector = await embed(String(source), settings, String(searchText), request.user.directories, request);
+            } catch (error) {
+                console.warn(`[WorldsApart] ${source} could not embed the query: ${error?.message ?? error}`);
+                return response.status(502).send({ error: String(error?.message ?? error) });
+            }
+            const dim = rowDim(queryVector);
+            if (!dim) return response.status(502).send({ error: `${source} returned no query vector` });
+            queryDims.set(scopeKey(request.user.directories, source, settings.model), dim);
             const results = [];
             const loadedAll = await loading;
-            // No query vector is the provider's failure: scoring throws it, and nothing is dropped.
-            const dim = rowDim(queryVector);
-            if (dim) queryDims.set(scopeKey(request.user.directories, source, settings.model), dim);
 
             for (let i = 0; i < collectionIds.length; i++) {
                 const collectionId = collectionIds[i];
-                const loaded = dim && loadedAll[i] ? await dropForeignRows(indexPaths[i], String(collectionId), loadedAll[i], dim) : loadedAll[i];
+                const loaded = loadedAll[i] ? await dropForeignRows(indexPaths[i], String(collectionId), loadedAll[i], dim) : loadedAll[i];
 
                 if (!loaded) {
                     continue;
@@ -354,7 +357,9 @@ export async function init(router) {
             if (fs.existsSync(root)) {
                 for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
                     if (!dir.isDirectory()) continue;
-                    for (const file of fs.readdirSync(path.join(root, dir.name))) if (file.endsWith('.jsonl')) files.push({ dir: dir.name, file });
+                    let names;
+                    try { names = fs.readdirSync(path.join(root, dir.name)); } catch { continue; }   // deleted mid-scan or unreadable: skipped, as an unreadable file is listed
+                    for (const file of names) if (file.endsWith('.jsonl')) files.push({ dir: dir.name, file });
                 }
             }
             const bindings = await mapBounded(files, async ({ dir, file }) => {

@@ -59,8 +59,11 @@ try {
     const extras = { source: 'extras', sourceSettings: { extrasUrl, extrasKey: '' } };
 
     const novec = await call('/query-multi', { collectionIds: ['wa_big', 'wa_foreign'], searchText: 'NOVEC', ...extras });
-    eq(novec.code, 500, 'a provider answering without a vector fails the query');
+    eq(novec.code, 502, 'a provider answering without a vector is a 502, the provider\'s failure');
     eq(rowsOf('wa_foreign'), 2, '...and drops nothing');
+    const down = await call('/query-multi', { collectionIds: ['wa_big'], searchText: 'x', source: 'extras', sourceSettings: { extrasUrl: 'http://127.0.0.1:1', extrasKey: '' } });
+    eq(down.code, 502, 'a provider that cannot be reached is a 502');
+    eq((await call('/query-multi', { collectionIds: ['wa_big'], searchText: 'x', source: 'webllm', sourceSettings: {} })).code, 422, 'a source embedded in the browser is a 422');
 
     const q = await call('/query-multi', { collectionIds: ['wa_big', 'wa_foreign', 'wa_mixed'], searchText: 'x', topK: 1000, ...extras });
     eq(q.code, 200, 'a foreign-dimension collection does not fail the query');

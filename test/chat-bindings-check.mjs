@@ -22,6 +22,8 @@ const write = (dir, file, meta) => {
 write('Ada', 'latched.jsonl', { world_info: 'Book', worldsApart: { fired: { [`Book${US}3`]: 7 } } });
 write('Ada', 'plain.jsonl', { world_info: 'Book' });
 write('Bo', 'unbound.jsonl', {});
+write('Locked', 'hidden.jsonl', { world_info: 'Book' });
+fs.chmodSync(path.join(chats, 'Locked'), 0o000);
 fs.writeFileSync(path.join(groupChats, '1700000000.jsonl'), `${JSON.stringify({ chat_metadata: { world_info: 'Book', worldsApart: { fired: { [`Book${US}5`]: 2 } } } })}\n`);
 
 const box = deploySandbox({ st });
@@ -34,7 +36,7 @@ try {
     const response = { send: v => (sent = v), status: () => response };
     await routes.get('/chat-bindings')({ user: { directories: { chats, groupChats } }, body: {} }, response);
     const byFile = Object.fromEntries((sent?.bindings ?? []).map(b => [b.file, b]));
-    eq(sent?.chats, 3, 'every chat file is counted');
+    eq(sent?.chats, 3, 'every readable chat file is counted, and an unreadable folder is skipped rather than failing the route');
     eqDeep(byFile['latched.jsonl']?.fired, { [`Book${US}3`]: 7 }, 'a chat holding latch records reports them, firing turn intact');
     eq(byFile['latched.jsonl']?.world_info, 'Book', '...beside its binding');
     eq('fired' in (byFile['plain.jsonl'] ?? {}), false, 'a chat with no record carries no `fired`');
@@ -42,6 +44,7 @@ try {
     eqDeep(sent?.groups, [{ id: '1700000000', world_info: 'Book', fired: { [`Book${US}5`]: 2 } }], 'a group chat is listed by id, with its binding and latch record');
 } finally {
     box.cleanup();
+    fs.chmodSync(path.join(chats, 'Locked'), 0o755);
     fs.rmSync(chats, { recursive: true, force: true });
     fs.rmSync(groupChats, { recursive: true, force: true });
 }
