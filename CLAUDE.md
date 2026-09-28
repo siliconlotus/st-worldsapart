@@ -87,7 +87,7 @@ task list and outlives a deliberate stop; append-and-resume already makes a kill
 prompt change is the only thing that can move the result. Hosted reasoning models honour neither seed nor
 temperature, so they can confirm a finding transfers but cannot be where it is found.
 
-## Four stages, and the three orderings
+## Five stages, and the three orderings
 
 The stages are `docs/matching-architecture.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
 **2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),

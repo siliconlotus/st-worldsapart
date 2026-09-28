@@ -1,5 +1,5 @@
 // Runs the genre vocabulary cases (genre-cases.mjs) against the real suggester; a failure prints the whole candidate list.
-//   node eval/genre-check.mjs [filter]   filter is a substring match on genre or shape
+//   node test/genre-check.mjs [filter]   filter is a substring match on genre or shape
 import { buildKeySuggest } from '../extension/keyword-suggest.mjs';
 import { GENRE_CASES, SUGGEST_OPTS, paddedBook } from './genre-cases.mjs';
 

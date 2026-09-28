@@ -12,7 +12,7 @@ if (!files.length) {
 
 const US = "\u001f";
 
-/** The last verdict: a re-grade appends beside the one it disagrees with (bundle-schema.md, Verdict elements). */
+/** The last verdict: a re-grade appends beside the one it disagrees with (eval/bundle-schema.md, Verdict elements). */
 const gradeOf = row => {
     const gs = row?.grades ?? [];
     return gs.length ? Number(gs[gs.length - 1].grade) : null;

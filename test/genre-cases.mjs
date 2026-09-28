@@ -1,4 +1,4 @@
-// Genre vocabulary cases for the keyword suggester — the data half; eval/genre-check.mjs runs it.
+// Genre vocabulary cases for the keyword suggester — the data half; test/genre-check.mjs runs it.
 // A case is { genre, shape, text, expect: [...], reject: [...] }: expect terms must be offered, reject must not, both compared against the lowercased ranking term.
 // Cases carry the SHAPE, never anyone's actual writing.
 

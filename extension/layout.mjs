@@ -1,6 +1,6 @@
 // layout.mjs — stage 3's product: the layout order. Classifies activated rows into the four blocks the
 // budget walks and orders each. Pure: settings and resolved book names arrive as parameters
-// (eval/layout-check.mjs).
+// (test/layout-check.mjs).
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
 import { hasDecorator } from './matcher.mjs';
 

@@ -32,21 +32,21 @@ does not carry "rare in one corpus" as a reason.
 
 - **R1** — Removing the stage-1 admission gate was a no-op: `bm25 > 0` admitted 99.9% of every book's
  indexed entries; removing `scoreThreshold` moved admission by 6 entries in 10,103 and recovered no
- relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching-architecture.md Divergences from ST core`; `CLAUDE.md Pure vs ST-coupled`.
+ relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching-architecture.md Stage 1 — Retrieval`; `CLAUDE.md Pure vs ST-coupled`.
 
 - **R2** — A strict cosine gate would lose 110 of 672 graded-relevant entries: chunks below the corpus
- mean carrying the query's exact terms (70 scenes). — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Divergences from ST core`.
+ mean carrying the query's exact terms (70 scenes). — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Stage 1 — Retrieval`.
 
 - **R3** — The old admitCeiling (100 entries / 300 chunks) bound on routine scenes — it sat below two
  of the seven books in the graded corpus: dropped 23 of 672 grade≥3 rows on 20 scenes; 200 recovered all but 2 and
  saturated; the gates admitted 100% of indexed entries on every scene measured.
- — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Divergences from ST core`.
+ — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Stage 1 — Retrieval`.
 
 - **R4** — Largest measured book: 208 vectorized entries, against the 1000-entry ceiling.
- — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching-architecture.md Divergences from ST core`; `CLAUDE.md countKey is the only matcher`.
+ — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching-architecture.md Stage 1 — Retrieval`; `CLAUDE.md countKey is the only matcher`.
 
 - **R5** — Chunks-per-entry ratio 9.1–10.3 (why no-plugin K counts 10,000 chunks).
- — `plugin/scoring.mjs selectTopK`; `docs/matching-architecture.md Divergences from ST core`.
+ — `plugin/scoring.mjs selectTopK`; `docs/matching-architecture.md Stage 1 — Retrieval`.
 
 - **R6** — Per-entry chunk maxima don't stabilise until K≈150–300 (three graded corpora) — why pooling
  is server-side. — `plugin/scoring.mjs scoreCollection`.
@@ -105,8 +105,7 @@ does not carry "rare in one corpus" as a reason.
  — `eval/embedding-models.md What to use § Known gotchas`.
 
 - **E4** — Delivered count is a corpus property, not a model property: at cutoff 0.10 all seven models
- deliver 13.3–14.2 entries; spread stays under 1 entry across 0.10–0.30 (eight fits quoted 13.2–14.2
- in matcher-design). — `eval/embedding-models.md Context length: check it against your scan window`; `extension/state.mjs runState`; `docs/matching-architecture.md Divergences from ST core`.
+ deliver 13.3–14.2 entries; spread stays under 1 entry across 0.10–0.30. — `eval/embedding-models.md Context length: check it against your scan window`; `extension/state.mjs runState`; `docs/matching-architecture.md Stage 4 — Selection`.
 
 - **E5** — Cutoff sweep (shipped model): 0.05→26.8 delivered / 27.1% P / 83.9% R; 0.10→13.3/38.1/69.5;
  0.15→9.2/43.6/59.7; 0.20→6.5/45.5/52.1; 0.30→4.1/47.9/42.0. ~1.8k tokens per delivered entry (≈24k
@@ -147,7 +146,7 @@ does not carry "rare in one corpus" as a reason.
  both embedders is the control. Caveats: own-fit diagonal is in-sample; 32 of 74 scenes rank unjudged
  rows in the window (lower bounds); interior fits measured only at 0.10. Every margin inside the
  corpus's noise floor. — `eval/eval-data/fit-transfer-2026-08-30/README.md` (gitignored);
- `docs/matching-architecture.md Divergences from ST core`; `extension/relevance.mjs fitKey` (mxbai beta +0.337, low-middle of seven).
+ `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`; `extension/relevance.mjs fitKey` (mxbai beta +0.337, low-middle of seven).
 
 - **E14** — Fits do not transfer across embedders: memory-tier cosine +0.3113 under bge-m3 vs +0.7460
  under Qwen3-8B (text and properNouns compensating); the signal ORDER inverts across models — bge-m3:
@@ -168,7 +167,7 @@ does not carry "rare in one corpus" as a reason.
  inverts at F4, the asymmetric bar keeps depth winning at every beta. — `docs/matching-architecture.md`.
 
 - **F4** — Offline budget replay is exact against the runtime's verdicts on 315 rows across 7 arms;
- the token budget binds on every graded scene measured. — `docs/matching-architecture.md Divergences from ST core`.
+ the token budget binds on every graded scene measured. — `docs/matching-architecture.md Stage 5 — Delivery`.
 
 - **F6** — The idf weighting is what makes it work: idf beats count 45 up / 14 down (p 0.0001);
  Jaccard is worse than count (27 up / 33 down); restricting to the gazetteer loses 15 up / 44 down
@@ -353,32 +352,32 @@ does not carry "rare in one corpus" as a reason.
  scenes: off +0.0024 (17/12/76, p 0.46), 0.15 −0.0048 (28/14/63, p 0.044, Holm 0.13), 0.4 +0.0009
  (14/10/81); no arm consistent per lineage. So neither list is load-bearing at the cut, and the
  suggester/audit (`ZIPF_EN`, `english common`) are the only places English is assumed.
- — `docs/matching-architecture.md`, *Evidence*.
+ — `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`.
 
 ## K — Keys and matching
 
 - **K1** — Quoting worked example (default paragraph window): `? (your | my) husband` scores 2/2/2
  across the three probe texts where `? ("your husband" | "my husband")` scores 1/0/0 — the loose form
- outranks a genuine phrase match. — `docs/matching-architecture.md The pipeline`.
+ outranks a genuine phrase match. — `docs/matching-architecture.md The SmartKeys grammar (smartkeys.mjs)`.
 
 - **K2** — Regex keys off the automaton: 100 regex keys × 300 entries × ~1KB = 9.8ms with no matches,
  18.4ms at 630,000 hits; a compile cache would recover ~5ms (not worth the code).
- — `docs/matching-architecture.md Selective logic (keysecondary)`.
+ — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`.
 
 - **K3** — Entry flags reach plain keys only (the `?`/`/re/` branches return before flag args are
  read) — measured against `countKey`; the 16,000-comparison fuzz it replaced never caught it because
  it only ran flags-off. — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`; `test/core-matcher-check.mjs`.
 
 - **K4** — The fold×strict em-dash interaction broke four of the seven dash spacings prose uses.
- — `docs/matching-architecture.md Stage 1 — Retrieval`.
+ — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`.
 
 - **K5** — Window segmentation is safe and cheap: 8 segments vs one join measured 1.01x (200 patterns,
  18KB, n=2000); literal keys are slice-invariant — 8 books, 8970 distinct keys (6353 multi-word),
- 0 change df, 0 change occurrence totals. — `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`; `extension/keyword-audit.mjs buildKeyPruneScan`;
+ 0 change df, 0 change occurrence totals. — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`; `extension/keyword-audit.mjs buildKeyPruneScan`;
  `test/matchwindow-check.mjs`.
 
 - **K6** — Unclosed preset tags are real: five `<internal_states>` opens across ten messages, no
- close, on the motivating chat. — `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`; `extension/matcher.mjs textSegments`.
+ close, on the motivating chat. — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`; `extension/matcher.mjs textSegments`.
 
 - **K7** — PARAGRAPH_BREAK is blank-line, not single-newline: 27.6% of messages carry blank-line
  breaks AND single newlines within a paragraph; only 3.8% use single newlines alone (one author's
