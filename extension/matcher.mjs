@@ -12,6 +12,8 @@ const BOUNDARY_CLASSES = {
 };
 /** The `wordBoundary` modes. */
 export const BOUNDARY_MODES = Object.freeze(Object.keys(BOUNDARY_CLASSES));
+/** The `matchWindow` units. */
+export const MATCH_WINDOWS = Object.freeze(['scan', 'message', 'paragraph']);
 
 /** `mode`, or a throw when it is not one: a node or scope without a mode never matches as strict by default. Object.hasOwn,
  *  not `in`: 'constructor' would resolve to a Function. */

@@ -17,9 +17,9 @@ import { getNomicAIVector } from '../../src/vectors/nomicai-vectors.js';
 import { getExtrasVector } from '../../src/vectors/extras-vectors.js';
 import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-vectors.js';
 import { getConfigValue } from '../../src/util.js';
-import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
+import { scoreCollection, poolEntries, selectTopK, admitCeiling } from './scoring.mjs';
 // Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
-import { BOUNDARY_MODES, WA_METADATA_KEY, countChatHits, dropTags } from './matcher.mjs';
+import { BOUNDARY_MODES, MATCH_WINDOWS, WA_METADATA_KEY, countChatHits, dropTags } from './matcher.mjs';
 import { chatUser, createScanScope } from './smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
@@ -44,11 +44,12 @@ export const info = {
     description: 'Mean-centered vector search for World Info retrieval.',
 };
 
-/** Corpus statistics per index path, reloaded when index.json's mtime or size changes. Re-insertion on a hit makes the
- *  Map an LRU, and the cap keeps every queried collection's full item list from staying resident until exit.
- *  @type {Map<string, { items: object[], mean: Float64Array, mtimeMs: number, size: number }>} */
+/** Corpus statistics per index path, reloaded when index.json's mtime or size changes; `loaded` is the load in flight or
+ *  done, so concurrent queries share one parse. Re-insertion on a hit makes the Map an LRU.
+ *  @type {Map<string, { loaded: Promise<{ items: object[], mean: Float64Array } | null>, mtimeMs: number, size: number }>} */
 const MEAN_CACHE_MAX = 16;
 const ADOPT_SIBLINGS_MAX = 32;
+const CHAT_READS_MAX = 16;
 const meanCache = new Map();
 
 const openAiish = (q, urlOverride = null) => getOpenAIVector(q.text, q.source, q.directories, String(q.s.model), urlOverride);
@@ -129,19 +130,28 @@ function centroidFor(loaded, uids) {
     return mean;
 }
 
-/** An index's items and corpus mean, cached per path on mtime AND size: two writes can share an mtime tick. */
-async function loadCentered(indexPath) {
+const statIndex = indexPath => {
     const stat = fs.statSync(path.join(indexPath, 'index.json'), { throwIfNoEntry: false });
-    const mtimeMs = stat?.mtimeMs ?? 0;
-    const size = stat?.size ?? 0;
+    return { mtimeMs: stat?.mtimeMs ?? 0, size: stat?.size ?? 0 };
+};
+/** The cache entry for `indexPath` when it is current by mtime AND size (two writes can share an mtime tick), else undefined. */
+const freshEntry = (indexPath, { mtimeMs, size }) => {
     const cached = meanCache.get(indexPath);
+    return cached && cached.mtimeMs === mtimeMs && cached.size === size ? cached : undefined;
+};
 
-    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
-        meanCache.delete(indexPath);
-        meanCache.set(indexPath, cached);
-        return cached;
-    }
+/** An index's items and corpus mean, null when it has none; cached per path. */
+function loadCentered(indexPath) {
+    const stat = statIndex(indexPath);
+    const entry = freshEntry(indexPath, stat) ?? { ...stat, loaded: readCentered(indexPath, stat.mtimeMs) };
+    meanCache.delete(indexPath);   // delete before set: set() on an existing key keeps its old position, so the sweep would evict a just-refreshed path first
+    meanCache.set(indexPath, entry);
+    while (meanCache.size > MEAN_CACHE_MAX) meanCache.delete(meanCache.keys().next().value);
+    entry.loaded.catch(() => { if (meanCache.get(indexPath) === entry) meanCache.delete(indexPath); });
+    return entry.loaded;
+}
 
+async function readCentered(indexPath, mtimeMs) {
     const index = new LocalIndex(indexPath);
 
     if (!mtimeMs || !await index.isIndexCreated()) {
@@ -158,14 +168,9 @@ async function loadCentered(indexPath) {
     // Against mean.length, not rowDim alone: corpusMean drops a row of another dimension, which still has a length.
     const usable = mean.length ? items.filter(it => rowDim(it?.vector) === mean.length).length : 0;
     if (usable < items.length) console.warn(`[WorldsApart] skipped ${items.length - usable} of ${items.length} chunks with a missing or foreign-dimension vector — re-sync the book, or delete the collection if it was embedded under another model`);
-    const loaded = { items, mean, mtimeMs, size };
-
-    meanCache.delete(indexPath);   // delete before set: set() on an existing key keeps its old position, so the sweep would evict a just-refreshed path first
-    meanCache.set(indexPath, loaded);
-    while (meanCache.size > MEAN_CACHE_MAX) meanCache.delete(meanCache.keys().next().value);
     console.log(`[WorldsApart] indexed ${path.basename(path.dirname(indexPath))}: ${usable} chunks, mean norm ${norm(mean).toFixed(4)}`);
 
-    return loaded;
+    return { items, mean };
 }
 
 export async function init(router) {
@@ -184,9 +189,9 @@ export async function init(router) {
                 return response.status(400).send({ error: 'searchText must be a string of at most 65536 characters' });
             }
 
-            const topK = Math.min(512, Math.max(1, Number(request.body.topK) || 10));
+            const topK = Math.min(admitCeiling(true), Math.max(1, Number(request.body.topK) || 10));
             const settings = { ...sourceSettings, model: modelScope(String(source), sourceSettings ?? {}) };
-            // Lexical fields a client may still send (threshold, bm25K1, bm25B, termWeights, stopwordDf) are ignored, not rejected: a stricter reading turns redeploy skew into a 400.
+            // Lexical fields a client may still send (threshold, bm25K1, bm25B, termWeights, stopwordDf) are ignored; never reject them.
             const opts = {
                 centered: request.body.centered !== false,
             };
@@ -199,6 +204,7 @@ export async function init(router) {
             const queryVector = await embed(String(source), settings, String(searchText), request.user.directories, request);
             const results = [];
             const loadedAll = await loading;
+            let scored = 0, failure = null;
 
             for (let i = 0; i < collectionIds.length; i++) {
                 const collectionId = collectionIds[i];
@@ -209,8 +215,16 @@ export async function init(router) {
                 }
 
                 const mean = centroidFor(loaded, centroidUids[String(collectionId)]);
-                results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
+                try {
+                    results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
+                    scored++;
+                } catch (error) {
+                    console.warn(`[WorldsApart] ${collectionId} skipped: ${error.message}`);
+                    failure ??= error;
+                }
             }
+            // Every collection failing is the query's fault (the provider's), not one collection's.
+            if (failure && !scored) throw failure;
 
             // Pool to entries FIRST, then cut, so topK counts entries.
             return response.send(selectTopK(poolEntries(results), topK));
@@ -233,11 +247,12 @@ export async function init(router) {
             if (keys.length > 10000 || chats.length > 5000) {
                 return response.status(400).send({ error: 'too many keys or chats' });
             }
-            // The caller's setting, required: a default here would disagree with the browser silently.
+            // The caller's settings, required: never default them.
             const wordBoundary = String(request.body?.wordBoundary ?? '');
             if (!BOUNDARY_MODES.includes(wordBoundary)) return response.status(400).send({ error: `wordBoundary must be one of ${BOUNDARY_MODES.join(', ')}` });
-            // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
-            const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
+            const matchWindow = String(request.body?.matchWindow ?? '');
+            if (!MATCH_WINDOWS.includes(matchWindow)) return response.status(400).send({ error: `matchWindow must be one of ${MATCH_WINDOWS.join(', ')}` });
+            const unitOpts = { matchWindow, depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
             // The elements WA strips from every message it reads live, so the audit counts the same text the runtime does.
             const dropChatTags = String(request.body?.dropChatTags ?? '').trim();
 
@@ -294,9 +309,6 @@ export async function init(router) {
 
     router.post('/scan-chats', scanChats);
 
-    /** `[{ dir, file, world_info, size }]` for EVERY chat, `world_info` null when line 0 names no book; line 0 is all
-     *  that is read (P1). Every chat, not only the bound ones: a book attached through the character or globally
-     *  reaches chats whose own metadata names nothing. */
     /** A chat file's line-0 metadata, null when unreadable; stops at line 0. */
     const chatMetadataOf = full => new Promise(resolve => {
         const stream = fs.createReadStream(full);
@@ -314,58 +326,70 @@ export async function init(router) {
         return { world_info: meta?.world_info ? String(meta.world_info) : null, ...(fired && typeof fired === 'object' ? { fired } : {}) };
     };
 
-    // `bindings` are character chats, one per file under its character's folder; `groups` are group chats, by chat id.
+    /** `fn` over `items`, at most CHAT_READS_MAX at a time, results in `items` order. */
+    const mapBounded = async (items, fn) => {
+        const out = new Array(items.length);
+        let next = 0;
+        const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]); } };
+        await Promise.all(Array.from({ length: Math.min(CHAT_READS_MAX, items.length) }, worker));
+        return out;
+    };
+
+    /** `bindings` holds `{ dir, file, size, world_info }` for EVERY character chat, `world_info` null when line 0 names no book;
+     *  `groups` holds `{ id, world_info }` per group chat. Line 0 is all that is read (P1). */
     router.post('/chat-bindings', async (request, response) => {
         try {
             const root = request.user.directories.chats;
-            const bindings = [], groups = [];
-            let chats = 0;
+            const files = [];
             if (fs.existsSync(root)) {
                 for (const dir of fs.readdirSync(root, { withFileTypes: true })) {
                     if (!dir.isDirectory()) continue;
-                    const dirPath = path.join(root, dir.name);
-                    for (const file of fs.readdirSync(dirPath)) {
-                        if (!file.endsWith('.jsonl')) continue;
-                        chats++;
-                        const full = path.join(dirPath, file);
-                        const meta = await chatMetadataOf(full);
-                        let size = null;
-                        try { size = fs.statSync(full).size; } catch { /* unreadable: listed without a size */ }
-                        bindings.push({ dir: dir.name, file, size, ...bindingOf(meta) });
-                    }
+                    for (const file of fs.readdirSync(path.join(root, dir.name))) if (file.endsWith('.jsonl')) files.push({ dir: dir.name, file });
                 }
             }
+            const bindings = await mapBounded(files, async ({ dir, file }) => {
+                const full = path.join(root, dir, file);
+                const meta = await chatMetadataOf(full);
+                let size = null;
+                try { size = fs.statSync(full).size; } catch { /* unreadable: listed without a size */ }
+                return { dir, file, size, ...bindingOf(meta) };
+            });
             const groupRoot = request.user.directories.groupChats;
-            if (groupRoot && fs.existsSync(groupRoot)) {
-                for (const file of fs.readdirSync(groupRoot)) {
-                    if (!file.endsWith('.jsonl')) continue;
-                    groups.push({ id: file.replace(/\.jsonl$/, ''), ...bindingOf(await chatMetadataOf(path.join(groupRoot, file))) });
-                }
-            }
-            return response.send({ bindings, groups, chats });
+            const groupFiles = groupRoot && fs.existsSync(groupRoot) ? fs.readdirSync(groupRoot).filter(f => f.endsWith('.jsonl')) : [];
+            const groups = await mapBounded(groupFiles, async file => ({ id: file.replace(/\.jsonl$/, ''), ...bindingOf(await chatMetadataOf(path.join(groupRoot, file))) }));
+            return response.send({ bindings, groups, chats: files.length });
         } catch (error) {
             console.error('WorldsApart: /chat-bindings failed', error);
             return response.status(500).send({ error: String(error?.message ?? error) });
         }
     });
 
-    // Every WA collection on disk (`vectors/<source>/wa_<hash>/<model>/`), size and mtime only; reports, never deletes.
+    /** Every WA collection on disk (`vectors/<source>/wa_<hash>/<model>/`, `<model>` empty for a source with no model scope),
+     *  size and mtime only; reports, never deletes. Body `{ source, sourceSettings }`, the settings `current` is judged
+     *  against: true on a row at the directory those settings read. `model` is the directory name, which sanitize() may have changed. */
     router.post('/collections', (request, response) => {
         try {
+            const { source, sourceSettings } = request.body ?? {};
+            const now = source ? { source: sanitize(String(source)), model: sanitize(modelScope(String(source), sourceSettings ?? {})) } : null;
             const root = request.user.directories.vectors;
             const out = [];
-            for (const source of fs.readdirSync(root, { withFileTypes: true })) {
-                if (!source.isDirectory()) continue;
-                const sourceDir = path.join(root, source.name);
+            const push = (sourceName, collectionId, model, stat) => out.push({
+                source: sourceName, collectionId, model, bytes: stat.size, mtimeMs: stat.mtimeMs,
+                current: Boolean(now) && sourceName === now.source && model === now.model,
+            });
+            const indexStat = dir => fs.statSync(path.join(dir, 'index.json'), { throwIfNoEntry: false });
+            for (const src of fs.existsSync(root) ? fs.readdirSync(root, { withFileTypes: true }) : []) {
+                if (!src.isDirectory()) continue;
+                const sourceDir = path.join(root, src.name);
                 for (const coll of fs.readdirSync(sourceDir, { withFileTypes: true })) {
                     if (!coll.isDirectory() || !coll.name.startsWith('wa_')) continue;
                     const collDir = path.join(sourceDir, coll.name);
+                    const flat = indexStat(collDir);
+                    if (flat) push(src.name, coll.name, '', flat);
                     for (const model of fs.readdirSync(collDir, { withFileTypes: true })) {
                         if (!model.isDirectory()) continue;
-                        const index = path.join(collDir, model.name, 'index.json');
-                        const stat = fs.statSync(index, { throwIfNoEntry: false });
-                        if (!stat) continue;
-                        out.push({ source: source.name, collectionId: coll.name, model: model.name, bytes: stat.size, mtimeMs: stat.mtimeMs });
+                        const stat = indexStat(path.join(collDir, model.name));
+                        if (stat) push(src.name, coll.name, model.name, stat);
                     }
                 }
             }
@@ -394,18 +418,25 @@ export async function init(router) {
             const wanted = new Set(hashes.map(Number));
             const found = new Map();
             // getIndexPath per sibling, not a fixed depth: an empty model scope (llamacpp, extras) puts index.json in the collection dir itself.
-            // Newest first and capped: listItems() parses a whole index.json, and a clone's source is the collection written most recently.
+            // Newest first and capped: each sibling not in meanCache costs a whole index.json parse.
             const siblings = (fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir, { withFileTypes: true }) : [])
                 .filter(coll => coll.isDirectory() && coll.name.startsWith('wa_') && coll.name !== sanitize(collectionId))
                 .map(coll => getIndexPath(dirs, coll.name, String(source), model))
-                .map(dir => ({ dir, mtimeMs: fs.statSync(path.join(dir, 'index.json'), { throwIfNoEntry: false })?.mtimeMs ?? 0 }))
-                .sort((a, b) => b.mtimeMs - a.mtimeMs)
+                .map(dir => ({ dir, stat: statIndex(dir) }))
+                .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)
                 .slice(0, ADOPT_SIBLINGS_MAX);
-            for (const { dir } of siblings) {
+            for (const { dir, stat } of siblings) {
                 if (found.size === wanted.size) break;
-                const sibling = new LocalIndex(dir);
-                if (!await sibling.isIndexCreated()) continue;
-                for (const it of await sibling.listItems()) {
+                // Read through a current cache entry, but never inserted: a sweep of siblings would evict the collections being queried.
+                const cached = freshEntry(dir, stat);
+                let items;
+                if (cached) items = (await cached.loaded)?.items ?? [];
+                else {
+                    const sibling = new LocalIndex(dir);
+                    if (!stat.mtimeMs || !await sibling.isIndexCreated()) continue;
+                    items = await sibling.listItems();
+                }
+                for (const it of items) {
                     const h = Number(it.metadata?.hash);
                     if (wanted.has(h) && !found.has(h) && rowDim(it.vector)) found.set(h, it);
                 }

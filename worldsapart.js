@@ -399,24 +399,21 @@ async function findOrphanCollections() {
     if (!await hasPlugin()) return null;
     let all;
     try {
-        const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders() });
+        const sourceSettings = vectorRequestBody();
+        const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ source: sourceSettings.source, sourceSettings }) });
         if (!response.ok) throw new Error(`${response.status}`);
         all = await response.json();
         // Every field the report reads, on every row.
-        if (!Array.isArray(all) || !all.every(c => typeof c?.collectionId === 'string' && typeof c?.source === 'string' && typeof c?.model === 'string' && typeof c?.bytes === 'number' && typeof c?.mtimeMs === 'number')) throw new Error('rows missing fields');
+        if (!Array.isArray(all) || !all.every(c => typeof c?.collectionId === 'string' && typeof c?.source === 'string' && typeof c?.model === 'string' && typeof c?.bytes === 'number' && typeof c?.mtimeMs === 'number' && typeof c?.current === 'boolean')) throw new Error('rows missing fields');
     } catch (error) {
         pluginFallback('collections', error);
         return null;
     }
     const claimed = new Set((world_names ?? []).map(n => `wa_${getStringHash(n)}`));
-    const v = extension_settings.vectors ?? {};
-    const source = v.source || 'transformers';
-    // Per source, not a `??` chain: `ollama_model` carries a non-empty default, so a chain reads it under any source.
-    const model = String(({ ollama: v.ollama_model, vllm: v.vllm_model })[source] ?? v[`${source}_model`] ?? '');
     const unclaimed = [], staleConfig = [], live = [];
     for (const c of all) {
         if (!claimed.has(c.collectionId)) unclaimed.push(c);
-        else if (c.source !== source || (model && c.model !== model)) staleConfig.push(c);
+        else if (!c.current) staleConfig.push(c);
         else live.push(c);
     }
     return { unclaimed, staleConfig, live, bytes: all.reduce((a, c) => a + c.bytes, 0) };

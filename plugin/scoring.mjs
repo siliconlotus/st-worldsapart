@@ -30,7 +30,7 @@ export function selectTopK(results, topK) {
     for (const r of byVector) {
         const hash = r.metadata?.hash;
         if (hash === undefined || hash === null) continue;   // a chunk without a hash cannot be resolved client-side
-        const key = `${r.collectionId}:${hash}`;
+        const key = `${r.collectionId}\u001f${hash}`;
         if (emitted.has(key)) continue; emitted.add(key);
         grouped[r.collectionId] ??= { hashes: [], metadata: [] };
         grouped[r.collectionId].hashes.push(Number(hash));
