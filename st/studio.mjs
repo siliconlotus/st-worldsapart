@@ -14,9 +14,9 @@ import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { macroMap, setMacros, validateSmartKey } from '../extension/smartkeys.mjs';
+import { macroMap, validateSmartKey, withMacros } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
-import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
+import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
 import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
@@ -217,13 +217,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Every term is judged below, so an edited row drops the false the edit forced.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
        
-        setMacros(macrosOf());
-        scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
+        // The audit keeps the map it was built under for its lazy verdicts.
+        scan = withMacros(macrosOf(), () => buildKeyPruneScan(data, studioOpts, ignoreSet, {
             t, translate,
             matchWindow: settings().matchWindow,
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
             chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs, unit: chatUnit } : undefined,
-        });
+        }));
     };
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); refreshTabStatus(); };
     /** Every key in the book — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
@@ -413,7 +413,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         // The forward pass must have finished before it is reversed.
         const forward = await u.latches;
-        if (u.rekeyBack) latchWarn((await rekeyChatLatches(u.rekeyBack)).failed);
+        if (u.rekeyBack) latchWarn((await rekeyChatLatches(u.rekeyBack, Object.values(u.entries))).failed);
         if (forward?.dropped.length) latchWarn(await putLatchesBack(forward.dropped, u.chatId));
     };
     const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; const snap = snapEntries(); for (const e of sel) fn(e); save(); armEntryUndo({ ...snap, n: sel.length }); sel.forEach(x => renderEntry(x)); consumeSelection(); };
@@ -495,7 +495,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
         entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
-        const latches = rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))));
+        const latches = rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))), ordered);
         armEntryUndo({ ...snap, n, latches, rekeyBack: uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(nu), o]))) });
         latchWarn((await latches).failed);
         toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'WorldsApart');
@@ -508,7 +508,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Out of the selection too: core hands freed uids back out, so a stale one would re-point at the next entry created.
         for (const uid of gone) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); selectedEntries.delete(uid); lastSel?.delete(uid); }
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-        const latches = rekeyChatLatches(uidRekey(selected, new Map(gone.map(u => [String(u), null]))));
+        const latches = rekeyChatLatches(uidRekey(selected, new Map(gone.map(u => [String(u), null]))), gone.map(u => snap.entries[u]));
         armEntryUndo({ ...snap, n: gone.length, latches });
         latchWarn((await latches).failed);
         return true;
@@ -1442,7 +1442,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); lastSel?.delete(e.uid); }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
             // A move keeps the entry's after-match state; a copy is a new entry and starts without one.
-            const latches = rekeyChatLatches(k => landed.get(k));
+            const latches = rekeyChatLatches(k => landed.get(k), copied);
             const back = new Map([...landed].map(([from, to]) => [to, from]));
             armEntryUndo({ ...snap, n: copied.length, latches, rekeyBack: k => back.get(k), target: { name: target, uids: added } });
             latchWarn((await latches).failed);
@@ -1565,7 +1565,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (wasOpen) { if (selected) openBook(selected); else renderExplorer(); }
         const chatId = getContext().chatId;
         // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
-        const latches = await rekeyChatLatches(k => (names.includes(latchBook(k)) ? null : undefined));
+        const latches = await rekeyChatLatches(k => (names.includes(latchBook(k)) ? null : undefined), books.flatMap(b => Object.values(b.data?.entries ?? {})));
         latchWarn(latches.failed);
         if (undoTimer) clearTimeout(undoTimer);
         pendingUndo = { books, forgotten, latches: latches.dropped, chatId };
@@ -1669,25 +1669,37 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const withFired = (m, fired) => ({ ...m, [WA_METADATA_KEY]: { ...(m?.[WA_METADATA_KEY] ?? {}), fired } });
     // One pass at a time, on its own chain: a pass picks its chats from an index a running one may be about to make stale.
     let latchPasses = Promise.resolve();
+    /** The open chat as an editClosedChat target, for writing to it once it is no longer open; null with no chat. */
+    const openChatTarget = () => {
+        const ctx = getContext();
+        if (!ctx.chatId) return null;
+        if (ctx.groupId) return { group: String(ctx.chatId), file: String(ctx.chatId) };
+        const ch = characters?.[ctx.characterId];
+        return ch ? { char: ch.name, avatar: ch.avatar, file: String(ctx.chatId) } : null;
+    };
     /**
      * Applies rekeyLatches' `rekey` to the open chat's latch record and to every closed chat whose record it changes.
-     * @returns {Promise<{dropped: Array<{target: object|null, fired: object}>, failed: string[]}>} `target` null for the open chat;
-     *          `dropped` is what an undo puts back
+     * @param {object[]} [entries] The entries the rekey can touch: when none carries a latch decorator, the closed chats are not
+     *        read, a record without its decorator being inert
+     * @returns {Promise<{dropped: Array<{target: object|null, openAs?: object, fired: object}>, failed: string[]}>} `target` null for
+     *          the open chat, `openAs` the same chat as a closed-chat target; `dropped` is what an undo puts back
      */
-    const rekeyChatLatches = rekey => {
-        const pass = latchPasses.then(() => rekeyChatLatchesNow(rekey));
+    const rekeyChatLatches = (rekey, entries = null) => {
+        const pass = latchPasses.then(() => rekeyChatLatchesNow(rekey, entries));
         latchPasses = pass.catch(() => {});
         return pass;
     };
-    const rekeyChatLatchesNow = async rekey => {
+    const rekeyChatLatchesNow = async (rekey, entries) => {
         const dropped = [], failed = [];
         const ctx = getContext();
         const open = ctx.chatMetadata && rekeyLatches(ctx.chatMetadata[WA_METADATA_KEY]?.fired, rekey);
         if (open) {
             Object.assign(ctx.chatMetadata, withFired(ctx.chatMetadata, open.fired));
             ctx.saveMetadata?.();
-            if (Object.keys(open.dropped).length) dropped.push({ target: null, fired: open.dropped });
+            if (Object.keys(open.dropped).length) dropped.push({ target: null, openAs: openChatTarget(), fired: open.dropped });
         }
+        // Every closed chat is read below, the whole of each without the plugin (P1).
+        if (entries && !entries.some(e => e && hasLatch(e))) return { dropped, failed };
         for (const { target, meta } of await closedChats()) {
             if (!rekeyLatches(meta?.[WA_METADATA_KEY]?.fired, rekey)) continue;
             let out = null;
@@ -1699,19 +1711,25 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return { dropped, failed };
     };
     /**
-     * Puts rekeyChatLatches' `dropped` back into the chat each key came from, the open one only while it is still `chatId`.
+     * Puts rekeyChatLatches' `dropped` back into the chat each key came from: the open chat in memory while it is still `chatId`,
+     * its file once it is not.
      * @returns {Promise<string[]>} the chats it could not write
      */
     const putLatchesBack = async (dropped, chatId, keep = () => true) => {
         const failed = [];
-        for (const { target, fired } of dropped ?? []) {
+        let wroteClosed = false;
+        for (const { target, openAs, fired } of dropped ?? []) {
             const back = Object.fromEntries(Object.entries(fired).filter(([k]) => keep(k)));
             if (!Object.keys(back).length) continue;
             const add = m => withFired(m, { ...(m?.[WA_METADATA_KEY]?.fired ?? {}), ...back });
-            if (target) { if (!await editClosedChat(target, add)) failed.push(target.file); continue; }
-            if (chatId && chatId === getContext().chatId) { Object.assign(getContext().chatMetadata, add(getContext().chatMetadata)); getContext().saveMetadata?.(); }
+            if (!target && chatId && chatId === getContext().chatId) { Object.assign(getContext().chatMetadata, add(getContext().chatMetadata)); getContext().saveMetadata?.(); continue; }
+            // A record from the chat open at the time, which has since been switched away from, is written to its file.
+            const to = target ?? openAs;
+            if (!to) { failed.push(String(chatId ?? '')); continue; }
+            wroteClosed = true;
+            if (!await editClosedChat(to, add)) failed.push(to.file);
         }
-        if (dropped?.some(l => l.target)) { chatIndex = null; groupIndex = null; }
+        if (wroteClosed) { chatIndex = null; groupIndex = null; }
         return failed;
     };
     const latchWarn = failed => { if (failed.length) toastr.warning(t`Could not carry over the after-match state in: ${failed.join(', ')}.`, 'WorldsApart', { timeOut: 12000 }); };
@@ -1725,7 +1743,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (sugg.has(from)) { sugg.set(to, sugg.get(from)); sugg.delete(from); }
         rowEls.delete(from);
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map([[String(from), to]])))).failed);
+        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map([[String(from), to]])), [e])).failed);
     };
     /** Latch keys of `book` whose uid `moves` maps (old uid -> new uid, or null to drop), as a rekeyLatches `rekey`. */
     const uidRekey = (book, moves) => k => {
@@ -1802,7 +1820,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (oldName === selected) { renderBooks(); openBook(newName); }
         else { renderBooks(); }
         const { moved, failed } = await repointChats(oldName, newName);
-        latchWarn((await rekeyChatLatches(k => (latchBook(k) === oldName ? latchKey({ world: newName, uid: k.slice(oldName.length + 1) }) : undefined))).failed);
+        latchWarn((await rekeyChatLatches(k => (latchBook(k) === oldName ? latchKey({ world: newName, uid: k.slice(oldName.length + 1) }) : undefined), Object.values(bookData.entries ?? {}))).failed);
         const cards = await repointCards(oldName, newName);
         const bits = [];
         if (moved.length) bits.push(moved.length === 1 ? t`${moved.length} chat` : t`${moved.length} chats`);
@@ -2190,7 +2208,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
      *  routes can split the picked chats between them. */
     const scanKeys = async (keys, picked) => {
         const macros = macrosOf();
-        setMacros(macros);
         const totals = new Map(keys.map(k => [k, 0])), typedTotals = new Map();
         let seen = 0, via = '', unit = 'message';
         // The chat is cut into the unit the book's match window matches a conjunction within; the scan depth only sizes
@@ -2243,40 +2260,31 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const strip = ms => (spec?.trim() ? ms.map(m => ({ ...m, mes: dropTags(String(m.mes ?? ''), spec) })) : ms);
         // Each chat under its own values: {{char}} its character, {{user}} the name on its user messages. The open chat of a
         // group has no one speaker, so it is counted once per member and a unit counts if any member's name makes it match.
-        const base = macrosOf();
         const members = ctx.groupId
             ? (ctx.groups?.find(g => String(g.id) === String(ctx.groupId))?.members ?? []).map(a => characters.find(ch => ch?.avatar === a)?.name).filter(Boolean)
             : [];
-        // finally, not a trailing restore: setMacros is module-global, and a throw here would leave one chat's
-        // {{char}} in force for the next caller — the audit's lazy verdicts then memoise the wrong answer.
-        try {
-            for (const c of picked) {
-                if (served.has(c)) continue;
-                const got = strip(c.open
-                    ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: m.is_user }))
-                    : await fetchChatMessages(c));
-                if (!got.length) continue;
-                const user = [...got].reverse().find(m => m?.is_user && m?.name)?.name;
-                const chatMap = { ...base, ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) };
-                if (c.open && members.length > 1) {
-                    const by = new Map(), typedBy = new Map();
-                    let messages = 0, unit;
-                    const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
-                    for (const name of members) {
-                        setMacros({ ...chatMap, '{{char}}': name });
-                        const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true });
-                        messages = r.messages; unit = r.unit;
-                        union(by, r.hitsBy); union(typedBy, r.typedBy);
-                    }
-                    add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
-                } else {
-                    setMacros(chatMap);
-                    add(countChatHits(keys, got, unitOpts));
+        for (const c of picked) {
+            if (served.has(c)) continue;
+            const got = strip(c.open
+                ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: m.is_user }))
+                : await fetchChatMessages(c));
+            if (!got.length) continue;
+            const user = [...got].reverse().find(m => m?.is_user && m?.name)?.name;
+            const chatMap = { ...macros, ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) };
+            if (c.open && members.length > 1) {
+                const by = new Map(), typedBy = new Map();
+                let messages = 0, unit;
+                const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
+                for (const name of members) {
+                    const r = withMacros({ ...chatMap, '{{char}}': name }, () => countChatHits(keys, got, { ...unitOpts, hitIndex: true }));
+                    messages = r.messages; unit = r.unit;
+                    union(by, r.hitsBy); union(typedBy, r.typedBy);
                 }
-                via = via ? 'server + browser' : 'browser';
+                add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
+            } else {
+                add(withMacros(chatMap, () => countChatHits(keys, got, unitOpts)));
             }
-        } finally {
-            setMacros(base);
+            via = via ? 'server + browser' : 'browser';
         }
         return { totals, typedTotals, seen, via, unit };
     };
@@ -2724,17 +2732,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const applyFrom = async (label, load, { keep = false } = {}) => {
         labRunSource = { label, load };
         if (!keep) labFlagOverride = {};
-        const parts = labPartsFor();
-        if (!parts) setMacros(labMacroMap());
         labRunEntries = await load();
-        const run = runBook(labRunEntries, labHay, {
+        // After the await: the map is set only for the synchronous run, and a parts run sets each part's itself.
+        const parts = labPartsFor();
+        const run = underLabMap(parts, () => runBook(labRunEntries, labHay, {
             matchWindow: labWindow,
             context: 30,
             override: labFlagOverride,
             parts,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
             skipVectorized: labSkipVector,
-        });
+        }));
         labRun = { label, ...run };
         toastr.info(run.scanned === 1 ? t`${run.entries.length} of ${run.scanned} keyed entry matched` : t`${run.entries.length} of ${run.scanned} keyed entries matched`, t`Key Lab`);
         labRepaint?.();
@@ -2945,12 +2953,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const labMacroMap = () => Object.fromEntries(Object.entries(labBaseMap()).map(([tok, v]) => [tok, Object.hasOwn(labMacros, tok) ? labMacros[tok] : Object.hasOwn(labChatMacros, tok) ? labChatMacros[tok] : v]));
     /** The loaded chats as parts for the model, each under its own values with the Lab's overrides on top; null without a load. */
     const labPartsFor = () => labParts?.map(p => ({ ...p, macros: { ...labBaseMap(), ...p.macros, ...labMacros } })) ?? null;
+    /** `fn()` under the Lab's map, or as is for a parts run, whose parts carry their own. */
+    const underLabMap = (parts, fn) => (parts ? fn() : withMacros(labMacroMap(), fn));
 
     /** The Lab's result plus the colour to draw it in, from whatever the panes hold now. */
     const scanLab = () => {
         const parts = labPartsFor();
-        if (!parts) setMacros(labMacroMap());
-        const r = labScan({
+        const r = underLabMap(parts, () => labScan({
             parts,
             hay: labHay,
             keys: labKeys,
@@ -2963,7 +2972,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             run: labRun,
             override: labFlagOverride,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
-        });
+        }));
         const ink = (sp, a) => labInk(Math.max(0, r.keys.indexOf(sp.key)), a);
         for (const row of r.rows) row.color = ink({ key: row.key });
         return { ...r, ink };
@@ -3166,7 +3175,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     if (ev.shiftKey && depth == null) return;
                     const end = ev.shiftKey ? await numberPrompt(t`Load chat`, t`Last message ID (-1 for the last message)`, -1, -1) : -1;
                     if (ev.shiftKey && end == null) return;
-                    labHay = chatHaystack(depth, end); labParts = null;
+                    // The open chat is ST's own values, so the last load's chat names stand down with its parts.
+                    labHay = chatHaystack(depth, end); labParts = null; labChatMacros = {}; labChatMixed = new Set();
                     hayBox.value = labHay;
                     labCommitted = true;   // imported text is for reading, not editing
                     repaint();

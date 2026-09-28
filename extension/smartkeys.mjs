@@ -11,15 +11,26 @@ const MACRO_RE = /\{\{[^{}]+\}\}/g;
 const HAS_MACRO = /\{\{[^{}]+\}\}/;
 let macros = {};
 let macroStamp = 0;
-/** The map in force, `{{token}}` as written -> its value: the ST half sets it once per scan, the scene from a capture. A changed map retires every cached AST through astId. */
+// One stamp per distinct map, so a map put back in force finds the ASTs cached under it.
+const stampOf = new Map([['{}', 0]]);
+/** The map in force, `{{token}}` as written -> its value: the runtime sets it once per scan, the scene from a capture. The map is part of every AST cache id (astId). */
 export function setMacros(map) {
     const next = Object.fromEntries(Object.entries(map ?? {}).map(([k, v]) => [k, String(v ?? '')]));
-    if (JSON.stringify(next) === JSON.stringify(macros)) return;
+    const json = JSON.stringify(next);
+    if (json === JSON.stringify(macros)) return;
     macros = next;
-    macroStamp++;
+    if (!stampOf.has(json)) stampOf.set(json, stampOf.size);
+    macroStamp = stampOf.get(json);
 }
-/** The map in force, for a caller that sets its own and puts it back. */
+/** The map in force. */
 export const getMacros = () => macros;
+/** `fn()` under `map`, the map in force put back after: everything but the runtime scan matches this way, so the map a scan
+ *  sets is never changed under it. `fn` must be synchronous. */
+export function withMacros(map, fn) {
+    const was = macros;
+    setMacros(map);
+    try { return fn(); } finally { setMacros(was); }
+}
 /** Every macro token in `texts`, as written, once each. */
 export const macroTokens = texts => [...new Set([].concat(...(texts ?? []).map(t => String(t ?? '').match(MACRO_RE) ?? [])))];
 /** The tokens of `texts` through `substitute`: the map setMacros takes, and the one a capture records. */

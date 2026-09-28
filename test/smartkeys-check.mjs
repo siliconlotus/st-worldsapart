@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey, splitKeys } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, setMacros, macroTokens, macroMap } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, getMacros, setMacros, macroTokens, macroMap, withMacros } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -694,6 +694,18 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(JSON.stringify(macroMap(['? {{user}} x'], tok => tok.toUpperCase())), '{"{{user}}":"{{USER}}"}', 'the map is the tokens through the substitution the caller supplies');
     setMacros({});
     eq(matches('? {{user}} sword', 'Nick Parsons sword'), false, 'with no map a token is literal text again');
+
+    setMacros({ '{{user}}': 'Nick' });
+    eq(withMacros({ '{{user}}': 'Kyle' }, () => matches('? {{user}}', 'Kyle')), true, 'withMacros runs under its map');
+    eq(getMacros()['{{user}}'], 'Nick', '...and puts the map in force back');
+    // The audit's verdicts are lazy: they must answer under the map the scan was built under, not whatever is in force when asked.
+    const book = { entries: { 0: { uid: 0, key: ['? {{user}}'], content: 'Kyle stood watch.' } } };
+    const auditOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, ignoreProper: false, minLength: 4 };
+    const audit = withMacros({ '{{user}}': 'Kyle' }, () => buildKeyPruneScan(book, auditOpts, new Set()));
+    eq(audit.classifyEntry(book.entries[0]).length, 0, 'an audit built under Kyle finds the key attested in the book...');
+    eq(getMacros()['{{user}}'], 'Nick', '...asked while Nick is in force...');
+    eq(withMacros({ '{{user}}': 'Nick' }, () => buildKeyPruneScan(book, auditOpts, new Set())).classifyEntry(book.entries[0])[0]?.flag, 'unattested', '...where one built under Nick finds it dead');
+    setMacros({});
 }
 
 // --- optional terms: a trailing `?` never gates and scores when present, on a term, a phrase, a group or a pattern ------

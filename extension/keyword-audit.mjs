@@ -4,7 +4,7 @@ import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
 import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { isConstant } from './layout.mjs';
-import { buildAst, cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
+import { buildAst, cachedCount, createScanScope, getMacros, hitLiterals, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey, withMacros } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; common word still applies. */
@@ -521,7 +521,13 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         for (const list of dupes.values()) list.sort((p, q) => q.sim - p.sim);
     }
 
-    return { entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf };
+    // Verdicts are computed lazily, so each runs under the map the scan was built under, whatever is in force when it is asked.
+    const builtUnder = getMacros();
+    return {
+        entries, nE, reasonOf, severityOf, effCase, effWhole, dupes,
+        classifyEntry: e => withMacros(builtUnder, () => classifyEntry(e)),
+        unusableKeysOf: e => withMacros(builtUnder, () => unusableKeysOf(e)),
+    };
 }
 
 /** Every entry, every mode. */

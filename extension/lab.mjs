@@ -2,14 +2,13 @@
 // injects the settings.
 
 import { dropTags, keyHits, keySpans, mergeSpans, scanSegments, secondaryKeys, splitKeys, usableKeys, WI_LOGIC } from './matcher.mjs';
-import { getMacros, setMacros } from './smartkeys.mjs';
+import { withMacros } from './smartkeys.mjs';
 
 /** `fn(text, at)` over each part under its own macro map, or once over `hay` under the map in force; always a list. A part is
  *  `{ text, at, macros }`, `at` its offset into the joined text the caller shows. */
 const perPart = (parts, hay, fn) => {
     if (!parts?.length) return [fn(hay, 0)];
-    const was = getMacros();   // put back after: a parts scan must not leave a part's map in force for the next caller
-    try { return parts.map(p => { setMacros(p.macros ?? {}); return fn(String(p.text ?? ''), Number(p.at) || 0); }); } finally { setMacros(was); }
+    return parts.map(p => withMacros(p.macros ?? {}, () => fn(String(p.text ?? ''), Number(p.at) || 0)));
 };
 const shiftSpans = (spans, at) => (at ? spans.map(sp => ({ ...sp, start: sp.start + at, end: sp.end + at, keys: (sp.keys ?? []).map(k => ({ ...k, start: k.start + at, end: k.end + at })) })) : spans);
 const shiftRows = (rows, at) => (at ? rows.map(r => ({ ...r, segments: r.segments.map(sg => ({ ...sg, at: sg.at + at })) })) : rows);
