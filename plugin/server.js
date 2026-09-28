@@ -44,8 +44,7 @@ export const info = {
     description: 'Mean-centered vector search for World Info retrieval.',
 };
 
-/** Corpus statistics per index path, reloaded when index.json's mtime or size changes; `loaded` is the load in flight or
- *  done, so concurrent queries share one parse. Re-insertion on a hit makes the Map an LRU.
+/** Corpus statistics per index path, an LRU; `loaded` is the load in flight or done, so concurrent queries share one parse.
  *  @type {Map<string, { loaded: Promise<{ items: object[], mean: Float64Array } | null>, mtimeMs: number, size: number }>} */
 const MEAN_CACHE_MAX = 16;
 const ADOPT_SIBLINGS_MAX = 32;
@@ -143,11 +142,14 @@ const freshEntry = (indexPath, { mtimeMs, size }) => {
 /** An index's items and corpus mean, null when it has none; cached per path. */
 function loadCentered(indexPath) {
     const stat = statIndex(indexPath);
-    const entry = freshEntry(indexPath, stat) ?? { ...stat, loaded: readCentered(indexPath, stat.mtimeMs) };
+    let entry = freshEntry(indexPath, stat);
+    if (!entry) {
+        entry = { ...stat, loaded: readCentered(indexPath, stat.mtimeMs) };
+        entry.loaded.catch(() => { if (meanCache.get(indexPath) === entry) meanCache.delete(indexPath); });
+    }
     meanCache.delete(indexPath);   // delete before set: set() on an existing key keeps its old position, so the sweep would evict a just-refreshed path first
     meanCache.set(indexPath, entry);
     while (meanCache.size > MEAN_CACHE_MAX) meanCache.delete(meanCache.keys().next().value);
-    entry.loaded.catch(() => { if (meanCache.get(indexPath) === entry) meanCache.delete(indexPath); });
     return entry.loaded;
 }
 
@@ -168,7 +170,9 @@ async function readCentered(indexPath, mtimeMs) {
     // Against mean.length, not rowDim alone: corpusMean drops a row of another dimension, which still has a length.
     const usable = mean.length ? items.filter(it => rowDim(it?.vector) === mean.length).length : 0;
     if (usable < items.length) console.warn(`[WorldsApart] skipped ${items.length - usable} of ${items.length} chunks with a missing or foreign-dimension vector — re-sync the book, or delete the collection if it was embedded under another model`);
-    console.log(`[WorldsApart] indexed ${path.basename(path.dirname(indexPath))}: ${usable} chunks, mean norm ${norm(mean).toFixed(4)}`);
+    // The wa_ segment, not a fixed depth: an empty model scope puts index.json in the collection dir itself.
+    const name = indexPath.split(path.sep).findLast(seg => seg.startsWith('wa_')) ?? indexPath;
+    console.log(`[WorldsApart] indexed ${name}: ${usable} chunks, mean norm ${norm(mean).toFixed(4)}`);
 
     return { items, mean };
 }
@@ -204,7 +208,7 @@ export async function init(router) {
             const queryVector = await embed(String(source), settings, String(searchText), request.user.directories, request);
             const results = [];
             const loadedAll = await loading;
-            let scored = 0, failure = null;
+            let scored = 0, foreign = 0;
 
             for (let i = 0; i < collectionIds.length; i++) {
                 const collectionId = collectionIds[i];
@@ -215,16 +219,17 @@ export async function init(router) {
                 }
 
                 const mean = centroidFor(loaded, centroidUids[String(collectionId)]);
-                try {
-                    results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
-                    scored++;
-                } catch (error) {
-                    console.warn(`[WorldsApart] ${collectionId} skipped: ${error.message}`);
-                    failure ??= error;
+                if (mean.length && rowDim(queryVector) !== mean.length) {
+                    foreign++;
+                    if (!loaded.warnedDim) console.warn(`[WorldsApart] ${collectionId} skipped: its vectors have ${mean.length} dimensions, the query ${rowDim(queryVector) || 'none'} — re-sync the book`);
+                    loaded.warnedDim = true;
+                    continue;
                 }
+                results.push(...scoreCollection(String(collectionId), mean === loaded.mean ? loaded : { ...loaded, mean }, queryVector, opts));
+                scored++;
             }
-            // Every collection failing is the query's fault (the provider's), not one collection's.
-            if (failure && !scored) throw failure;
+            // Every collection foreign is the provider's failure, not one collection's.
+            if (foreign && !scored) throw new Error(`the query has ${rowDim(queryVector) || 'no'} dimensions, matching no attached collection`);
 
             // Pool to entries FIRST, then cut, so topK counts entries.
             return response.send(selectTopK(poolEntries(results), topK));
@@ -247,7 +252,7 @@ export async function init(router) {
             if (keys.length > 10000 || chats.length > 5000) {
                 return response.status(400).send({ error: 'too many keys or chats' });
             }
-            // The caller's settings, required: never default them.
+            // wordBoundary and matchWindow are the caller's settings, required: never default them.
             const wordBoundary = String(request.body?.wordBoundary ?? '');
             if (!BOUNDARY_MODES.includes(wordBoundary)) return response.status(400).send({ error: `wordBoundary must be one of ${BOUNDARY_MODES.join(', ')}` });
             const matchWindow = String(request.body?.matchWindow ?? '');
@@ -335,8 +340,7 @@ export async function init(router) {
         return out;
     };
 
-    /** `bindings` holds `{ dir, file, size, world_info }` for EVERY character chat, `world_info` null when line 0 names no book;
-     *  `groups` holds `{ id, world_info }` per group chat. Line 0 is all that is read (P1). */
+    /** Every chat's line-0 binding (P1): `bindings` `{ dir, file, size, world_info }` per character chat, `groups` `{ id, world_info }`. */
     router.post('/chat-bindings', async (request, response) => {
         try {
             const root = request.user.directories.chats;
@@ -364,9 +368,7 @@ export async function init(router) {
         }
     });
 
-    /** Every WA collection on disk (`vectors/<source>/wa_<hash>/<model>/`, `<model>` empty for a source with no model scope),
-     *  size and mtime only; reports, never deletes. Body `{ source, sourceSettings }`, the settings `current` is judged
-     *  against: true on a row at the directory those settings read. `model` is the directory name, which sanitize() may have changed. */
+    /** Every WA collection on disk, `current` when it is where `{ source, sourceSettings }` read; `model` is the sanitized directory name. */
     router.post('/collections', (request, response) => {
         try {
             const { source, sourceSettings } = request.body ?? {};
@@ -430,11 +432,16 @@ export async function init(router) {
                 // Read through a current cache entry, but never inserted: a sweep of siblings would evict the collections being queried.
                 const cached = freshEntry(dir, stat);
                 let items;
-                if (cached) items = (await cached.loaded)?.items ?? [];
-                else {
-                    const sibling = new LocalIndex(dir);
-                    if (!stat.mtimeMs || !await sibling.isIndexCreated()) continue;
-                    items = await sibling.listItems();
+                try {
+                    if (cached) items = (await cached.loaded)?.items ?? [];
+                    else {
+                        const sibling = new LocalIndex(dir);
+                        if (!stat.mtimeMs || !await sibling.isIndexCreated()) continue;
+                        items = await sibling.listItems();
+                    }
+                } catch (error) {
+                    console.warn(`[WorldsApart] adopt skipped an unreadable sibling ${dir}: ${error?.message ?? error}`);
+                    continue;
                 }
                 for (const it of items) {
                     const h = Number(it.metadata?.hash);

@@ -24,6 +24,9 @@ const writeIndex = (dir, rows) => {
 writeIndex(path.join(vectors, 'extras', 'wa_big'), Array.from({ length: 700 }, (_, i) => [i, [1, (i % 7) / 7, (i % 11) / 11]]));
 writeIndex(path.join(vectors, 'extras', 'wa_foreign'), [[1, [1, 0]], [2, [0, 1]]]);
 writeIndex(path.join(vectors, 'openrouter', 'wa_or', 'openaitext-embedding-3-large'), [[1, [1, 0, 0]]]);
+// Whole seconds, so the mtime survives being set back after the file is rewritten.
+const BIG = path.join(vectors, 'extras', 'wa_big', 'index.json');
+fs.utimesSync(BIG, 1_700_000_000, 1_700_000_000);
 
 const embedder = http.createServer((req, res) => { req.resume(); req.on('end', () => res.end(JSON.stringify({ embedding: [1, 0.5, 0.2] }))); });
 await new Promise(r => embedder.listen(0, '127.0.0.1', r));
@@ -57,8 +60,14 @@ try {
     const or = await call('/collections', { source: 'openrouter', sourceSettings: { model: 'openai/text-embedding-3-large' } });
     eq(or.body?.find(c => c.collectionId === 'wa_or')?.current, true, 'a model id holding "/" is current against its sanitized directory');
 
+    // wa_big's file is garbage of the same size and mtime, so only the cache can still yield its rows; wa_broken is newest and unreadable.
+    fs.writeFileSync(BIG, 'x'.repeat(fs.statSync(BIG).size));
+    fs.utimesSync(BIG, 1_700_000_000, 1_700_000_000);
+    fs.mkdirSync(path.join(vectors, 'extras', 'wa_broken'));
+    fs.writeFileSync(path.join(vectors, 'extras', 'wa_broken', 'index.json'), '{');
     const adopt = await call('/adopt', { collectionId: 'wa_clone', hashes: [1003, 1004, 99999], ...extras });
-    eq(adopt.body?.adopted?.sort().join(','), '1003,1004', 'adopt copies the rows a sibling holds, through the cache');
+    eq(adopt.code, 200, 'an unreadable sibling is skipped, not fatal');
+    eq(adopt.body?.adopted?.sort().join(','), '1003,1004', 'adopt reads a cached sibling from the cache, not the disk');
     eq(fs.existsSync(path.join(vectors, 'extras', 'wa_clone', 'index.json')), true, '...into the clone\'s collection');
 
     const scan = await call('/scan-chats', { keys: ['a'], chats: [{ dir: 'd', file: 'f' }], wordBoundary: 'strict' });
