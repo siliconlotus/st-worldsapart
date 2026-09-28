@@ -928,12 +928,13 @@ async function intercept(chat, _maxContext, _abort, type) {
 }
 
 
-/** The chat length decorators are resolved against: core's scan haystack when a generation is in flight. */
-const decoratorChatLength = () => (runState.scanChat ?? getContext().chat ?? []).length;
+/** The chat length on core's clock, which its delay and timed effects read: the scan haystack, hidden messages out and a
+ *  swiped reply popped. Decorators and latches read it too. */
+const scanLength = () => (runState.scanChat ?? getContext().chat ?? []).length;
 
 /** Sets the `@@reverse_depth` depth onEntriesLoaded withheld, on the entries core activated; runs every scan loop. */
 function applyReverseDepth(args) {
-    const chatLength = decoratorChatLength();
+    const chatLength = scanLength();
     for (const entry of args?.activated?.entries?.values?.() ?? []) {
         if (entry?.waReverseDepth !== undefined) entry.depth = chatLength - entry.waReverseDepth;
     }
@@ -953,7 +954,7 @@ function onEntriesLoaded(loaded) {
 
     // Gated: with WA off the install behaves as it would with WA not installed.
     if (settings().enabled) {
-        const chatLength = decoratorChatLength();
+        const chatLength = scanLength();
         // Before the stash below, so waSecondary captures the desugared keysecondary.
         for (const entry of entries) {
             if (!entry) continue;
@@ -1123,14 +1124,14 @@ const activationOpts = () => ({
     // IS the greeting index; a card with no alternates has no swipes array.
     greetingIndex: getContext().chat?.[0]?.swipe_id ?? 0,
     personaName: name1,
-    chatLength: (runState.scanChat ?? []).length,
+    chatLength: scanLength(),
     fired: firedLatches(),
 });
 
 /** Entries that have fired a latch decorator in this chat. */
 function firedLatches() {
     const ctx = getContext();
-    return matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, ctx.chat?.length ?? 0);
+    return matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, scanLength());
 }
 
 /** Records the activated entries carrying a latch decorator. */
@@ -1141,8 +1142,9 @@ function recordLatches(entries) {
     if (!meta) return;
     const fired = { ...(meta[matcher.WA_METADATA_KEY]?.fired ?? {}) };
     const before = Object.keys(fired).length;
-    // The chat length WHEN it fired, so any later moment is a filter and a rewind past it un-latches.
-    const at = ctx.chat?.length ?? 0;
+    // The first scan length after this turn: a swipe, a regenerate or a rewind reads a length below it and un-latches, as core's
+    // timed effects do on a chat that has not advanced.
+    const at = scanLength() + 1;
     for (const entry of entries) {
         const key = matcher.latchKey(entry);
         if (matcher.hasLatch(entry) && !(key in fired)) fired[key] = at;
@@ -1523,7 +1525,7 @@ async function rankOwnedScan(activated, args, skip) {
         // A latched @@keep_activate_after_match is sticky by another name, so it is durable too: hoisted past
         // the relevance cut rather than scored and cut like an ordinary activation.
         isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry))
-            || matcher.latchActive(entry, firedLatches(), getContext().chat?.length ?? 0),
+            || matcher.latchActive(entry, firedLatches(), scanLength()),
         isPromoted: entry => Boolean(entry?.waPromote),
         priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
         priorityMode,

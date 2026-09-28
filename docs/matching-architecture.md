@@ -166,7 +166,7 @@ the prompt by intent rather than because relevance chose it" — and CCv3's "in 
 activation, a stage before the cut WA adds. **Both latch decorators take an optional duration**, which the record's firing turn makes free:
 `@@keep_activate_after_match 5` holds the entry in while `chatLength <= firedAt + N`,
 `@@dont_activate_after_match 5` holds it out over the same window, and bare is CCv3's "in any case" for
-either. A duration of 0 covers the firing turn only. Both are measured from the FIRST firing — the record
+either. A duration of 0 lapses once the chat advances past the firing turn. Both are measured from the FIRST firing — the record
 keeps no later one, and a latch-admitted row cannot be told from a genuinely matched one at scan-done, so
 re-recording would leave a `keep` window open forever. A duration therefore delays re-entry once rather
 than repeating, which is not what a cooldown does. CCv3 defines no value for either decorator, so a reader
@@ -177,8 +177,10 @@ per-entry state that survives WA being switched off, so they are not desugared t
 `cooldown`: core deletes a stored timed effect the moment the entry's own field is absent, and the
 desugar is gated on `settings().enabled`, so one generation with WA off would destroy the latch
 permanently. WA owns the record instead, in `chat_metadata.worldsApart.fired` (`WA_METADATA_KEY`): each
-`latchKey(entry)` — the entry's world and uid joined with US (`CLAUDE.md`), never NUL — to the chat length
-when it first fired. Written at scan-done for activated entries carrying either decorator (never on a dry
+`latchKey(entry)` — the entry's world and uid joined with US (`CLAUDE.md`), never NUL — to the first chat length
+it holds at, one past the length when it first fired. Every length is on core's scan clock, the one its delay and timed
+effects read: hidden messages out and a swiped reply popped, so a swipe of the firing turn reads the record as not yet
+fired. Written at scan-done for activated entries carrying either decorator (never on a dry
 run, which arms no timed effect and must not arm this either), and read in `activationAdds` through
 `firedUpTo`, which drops every firing past the current chat length, so a rewind past a firing point
 un-latches as core drops a timed effect: a recorded `@@dont_activate_after_match` entry is skipped, a

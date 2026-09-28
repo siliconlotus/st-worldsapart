@@ -1045,9 +1045,9 @@ export const latchKey = entry => `${entry?.world ?? ''}${String.fromCharCode(0x1
 /** The book a latch key belongs to — the segment before the US. */
 export const latchBook = key => String(key ?? '').split(String.fromCharCode(0x1F))[0];
 
-/** The latch record as it stood at `chatLength`: key -> the chat length when it fired, dropping anything
- *  that fired later. A rewind past a firing point therefore un-latches, as core drops a timed effect on a
- *  chat that has not advanced, and a frozen scene reads the record as of its own turn. */
+/** The latch record as it stood at `chatLength`: key -> the first chat length it holds at, on core's scan clock (hidden
+ *  messages out), dropping anything later. A swipe or a rewind past a firing therefore un-latches, as core drops a timed
+ *  effect on a chat that has not advanced, and a frozen scene reads the record as of its own turn. */
 export const firedUpTo = (record, chatLength) => Object.fromEntries(
     Object.entries(record ?? {}).filter(([, at]) => Number(at) <= Number(chatLength)));
 

@@ -182,12 +182,15 @@ async function sceneCommon(rows, books) {
 function sceneGateInputs() {
     const ctx = getContext();
     const chat = ctx.chat ?? [];
+    // Core's scan clock, hidden messages out: the latch record and the delay gate are counted on it.
+    const chatLength = chat.filter(m => m && !m.is_system).length;
     return {
         assistantCount: chat.filter(m => m && !m.is_user && !m.is_system).length,
         greetingIndex: chat[0]?.swipe_id ?? 0,
         personaName: name1 ?? '',
         macros: { ...runState.lastMacros },
-        firedLatches: matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, chat.length),
+        chatLength,
+        firedLatches: matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, chatLength),
     };
 }
 

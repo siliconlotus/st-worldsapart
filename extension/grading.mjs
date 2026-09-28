@@ -208,7 +208,7 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 /** Fields identical across every arm, stored once at document level. Not query, candidates, params, cutoff or primaryBook: those are per-arm. */
 const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
 
-const GATE_INPUT_FIELDS = ['assistantCount', 'greetingIndex', 'personaName', 'firedLatches'];
+const GATE_INPUT_FIELDS = ['assistantCount', 'greetingIndex', 'personaName', 'chatLength', 'firedLatches'];
 
 const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's names for sceneChat / sceneChats / sceneInjects / sceneSources
 
