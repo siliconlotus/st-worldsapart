@@ -202,8 +202,9 @@ eq(countKey('gfx', '<!-- GFX_START -->', false, false, NEUTRAL), 0, 'a comment i
     eq(countKey('/\\bJoe\\b/', "that is Joe's coat", false, true, strict), 1, 'a \\b regex key recovers permissive behaviour');
     eq(countKey('Joe', "that is Joe's coat", false, true, NEUTRAL), 0, 'without a scope the boundary is strict');
 
-    eq(countKey('Joe', "that is Joe's coat", false, true, createScanScope({ boundary: 'nonsense' })), 0, 'an unknown mode falls back to the default');
-    eq(countKey('Joe', 'Joe arrived', false, true, createScanScope({ boundary: 'constructor' })), 1, 'a prototype property name is not a mode');
+    const refused = mode => { try { createScanScope({ boundary: mode }); return false; } catch { return true; } };
+    eq(refused('nonsense'), true, 'a scope refuses an unknown mode rather than matching as strict');
+    eq(refused('constructor'), true, '...and a prototype property name is not a mode');
 
     eq(countKey('Joe', "that is Joe's coat", false, false, strict), 1, 'the setting does not reach substring matching');
 }

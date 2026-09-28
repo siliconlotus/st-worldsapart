@@ -33,7 +33,7 @@ import { gradeValue, arg as sharedArg } from './lib/metrics.mjs';
 // One copy of the gazetteer and scorers: scene.mjs.
 import { entryKey } from '../extension/content-lexical.mjs';
 import { resolveModel } from './lib/reindex.mjs';
-import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './lib/scene.mjs';
+import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 
 const arg = k => sharedArg(process.argv, k);
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -52,7 +52,7 @@ const DEPTH = Number(arg('--depth') ?? S.params?.depth ?? 10);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? S.embedModel;
 if (!MODEL) { console.error('sample records no embedModel — set WA_EMBED_MODEL'); process.exit(2); }
 const EM = resolveModel(MODEL);
-const P = sceneParams(S);
+const P = sceneParams(S, boundaryOverride());
 const FREEZE = process.argv.includes('--freeze');
 // --depths rebuilds the query from the chat at each depth; the query text is the frozen artifact.
 const DEPTHS = arg('--depths') ? String(arg('--depths')).split(',').map(Number).filter(d => d > 0) : null;

@@ -1,7 +1,7 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys. Entry point evaluateSmartKey(); countKey() routes `?` keys here.
 // The grammar is docs/smartkeys.md's; docs/matching-architecture.md holds what each operator is worth.
 
-import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_FLAGS, REGEX_KEY_RE, boundaryAfter, boundaryBefore, boundaryMode, knownBoundary, wordChar } from './matcher.mjs';
+import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_FLAGS, REGEX_KEY_RE, boundaryAfter, boundaryBefore, knownBoundary, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
 import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits } from './automaton.mjs';
 export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits };
@@ -516,7 +516,7 @@ export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {},
 export function createScanScope({ macros = {}, boundary = 'strict' } = {}) {
     return {
         macros: Object.freeze(Object.fromEntries(Object.entries(macros ?? {}).map(([k, v]) => [k, String(v ?? '')]))),
-        boundary: boundaryMode(boundary),
+        boundary: knownBoundary(boundary),
         // variantIdx: raw key -> its variants' pattern indices, filled once every variant is interned; the hot path is then a map read.
         termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), scanMax: SCAN_CACHE_MAX, astCache: new Map(), variantIdx: new Map(), typedIdx: new Map(), keysByIdx: null,
     };

@@ -170,7 +170,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     // Secondaries ride in the same pass: unusableKeysOf reads a gate's attestation off these counts.
     const keysOf = e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])].map(k => String(k).trim()).filter(Boolean);
     const allKeys = [...new Set(allEntries.flatMap(keysOf))];
-    // Its OWN scope: sharing the retrieval scope would leave thousands of keys in the live automaton.
+    // Filled with the whole book: never the runtime's live scope, whose automaton this would swamp.
     const scanScope = requireScope(scope, 'buildKeyPruneScan');
     registerKeys(allKeys, scanScope);
     const comboId = (cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0}`;

@@ -4,7 +4,7 @@
 //   node .../core-compare.mjs <sample.json> [...] --cutoff 0.10 [--tier memory|reference|all] [--budget 25083,37624] [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3] [--tokenizer gpt-3.5-turbo]
 // The defaults are a stock install (max_entries 5, depth 2, order untouched); a tuned install scores measurably higher (R14), so say which is being quoted.
 import fs from 'node:fs';
-import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel } from './lib/scene.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, arg } from './lib/metrics.mjs';
 import { offlineTokenCounter } from './lib/tokens.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
@@ -56,7 +56,7 @@ const scoreSet = (got, relevant) => {
 const scenes = [];
 for (const file of samples) {
     let S; try { S = openSample(file); } catch (e) { console.error(`  ${file}: ${e.message}`); continue; }
-    const P = sceneParams(S);
+    const P = sceneParams(S, boundaryOverride());
     // ensureIndex returns an existing --all build rather than re-embedding; a book without one names the command rather than scoring the ordinary collection.
     let indexFile;
     try {

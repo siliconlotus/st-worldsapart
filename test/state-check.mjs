@@ -4,7 +4,7 @@ import { ensureSettings, settings, defaultSettings } from '../extension/state.mj
 import { eq } from '../eval/lib/metrics.mjs';
 
 // Garbage present before init: the shape a corrupted write or a hand edit leaves behind.
-const store = { worldsApart: { relevanceCutoff: 'abc', maxTokens: ' 500', messageDepth: '25', enabled: 'false', debugLog: 'yes', meanCentered: 'true' } };
+const store = { worldsApart: { relevanceCutoff: 'abc', maxTokens: ' 500', messageDepth: '25', enabled: 'false', debugLog: 'yes', meanCentered: 'true', wordBoundary: 'Permissive' } };
 ensureSettings(store);
 const s = settings();
 
@@ -13,6 +13,7 @@ eq(s.maxTokens, 500, 'a numeric string coerces — the cap works instead of sile
 eq(s.messageDepth, 25, '...likewise for the depth');
 eq(s.enabled, true, 'a boolean spelled as a string falls back to the default: Boolean("false") is true');
 eq(s.meanCentered, true, '...and an internal boolean resets with the rest');
+eq(s.wordBoundary, defaultSettings.wordBoundary, 'a wordBoundary that is no mode resets to the default, warned, before any scope is built from it');
 eq(s.chunkSize, defaultSettings.chunkSize, 'an internal key resets to the shipped value, as always');
 eq(s.worldPriorityByChar && Array.isArray(s.worldPriorityByChar) === false && typeof s.worldPriorityByChar === 'object', true, 'the object settings still merge');
 

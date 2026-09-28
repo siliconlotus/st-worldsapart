@@ -9,9 +9,6 @@ import { countChatHits } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 import { deploySandbox } from './plugin-sandbox.mjs';
 
-/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
-const NEUTRAL = createScanScope();
-
 const source = new URL('../plugin/', import.meta.url);
 const lstat = p => { try { return fs.lstatSync(p); } catch { return null; } };
 
@@ -54,7 +51,7 @@ try {
     const deployed = await import(pathToFileURL(at('matcher.mjs')).href);
     const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
     const keys = ['copper', '? copper pipe', '? =cop', '/vasqu[ei]z/i'];
-    const here = countChatHits(keys, msgs, { scope: NEUTRAL }), there = deployed.countChatHits(keys, msgs, { scope: NEUTRAL });
+    const here = countChatHits(keys, msgs, { scope: createScanScope() }), there = deployed.countChatHits(keys, msgs, { scope: createScanScope() });
     eq(there.messages, here.messages, 'the deployed matcher counts the same messages');
     for (const k of keys) eq(there.messagesWith.get(k), here.messagesWith.get(k), `...and the same hits for ${k}`);
     eq(here.messagesWith.get('? =cop'), 0, 'and a `=` term is live server-side: it rejects "copper" where a plain term would hit');

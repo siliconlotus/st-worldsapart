@@ -28,10 +28,10 @@ const secondaries = [...new Set(entries.flatMap(e => e.keysecondary ?? []))];
 
 /** The chat scan through the function the Studio's client path calls. */
 // The substring probes ride along as the Studio's second pass would send them: a 23-key fixture needs no gate.
-const chatRate = () => countChatHits([...keys, ...secondaries, ...keys.flatMap(substringProbes)], msgs, { scope: NEUTRAL });
+const chatRate = () => countChatHits([...keys, ...secondaries, ...keys.flatMap(substringProbes)], msgs, { scope: createScanScope() });
 
 const verdicts = (chat, matchWindow = 'scan') => {
-    const s = buildKeyPruneScan(data, OPTS, new Set(), { scope: NEUTRAL, chatScan: chat, matchWindow });
+    const s = buildKeyPruneScan(data, OPTS, new Set(), { scope: createScanScope(), chatScan: chat, matchWindow });
     const out = {};
     for (const e of entries) for (const p of s.classifyEntry(e)) out[p.key] = { flag: p.flag, why: s.reasonOf(p).label, message: s.reasonOf(p).message, sev: s.severityOf(p) };
     return out;
@@ -53,7 +53,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v['? =/re/']?.message, 'Flag = makes this a literal; remove it if you want the expression, or use quotes to suppress this warning.', '...with the validator\'s sentence as the tooltip');
     eq(v['? =/re/']?.sev, 'moderate', '...at the amber severity');
     // A key the audit never scanned — edited in since — is judged on demand, not handed "never matches" by default.
-    const later = buildKeyPruneScan(data, OPTS, new Set(), { scope: NEUTRAL });
+    const later = buildKeyPruneScan(data, OPTS, new Set(), { scope: createScanScope() });
     const fresh = key => { const f = later.classifyEntry({ uid: 99, key: [key] })[0]; return f ? later.reasonOf(f).label : ''; };
     eq(fresh('? =quarkspindle'), '', 'an edited-in whole-word term the book holds is judged attested');
     eq(fresh('? =zzunattested'), 'never matches (book)', '...and one it does not hold is dead, by a scan and not by default');
@@ -67,7 +67,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v['lamp-post']?.why, 'book uses it only un-hyphenated', 'the key matches, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
     // Six messages, one hit: under the chat-common share, so the variant verdict is what remains.
-    const lamp = countChatHits(['lamp-post'], ['the lamp post flickers at the corner', 'a', 'b', 'c', 'd', 'e'], { scope: NEUTRAL });
+    const lamp = countChatHits(['lamp-post'], ['the lamp post flickers at the corner', 'a', 'b', 'c', 'd', 'e'], { scope: createScanScope() });
     eq(verdicts({ messagesWith: lamp.messagesWith, typedWith: lamp.typedWith, messages: lamp.messages })['lamp-post']?.why,
         'chat uses it only un-hyphenated', '...and the chat is cited over the book, being what the model writes');
     eq(v["/Cap'n \\w+/"]?.why, `will not match curly form, consider ['${ORTHO_FAMILIES.find(f => f.ascii === "'").pair}]`,
@@ -76,7 +76,7 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
         'the hyphen flags on evidence, and the evidence outranks the dead verdict it explains');
     // Chat outranks the book as the citation: the alternates are scanned as ordinary keys so the count exists.
     const probes = orthoAlternates('/Bose-Einstein \\w+/').map(a => a.alt);
-    const withChat = countChatHits(['/Bose-Einstein \\w+/', ...probes], ['the Bose\u2013Einstein condensate forms'], { scope: NEUTRAL });
+    const withChat = countChatHits(['/Bose-Einstein \\w+/', ...probes], ['the Bose\u2013Einstein condensate forms'], { scope: createScanScope() });
     const vc = verdicts({ messagesWith: withChat.messagesWith, messages: withChat.messages });
     eq(vc['/Bose-Einstein \\w+/']?.why, 'chat uses en-dash, consider [-\u2013]', 'and the chat is cited over the book when it has the form');
 }
@@ -202,7 +202,7 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
 // --- unusableKeysOf: the Studio's only surface for a secondary — refused by the matcher, or live and attested nowhere
 {
     const row = r => `${r.key}:${r.flag}${r.code ? `:${r.code}` : ''}`;
-    const s = _pruneScan(data, OPTS, new Set(), { scope: NEUTRAL });
+    const s = _pruneScan(data, OPTS, new Set(), { scope: createScanScope() });
     eq(s.unusableKeysOf(data.entries['15']).map(row).join(','), 'morning:unattested,? "moon:unusable:stray-quote',
         'without a chat the positive secondary is unattested by the book and the malformed one carries the validator\'s code; the negation-only one is neither');
     const [dead, bad] = s.unusableKeysOf(data.entries['15']);
@@ -212,7 +212,7 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(s.unusableKeysOf({ ...data.entries['15'], selective: false }).length, 0, 'a switched-off gate lists nothing');
     eq(s.unusableKeysOf(data.entries['0']).length, 0, 'an entry with no secondaries reports nothing');
 
-    const c = _pruneScan(data, OPTS, new Set(), { scope: NEUTRAL, chatScan: chatRate() });
+    const c = _pruneScan(data, OPTS, new Set(), { scope: createScanScope(), chatScan: chatRate() });
     eq(c.unusableKeysOf(data.entries['15']).map(row).join(','), '? "moon:unusable:stray-quote', 'the chat attests the positive secondary');
     eq(c.unusableKeysOf(data.entries['25']).map(r => `${r.key}:${c.reasonOf(r).label}`).join(','), 'zzghostgate:unattested (book/chat)',
         'a secondary in no entry and no message stays unattested once the chat is scanned, and says the chat was checked');

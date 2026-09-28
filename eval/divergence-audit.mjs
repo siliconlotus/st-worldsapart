@@ -1,16 +1,18 @@
 // divergence-audit.mjs — for a keyword-only book's graded bundle (no vector index, so scene.mjs cannot load it): over-matches (matchd, graded 0-1) and window misses (unmatched, though a key occurs in WA's frozen scan window — core's shallower scan expired it). Key misses beyond the window need a judge.
-// Usage: node eval/divergence-audit.mjs <sample.json> [more samples...]   (needs a bundle that embeds its books)
+// Usage: node eval/divergence-audit.mjs [--assume-strict] <sample.json> [more samples...]   (needs a bundle that embeds its books)
 import { readFileSync } from 'node:fs';
 import * as matcher from '../extension/matcher.mjs';
-import { countKey } from '../extension/matcher.mjs';
+import { countKey, knownBoundary } from '../extension/matcher.mjs';
 import { createScanScope } from '../extension/smartkeys.mjs';
 import { openBundle } from '../extension/grading.mjs';
 import { isConstant } from '../extension/layout.mjs';
 import { gradeValue } from './lib/metrics.mjs';
+import { ASSUME_STRICT } from './lib/scene.mjs';
 
-const files = process.argv.slice(2);
+const assumeStrict = process.argv.includes(ASSUME_STRICT);
+const files = process.argv.slice(2).filter(a => a !== ASSUME_STRICT);
 if (!files.length) {
-    console.error('usage: node eval/divergence-audit.mjs <sample.json> [more samples...]');
+    console.error(`usage: node eval/divergence-audit.mjs [${ASSUME_STRICT}] <sample.json> [more samples...]`);
     process.exit(1);
 }
 
@@ -49,12 +51,13 @@ for (const file of files) {
     }
     // scene.mjs makeCandidateSet's stage-2 guard: keys blanked under suppressVectorKeys could never fire, so that is no window miss. paramSnapshot is a scalar dump under settings.
     const suppress = j.params?.suppressVectorKeys ?? j.paramSnapshot?.settings?.suppressVectorKeys;
-    // The bundle's own wordBoundary and macros, never a default: the setting has no knowable value.
-    if (!j.params?.wordBoundary) {
-        console.log('  (bundle records no wordBoundary — predates the field; unfired analysis skipped)');
+    // The bundle's own wordBoundary and macros; a bundle predating the field matches under strict only when told to.
+    const boundary = j.params?.wordBoundary ?? (assumeStrict ? 'strict' : undefined);
+    if (!boundary) {
+        console.log(`  (bundle records no wordBoundary; pass ${ASSUME_STRICT} to match it under strict — unfired analysis skipped)`);
         continue;
     }
-    const scope = createScanScope({ macros: j.macros ?? {}, boundary: j.params.wordBoundary });
+    const scope = createScanScope({ macros: j.macros ?? {}, boundary: knownBoundary(boundary) });
     let eligible = 0, misses = 0;
     for (const e of entries) {
         if (matched.has(Number(e.uid)) || e.disable || isConstant(e) || (e.vectorized && suppress)) continue;

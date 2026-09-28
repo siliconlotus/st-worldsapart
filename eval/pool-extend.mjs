@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { entryKey } from '../extension/content-lexical.mjs';
-import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel } from './lib/scene.mjs';
+import { scoreScene, loadScene, indexPath, openSample, sceneParams, embed, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 import { arg } from './lib/metrics.mjs';
 
@@ -42,7 +42,7 @@ const DRY = argv.includes('--dry');
         const S = openSample(path, arg(argv, '--arm'));
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: no embedded entries for "${S.primaryBook}" — a bundle that does not embed its books is malformed`); continue; }
         // all from the scene's own params: a denseAllEntries scene cannot be scored against a vectorized-only build.
-        const P = sceneParams(S);
+        const P = sceneParams(S, boundaryOverride());
         const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
         const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
 
@@ -59,12 +59,12 @@ const DRY = argv.includes('--dry');
         };
 
         // The baseline is a dose too: a re-derived ranking is not the captured one, so its top-k can hold unjudged rows.
-        const base = await scoreScene({ sample: S, k: K, scene, qv });
+        const base = await scoreScene({ overrides: boundaryOverride(), sample: S, k: K, scene, qv });
         note(base.unjudgedRows, 'baseline');
 
         for (const arm of picked) {
             // Every arm here changes what gets embedded, so each needs its own collection.
-            const r = await scoreScene({ sample: S, overrides: {}, k: K, model: MODEL, ollama: OLLAMA, qv,
+            const r = await scoreScene({ sample: S, overrides: boundaryOverride(), k: K, model: MODEL, ollama: OLLAMA, qv,
                 index: (await ensureIndex(S, { overrides: CHUNK_ARMS[arm], model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} })).path });
             note(r.unjudgedRows, arm);
             process.stdout.write(`\r  ${sceneLabel(S) || basename(path)}: scored ${arm}                    `);

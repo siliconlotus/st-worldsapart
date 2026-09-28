@@ -219,7 +219,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false, NEUTRAL), 3, 'X
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, minLength: 4 };
-    const { classifyEntry } = buildKeyPruneScan(data, opts, new Set(), { scope: NEUTRAL });
+    const { classifyEntry } = buildKeyPruneScan(data, opts, new Set(), { scope: createScanScope() });
     eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested,unusable', 'a dead query is flagged; a negation-only one is flagged unusable, not dead');
 }
 
@@ -230,12 +230,12 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false, NEUTRAL), 3, 'X
     entries[1].key = ['/\\n/', '/zzznope/', '/by the door/i', 'x'];
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
         pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, bookShared: 0.5, minLength: 4 };
-    const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set(), { scope: NEUTRAL });
+    const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope() });
     const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
     eq(flags.get('/\\n/')?.flag, 'book common', 'a pattern that matches on every entry is book common while no chat is scanned for it');
     {
         const quiet = { messagesWith: new Map(entries[1].key.map(k => [k, 0])), messages: 50 };
-        const withChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: NEUTRAL, chatScan: quiet });
+        const withChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), chatScan: quiet });
         eq(withChat.classifyEntry(entries[1]).some(f => String(f.key) === '/\\n/'), false, '...and with a chat that does not bear it out, nothing: ubiquity in entry text is a fact about the story');
     }
     eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that matches nowhere is flagged dead');
@@ -341,7 +341,7 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     // A chat scanned that bears none of these out: with chat evidence, ubiquity in entry text draws nothing on its own,
     // which is what lets the English-list verdicts below be observed. Without one, `book common` stands in (further down).
     const quiet = { messagesWith: new Map(Object.values(entries).flatMap(e => e.key).map(k => [k, 0])), messages: 50 };
-    const sc = buildKeyPruneScan({ entries }, opts, new Set(), { scope: NEUTRAL, caseSensitiveDefault: false, wholeWordsDefault: false, chatScan: quiet });
+    const sc = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), caseSensitiveDefault: false, wholeWordsDefault: false, chatScan: quiet });
     const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).label}` : ''; };
 
     eq(verdict(2), 'unattested|never matches (book/chat)', 'a query that evaluates false everywhere is flagged dead');
@@ -350,7 +350,7 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     eq(verdict(4), 'unattested|never matches (book/chat)', 'a common word the chat does not bear out is not common word: the chat has answered, and what remains is that it is dead');
 
     // The common list is the no-chat fallback, so its verdicts are observed without one.
-    const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: NEUTRAL, caseSensitiveDefault: false, wholeWordsDefault: false });
+    const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), caseSensitiveDefault: false, wholeWordsDefault: false });
     const flagOf = uid => noChat.classifyEntry(entries[uid])[0]?.flag;
     const textOf = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).label : ''; };
     eq(textOf(1), 'book common (100%)', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
@@ -371,15 +371,15 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     eq(probes.includes('? =mother =my') && probes.includes('? parent Parsons'), true, '...each carrying its terms\' own flags');
     eq(textOf(9), 'common word (mom & my)', 'no chat: the first common path, joined with &');
     const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
-    const chat = countChatHits([entries[9].key[0], ...probes], msgs, { scope: NEUTRAL });
-    const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: NEUTRAL, chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
+    const chat = countChatHits([entries[9].key[0], ...probes], msgs, { scope: createScanScope() });
+    const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
     eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).label, 'chat common (80%, mostly mother & my)',
         'over the share it is chat common, naming the path that matches most — the chat\'s question, not the list\'s');
     eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'severe', '...and severe by degree at 80%, whatever the path');
     // The breadth earned by a legitimate path: named as such, which is what clears the English-list concern.
     const legit = ['my mom once', 'the parent Parsons', 'parent Parsons again', 'Parsons the parent', 'Nick and his parent'];
-    const chat2 = countChatHits([entries[9].key[0], ...probes], legit, { scope: NEUTRAL });
-    const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { scope: NEUTRAL, chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
+    const chat2 = countChatHits([entries[9].key[0], ...probes], legit, { scope: createScanScope() });
+    const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
     eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).label, 'chat common (100%, mostly parent & Parsons)',
         'a legitimate path matching most is what the chip names');
 }

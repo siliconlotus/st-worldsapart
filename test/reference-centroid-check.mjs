@@ -20,7 +20,7 @@ const S = {
 };
 const QV = [1, 0, 0];
 const rowsOf = overrides => {
-    const P = sceneParams(S, { denseAllEntries: true, ...overrides });
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: true, ...overrides });
     const scene = loadScene(S, { indexFile: INDEX, params: P });
     const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['nothing here']);
     return new Map(rows.map(r => [r.uid, r.score]));

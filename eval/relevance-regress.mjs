@@ -4,7 +4,7 @@
 //        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|bare|span|book|named] [--density-extract entity|book]
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
-import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './lib/scene.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './lib/metrics.mjs';
@@ -264,7 +264,7 @@ const queryVec = async (S, name, value, em) => {
         const perScene = [];
         let dropped = 0;
         for (const { S, qv, name, book } of loaded) {
-            const P = sceneParams(S, { ...(sweep ? { [SWEPT]: value } : {}), ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
+            const P = sceneParams(S, { ...boundaryOverride(), ...(sweep ? { [SWEPT]: value } : {}), ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
             // denseAllEntries needs a collection covering every entry, or it reports a null result that reads like an answer.
             const em = resolveModel(EMBED_SWEEP ? value : MODEL);
             const indexFile = P.denseAllEntries || EMBED_SWEEP

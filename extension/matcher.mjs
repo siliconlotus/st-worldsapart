@@ -10,11 +10,11 @@ const BOUNDARY_CLASSES = {
     permissive: '[\\p{L}\\p{N}\\p{M}]',
     strict: '[\\p{L}\\p{N}\\p{M}\\-\'’]',
 };
-/** A `wordBoundary` setting as a mode, anything unknown being strict, the setting's default. Object.hasOwn, not `in`: 'constructor'
- *  would resolve to a Function. */
-export const boundaryMode = setting => (Object.hasOwn(BOUNDARY_CLASSES, setting) ? setting : 'strict');
+/** The `wordBoundary` modes. */
+export const BOUNDARY_MODES = Object.freeze(Object.keys(BOUNDARY_CLASSES));
 
-/** `mode`, or a throw when it is not one: a node or scope without a mode never matches as strict by default. */
+/** `mode`, or a throw when it is not one: a node or scope without a mode never matches as strict by default. Object.hasOwn,
+ *  not `in`: 'constructor' would resolve to a Function. */
 export const knownBoundary = mode => {
     if (!Object.hasOwn(BOUNDARY_CLASSES, mode)) throw new TypeError(`not a word boundary mode: ${mode}`);
     return mode;

@@ -42,7 +42,7 @@ const sample = () => ({
     excludeTitles: ['B-1'],
 });
 
-const P = sceneParams(sample());
+const P = sceneParams(sample(), { wordBoundary: 'strict' });
 const load = () => loadScene(sample(), { indexFile: A_INDEX, indexOpts: { vectors: DIR }, params: P });
 const scene = load();
 
@@ -81,7 +81,7 @@ eq(top2.length, 2, 'topK counts entries across every collection, not per collect
 // relevanceFit is named because check-embed has no fit and modelsFor refuses to borrow; which fit is arbitrary.
 const delivered = async (overrides) => {
     // memoryCutoff 0: the relevance cut admits every scored row, so only the cap and the budget decide.
-    const r = await scoreScene({ sample: sample(), overrides: { budgetTokens: 100000, relevanceFit: 'bge-m3', memoryCutoff: 0, ...overrides }, scene, qv: QV });
+    const r = await scoreScene({ sample: sample(), overrides: { wordBoundary: 'strict', budgetTokens: 100000, relevanceFit: 'bge-m3', memoryCutoff: 0, ...overrides }, scene, qv: QV });
     return r.atBudget.n;
 };
 eq(await delivered({}), 4, 'no cap: the budget alone delivers every row');

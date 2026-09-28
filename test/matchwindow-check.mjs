@@ -83,7 +83,7 @@ console.log('ok   matchWindow: scan is the old behaviour, narrower settings scop
         },
     };
     const flags = mw => {
-        const s = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, matchWindow: mw });
+        const s = buildKeyPruneScan(book, opts, new Set(), { scope: createScanScope(), matchWindow: mw });
         return Object.fromEntries(s.classifyEntry(book.entries[0]).map(f => [f.key, f.flag]));
     };
     eq(flags('scan')['? apollo astronauts'], undefined, 'scan: the query is attested across the entry');
@@ -101,7 +101,7 @@ console.log('ok   the audit segments like the runtime, and literals are slice-in
     const content = 'The pack gathers. Pack law is absolute.';
     const entries = {};
     for (let i = 0; i < 12; i++) entries[i] = { uid: i, key: ['Pack', 'pack'], content };
-    const s = buildKeyPruneScan({ entries }, { ...opts, pruneShared: true, bookShared: 0.75 }, new Set(), { scope: NEUTRAL });
+    const s = buildKeyPruneScan({ entries }, { ...opts, pruneShared: true, bookShared: 0.75 }, new Set(), { scope: createScanScope() });
     const p = s.classifyEntry(entries[0]).find(x => x.key === 'Pack');
     eq(p?.bookContent, 12, 'df is the entry count, not once per variant');
     eq(p.bookContent <= 12, true, '...so it can never exceed the book');
@@ -116,7 +116,7 @@ console.log('ok   a key and its case variant count one entry once');
     // `mother` is in COMMON_WORDS; `zzznope` is in neither the book's text nor any word list.
     const book = { entries: { 0: { uid: 0, key: ['mother', 'zzznope'], content: 'Nothing relevant here.' } } };
     const run = chatScan => {
-        const s = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, chatScan });
+        const s = buildKeyPruneScan(book, opts, new Set(), { scope: createScanScope(), chatScan });
         return Object.fromEntries(s.classifyEntry(book.entries[0]).map(p => [p.key, { flag: p.flag, why: s.reasonOf(p).label, sev: s.severityOf(p) }]));
     };
     const none = run(undefined);
@@ -141,7 +141,7 @@ console.log('ok   chat evidence reaches the classifier and conditions severity')
 {
     const book = { entries: { 0: { uid: 0, key: ['zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
-        const s = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, chatScan });
+        const s = buildKeyPruneScan(book, opts, new Set(), { scope: createScanScope(), chatScan });
         return s.reasonOf(s.classifyEntry(book.entries[0])[0]).label;
     };
     eq(why({ messagesWith: new Map([['zzznope', 0]]), messages: 100 }), 'unattested (book/chat)',
@@ -155,20 +155,20 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
 {
     const { countChatHits } = await import('../extension/matcher.mjs');
     const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
-    const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs, { scope: NEUTRAL });
+    const got = countChatHits(['copper', '? copper pipe', '/vasqu[ei]z/i', '? zzznope'], msgs, { scope: createScanScope() });
     // Expansion reaches here too, or a hyphenated key reports fewer messages than countKey matches.
     // Test like we fight: a conjunction across two adjacent messages matches under `scan` and not under `message`.
     const split = ['the copper arrived', 'the pipe burst', 'nothing', 'nothing'];
-    eq(countChatHits(['? copper pipe'], split, { scope: NEUTRAL }).messagesWith.get('? copper pipe'), 0, 'message unit: terms in different messages never co-occur');
-    const sc = countChatHits(['? copper pipe'], split, { scope: NEUTRAL, matchWindow: 'scan', depth: 2 });
+    eq(countChatHits(['? copper pipe'], split, { scope: createScanScope() }).messagesWith.get('? copper pipe'), 0, 'message unit: terms in different messages never co-occur');
+    const sc = countChatHits(['? copper pipe'], split, { scope: createScanScope(), matchWindow: 'scan', depth: 2 });
     eq(`${sc.messagesWith.get('? copper pipe')}/${sc.messages} ${sc.unit}`, '1/2 window', 'scan unit: blocks of `depth` messages, and the conjunction co-occurs in one');
-    const pg = countChatHits(['? copper pipe'], ['copper here.\n\npipe there.'], { scope: NEUTRAL, matchWindow: 'paragraph' });
+    const pg = countChatHits(['? copper pipe'], ['copper here.\n\npipe there.'], { scope: createScanScope(), matchWindow: 'paragraph' });
     eq(`${pg.messagesWith.get('? copper pipe')}/${pg.messages} ${pg.unit}`, '0/2 paragraph', 'paragraph unit: one message, two paragraphs, no co-occurrence');
     // includeNames: the speaker's name is in the unit exactly when the live scan would put it there.
     const named = [{ name: 'Sentinel', mes: 'hello' }, { name: 'You', mes: 'hi' }];
-    eq(countChatHits(['Sentinel'], named, { scope: NEUTRAL, includeNames: true }).messagesWith.get('Sentinel'), 1, 'with includeNames a key reaches the speaker');
-    eq(countChatHits(['Sentinel'], named, { scope: NEUTRAL }).messagesWith.get('Sentinel'), 0, '...and not without, the default');
-    const hy = countChatHits(['copper-pipe'], ['a copper pipe', 'a copper-pipe', 'both copper pipe and copper-pipe', 'neither'], { scope: NEUTRAL });
+    eq(countChatHits(['Sentinel'], named, { scope: createScanScope(), includeNames: true }).messagesWith.get('Sentinel'), 1, 'with includeNames a key reaches the speaker');
+    eq(countChatHits(['Sentinel'], named, { scope: createScanScope() }).messagesWith.get('Sentinel'), 0, '...and not without, the default');
+    const hy = countChatHits(['copper-pipe'], ['a copper pipe', 'a copper-pipe', 'both copper pipe and copper-pipe', 'neither'], { scope: createScanScope() });
     eq(hy.messagesWith.get('copper-pipe'), 3, 'both forms count, and a message holding both counts once');
     eq(got.messages, 4, 'the denominator is every message it was given');
     eq(got.messagesWith.get('copper'), 2, 'a literal is still the automaton pass');
@@ -178,7 +178,7 @@ console.log('ok   a key the chat scan never covered is not reported as chat-chec
 
     const book = { entries: { 0: { uid: 0, key: ['? zzznope'], content: 'Nothing relevant.' } } };
     const why = chatScan => {
-        const sc = buildKeyPruneScan(book, opts, new Set(), { scope: NEUTRAL, chatScan });
+        const sc = buildKeyPruneScan(book, opts, new Set(), { scope: createScanScope(), chatScan });
         return sc.reasonOf(sc.classifyEntry(book.entries[0])[0]).label;
     };
     eq(why(undefined), 'never matches (book)', 'a dead query claims only what was checked');

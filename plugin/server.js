@@ -19,7 +19,7 @@ import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-v
 import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
-import { WA_METADATA_KEY, countChatHits, dropTags } from './matcher.mjs';
+import { BOUNDARY_MODES, WA_METADATA_KEY, countChatHits, dropTags } from './matcher.mjs';
 import { chatUser, createScanScope } from './smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
@@ -235,7 +235,7 @@ export async function init(router) {
             }
             // The caller's setting, required: a default here would disagree with the browser silently.
             const wordBoundary = String(request.body?.wordBoundary ?? '');
-            if (!wordBoundary) return response.status(400).send({ error: 'wordBoundary is required' });
+            if (!BOUNDARY_MODES.includes(wordBoundary)) return response.status(400).send({ error: `wordBoundary must be one of ${BOUNDARY_MODES.join(', ')}` });
             // The unit the chat is cut into, the caller's setting as wordBoundary is; message when an older client sends none.
             const unitOpts = { matchWindow: String(request.body?.matchWindow ?? 'message'), depth: Number(request.body?.depth) || 0, includeNames: Boolean(request.body?.includeNames) };
             // The elements WA strips from every message it reads live, so the audit counts the same text the runtime does.

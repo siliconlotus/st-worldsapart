@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './lib/scene.mjs';
+import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor, boundaryOverride } from './lib/scene.mjs';
 import { ensureIndex } from './lib/reindex.mjs';
 import { arg } from './lib/metrics.mjs';
 
@@ -257,7 +257,7 @@ for (const idx of picks) {
             query: queryText, queryChat, scanChat, depth: DEPTH, params: capture,
             paramSnapshot: src?.paramSnapshot, index: built.path,
         };
-        const P = sceneParams(S);
+        const P = sceneParams(S, boundaryOverride());
         // Per arm, not once: the gazetteer is baked at load time and an arm moves it.
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), indexOpts: { model: MODEL }, params: P });
         const haystack = haystackFor(S, P);

@@ -31,7 +31,7 @@ const S = {
 
 const HAY = ['Morning light suits the workshop, and the lamps stay warm past midnight.'];
 const run = (overrides = {}) => {
-    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
     const rows = makeCandidateSet({ ...loadScene(structuredClone(S), { indexFile: INDEX, params: P }), params: P })(
         2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
     return new Map(rows.map(r => [r.uid, r]));
@@ -81,7 +81,7 @@ const run = (overrides = {}) => {
         7: entry(7, [], 'The harbour smells of kelpfire.', { constant: true }),
         8: entry(8, ['? kelpfire::3'], 'Kelpfire burns green.'),
     } };
-    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
     const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
         2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
     const r8 = rows.find(r => r.uid === 8);
@@ -96,7 +96,7 @@ const run = (overrides = {}) => {
             7: entry(7, extra.key ?? [], 'The harbour smells of kelpfire.', { constant: true, ...extra }),
             8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
         } };
-        const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+        const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
         const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P, gates })(
             2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
         return rows.find(r => r.uid === 8);
@@ -116,7 +116,7 @@ const run = (overrides = {}) => {
             8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
             ...(level2 ? { 9: entry(9, ['nowhere'], 'Unmatched.', { delayUntilRecursion: 2, disable: true }) } : {}),
         } };
-        const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+        const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
         const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
             2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
         return new Map(rows.map(x => [x.uid, x]));

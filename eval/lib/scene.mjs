@@ -12,6 +12,7 @@ import { corpusMean, centeredCosineScores } from '../../plugin/vector.mjs';
 import * as entity from '../../extension/entity.mjs';
 import * as matcher from '../../extension/matcher.mjs';
 import { createScanScope } from '../../extension/smartkeys.mjs';
+import { knownBoundary } from '../../extension/matcher.mjs';
 import { hasPromoteDecorator } from '../../extension/matcher.mjs';
 import { isDurable, openBundle } from '../../extension/grading.mjs';
 import * as selection from '../../extension/selection.mjs';
@@ -113,7 +114,18 @@ export function haystackFor(S, P, over = {}) {
 
 /** The match scope of a parameter set: its macros and wordBoundary, and the caches built under them, one per `P`. */
 const scopes = new WeakMap();
-const scopeOf = P => { let s = scopes.get(P); if (!s) scopes.set(P, s = createScanScope({ macros: P.macros, boundary: P.wordBoundary })); return s; };
+const scopeOf = P => {
+    let s = scopes.get(P);
+    if (s) return s;
+    if (P.wordBoundary === undefined) throw new Error(`the bundle records no wordBoundary; pass ${ASSUME_STRICT} to match it under strict, the only mode before the setting existed`);
+    scopes.set(P, s = createScanScope({ macros: P.macros, boundary: knownBoundary(P.wordBoundary) }));
+    return s;
+};
+
+/** The flag a CLI passes through as `{ assumeStrict: true }` in sceneParams' overrides. */
+export const ASSUME_STRICT = '--assume-strict';
+/** `{ assumeStrict: true }` when `argv` carries ASSUME_STRICT, for a CLI to spread into sceneParams' overrides. */
+export const boundaryOverride = (argv = process.argv) => (argv.includes(ASSUME_STRICT) ? { assumeStrict: true } : {});
 
 /** Key hits for one entry against a scan window — the same call onScanDone makes. */
 export function whyFor(entry, scanText, P) {
@@ -205,8 +217,10 @@ export const embed = async (text, { ollama = 'http://localhost:11434', model, en
     return v;
 };
 
-/** The sample's own `params` over these defaults, then `overrides`. The scorer constants come off state.mjs, which owns them. */
-export const sceneParams = (S, overrides = {}) => ({
+/** The sample's own `params` over these defaults, then `overrides`. The scorer constants come off state.mjs, which owns them.
+ *  `overrides.assumeStrict` fills a wordBoundary the sample does not record with 'strict', never replacing one it does. */
+export const sceneParams = (S, { assumeStrict = false, ...overrides } = {}) => {
+    const P = {
     K1: defaultSettings.bm25K1, B: defaultSettings.bm25B, boost: defaultSettings.properNounBoost, stopwordDf: defaultSettings.stopwordDocFreq,
     // null = no cut: `@cut` is reported unavailable, never scored at the fit's own optimum. `relevanceCutoff` is a user
     // setting, so a caller that wants the window must supply the number; a cutoff arm sets one for both tiers.
@@ -222,8 +236,7 @@ export const sceneParams = (S, overrides = {}) => ({
     caseSensitive: false, wholeWords: false, includeNames: true,
     // How the haystack is segmented for countKey; a document that records it overrides this.
     matchWindow: 'scan',
-    // What counts as inside a word when wholeWords is on (shipped 'strict'). With `macros`, the match scope every key here is matched in.
-    wordBoundary: 'strict',
+    // With `wordBoundary`, which has no default here (a user setting), the match scope every key here is matched in.
     macros: S.macros ?? {},   // the map the capture recorded
     // Occurrences -> score (matcher.mjs repeatCurveOf). 'bm25', not the shipped 'presence-log': captures predating the setting must reproduce.
     repeatCurve: 'bm25', repeatR: 1,
@@ -260,7 +273,10 @@ export const sceneParams = (S, overrides = {}) => ({
     recursive: false,
     maxRecursionSteps: 0,
     ...(S.params ?? {}), ...overrides,
-});
+    };
+    if (P.wordBoundary === undefined && assumeStrict) P.wordBoundary = 'strict';
+    return P;
+};
 
 /** Loads a sample into everything needed to score it: every attached book in one ranking, row identity `entryKey` (book, uid); `indexFile` is the PRIMARY book's, the others resolve their own. */
 export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {

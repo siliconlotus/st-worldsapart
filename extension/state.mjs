@@ -1,5 +1,6 @@
 // state.mjs — the settings seam shared by every WA module: the settings key, the defaults, the settings()
 // accessor and the cross-module runState. ST's store is bound at init, never imported (node-loadable).
+import { BOUNDARY_MODES } from './matcher.mjs';
 
 const MODULE_NAME = 'worldsApart';
 
@@ -71,6 +72,10 @@ export function ensureSettings(extensionSettings) {
     for (const [k, d] of Object.entries(defaultSettings)) {
         if (typeof d === 'number') { const n = Number(s[k]); s[k] = Number.isFinite(n) ? n : d; }
         else if (typeof d === 'boolean' && typeof s[k] !== 'boolean') s[k] = d;
+    }
+    if (!BOUNDARY_MODES.includes(s.wordBoundary)) {
+        console.warn(`WorldsApart: wordBoundary "${s.wordBoundary}" is not one of ${BOUNDARY_MODES.join(', ')} — reset to ${defaultSettings.wordBoundary}`);
+        s.wordBoundary = defaultSettings.wordBoundary;
     }
 }
 

@@ -2,7 +2,7 @@
 // Usage (from SillyTavern root):
 //   node .../cost-curve.mjs <sample.json> [...] --fits scene=<dir>,book=<dir> [--cutoffs 0.05,0.10,…]
 // Both fits must be fitted on this corpus: a model fitted elsewhere reads two corpora as a standardisation effect.
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel } from './lib/scene.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 import { resolveModel } from './lib/reindex.mjs';
 import { mean, arg as sharedArg } from './lib/metrics.mjs';
 
@@ -27,7 +27,7 @@ for (const path of samples) {
     const S = openSample(path);
     // The wrong-book null fixture is not a real configuration and contributes a tie to every cell.
     if (S.invalidConfiguration) { console.log(`skip ${sceneLabel(S) || path}: ${S.invalidConfiguration}`); continue; }
-    const P = sceneParams(S, {});
+    const P = sceneParams(S, boundaryOverride());
     const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
     const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
     scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv });
@@ -41,7 +41,7 @@ for (const [name, dir] of FITS) {
     for (const cut of CUTOFFS) {
         const rows = [];
         for (const sc of scenes) {
-            rows.push(await scoreScene({ sample: sc.S, overrides: { fitDir: dir, memoryCutoff: cut }, k: 20, scene: sc.scene, qv: sc.qv }));
+            rows.push(await scoreScene({ sample: sc.S, overrides: { ...boundaryOverride(), fitDir: dir, memoryCutoff: cut }, k: 20, scene: sc.scene, qv: sc.qv }));
         }
         const at = rows.map(r => r.atCut);
         console.log(`  ${cut.toFixed(2)}   | ${mean(at.map(r => r.f)).toFixed(4)}   ${(100 * mean(at.map(r => r.precision))).toFixed(1)}%    ${(100 * mean(at.map(r => r.recall))).toFixed(1)}%   ${mean(at.map(r => r.n)).toFixed(1)}     ${Math.round(mean(at.map(r => r.tokens)))}`);

@@ -36,7 +36,7 @@ const ALL = write('all.json', [1, 5, 2, 3]);
 const QV = [0.7, 0.7, 0.1];
 const rowsOf = (indexFile, overrides) => {
     // Neither form may come from a default; centroidPopulation is pinned because this book has no STMB markers, so 'memory' would fall back to the whole collection.
-    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
     const scene = loadScene(S, { indexFile, params: P });
     const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['the spire looms over the quarter']);
     return { scene, byUid: new Map(rows.map(r => [r.uid, r])) };
