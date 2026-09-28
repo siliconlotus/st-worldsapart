@@ -9,7 +9,7 @@ import { mean, arg as sharedArg } from './lib/metrics.mjs';
 import { booksOrExit, WORLDS } from './lib/corpus.mjs';
 import { fileURLToPath } from 'node:url';
 
-/** No macros and the strict boundary: what these counts are taken under. */
+/** Plain terms with whole-word off, so neither macros nor the boundary mode reach these counts. */
 const SCOPE = createScanScope();
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));

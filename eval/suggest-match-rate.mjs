@@ -1,18 +1,20 @@
 // Does a suggested key match? Buckets buildKeySuggest's candidates by how many messages of a real chat they match (countKey, so /regex/ and ?SmartKeys score too), beside the book's own keys under their entries' flags; the chat doubles as bgDocs, exactly as the Studio passes it.
-// Usage:  node suggest-match-rate.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]   (pass several pairs; n=1 book overstates any finding)
+// Usage:  node suggest-match-rate.mjs --word-boundary strict|permissive <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]   (pass several pairs; n=1 book overstates any finding)
 // Both denominators are printed: per-row and unique diverge enough to invert a comparison (S11), so neither may be the only one on screen.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { buildKeySuggest, STUDIO_SUGGEST_OPTS as OPTS } from '../extension/keyword-suggest.mjs';
-import { countKey } from '../extension/matcher.mjs';
+import { countKey, knownBoundary } from '../extension/matcher.mjs';
 import { createScanScope } from '../extension/smartkeys.mjs';
+import { arg } from './lib/metrics.mjs';
 
-/** No macros and the strict boundary: what these counts are taken under. */
-const SCOPE = createScanScope();
-
-const args = process.argv.slice(2);
-if (!args.length || args.length % 2) {
-    console.error('usage: node suggest-match-rate.mjs <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]');
+// The book's keys match under their entries' whole-word flags, so the boundary is an input and has no default.
+const boundary = arg(process.argv, '--word-boundary');
+const args = process.argv.slice(2).filter((a, i, all) => a !== '--word-boundary' && all[i - 1] !== '--word-boundary');
+let SCOPE = null;
+try { SCOPE = createScanScope({ boundary: knownBoundary(boundary) }); } catch { /* reported below */ }
+if (!SCOPE || !args.length || args.length % 2) {
+    console.error('usage: node suggest-match-rate.mjs --word-boundary strict|permissive <book.json> <chat.jsonl> [<book.json> <chat.jsonl> ...]');
     process.exit(2);
 }
 

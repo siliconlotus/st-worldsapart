@@ -1,7 +1,7 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
 // dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
-import { addMessageHits, buildAst, buildAutomaton, cachedCount, createScanScope, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, matchScope, primeScan, QUOTE_FAMILIES, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
+import { addMessageHits, buildAst, buildAutomaton, cachedCount, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, requireScope, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
 
 export function escapeRegex(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -10,9 +10,18 @@ const BOUNDARY_CLASSES = {
     permissive: '[\\p{L}\\p{N}\\p{M}]',
     strict: '[\\p{L}\\p{N}\\p{M}\\-\'’]',
 };
-/** The word-character class of a `wordBoundary` mode, `strict` for anything unknown. Object.hasOwn, not `in`: 'constructor'
+/** A `wordBoundary` setting as a mode, anything unknown being strict, the setting's default. Object.hasOwn, not `in`: 'constructor'
  *  would resolve to a Function. */
-export const wordChar = mode => BOUNDARY_CLASSES[Object.hasOwn(BOUNDARY_CLASSES, mode) ? mode : 'strict'];
+export const boundaryMode = setting => (Object.hasOwn(BOUNDARY_CLASSES, setting) ? setting : 'strict');
+
+/** `mode`, or a throw when it is not one: a node or scope without a mode never matches as strict by default. */
+export const knownBoundary = mode => {
+    if (!Object.hasOwn(BOUNDARY_CLASSES, mode)) throw new TypeError(`not a word boundary mode: ${mode}`);
+    return mode;
+};
+
+/** The word-character class of a boundary mode. */
+export const wordChar = mode => BOUNDARY_CLASSES[knownBoundary(mode)];
 
 /** Whole-word assertions: the neighbour is not a word character, or is `--` (a folded dash). Zero-width: run under `g` to count, and keyExcerpts reads the offsets. */
 export const boundaryBefore = mode => `(?:(?<!${wordChar(mode)})|(?<=--))`;
@@ -370,16 +379,15 @@ const chatAutomaton = folded => {
     return chatAut;
 };
 
-/** `scope` gives the match context; the scan builds a scope of its own under it. */
-export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false, hitIndex = false, scope: context } = {}) {
+/** `scope` is used as given: pass a fresh one, since a whole book's keys would swamp the live scope's vocabulary. */
+export function countChatHits(keys, messages, { matchWindow = 'message', depth = 0, includeNames = false, hitIndex = false, scope } = {}) {
     // Test like we fight: the units are what the matcher matches a conjunction within, so a `?` key whose terms sit in
     // adjacent messages counts under `scan` and not under `message`, as it matches. `messagesWith`/`messages` keep their
     // names and count units; `unit` says which.
     messages = chatUnits(messages, { matchWindow, depth, includeNames });
     const all = [...new Set(keys.map(k => String(k ?? '').trim()).filter(Boolean))];
     const literals = all.filter(isLiteral), rest = all.filter(k => !isLiteral(k));
-    // Its own scope: the live one carries the active books' vocabulary, and a whole book's keys would swamp it.
-    const scope = createScanScope(matchScope(context, 'countChatHits'));
+    requireScope(scope, 'countChatHits');
     // Every variant is its own pattern, or a hyphenated key reports fewer messages here than countKey matches.
     const folded = [...new Set(literals.flatMap(k => keyVariants(expandMacros(k, scope.macros)).map(fold)))];
     const idxOf = new Map(folded.map((f, i) => [f, i]));
@@ -436,7 +444,7 @@ function wholeWordRegex(needle, mode) {
 
 /** `scope` is the match context and its caches (createScanScope). */
 export function countKey(key, text, caseSensitive, wholeWords, scope, gateAst = null) {
-    matchScope(scope, 'countKey');
+    requireScope(scope, 'countKey');
     const raw = String(key ?? '').trim();
 
     if (!raw || !text) {
@@ -496,7 +504,7 @@ export const markExcerptText = ex => (ex
 
 /** Every place a key matched, up to `limit`, as excerpts with match offsets; display only. A compound SmartKey returns nothing; a single-term one uses its own flags. */
 export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, scope) {
-    matchScope(scope, 'keyExcerpts');
+    requireScope(scope, 'keyExcerpts');
     const out = [];
     let raw = String(key ?? '').trim();
     if (!raw || limit < 1) return out;
@@ -706,7 +714,7 @@ export function mergeSpans(spans) {
 }
 
 export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, matchWindow = 'scan', gate, scope } = {}) {
-    matchScope(scope, 'keySpans');
+    requireScope(scope, 'keySpans');
     const segs = textSegments(text, matchWindow);
     const gateOf = gateNodeFor(gate, caseSensitive, wholeWords, scope);
     const spans = (Array.isArray(keys) ? keys : [])
@@ -730,7 +738,7 @@ export function keySpans(keys, text, caseSensitive, wholeWords, { limit = 200, m
  *  (every occurrence when the key is a single positive branch), whose `at`/`to` index `text`. `count` sums the key's own
  *  occurrences over matched windows. `gate` is `{ keys, logic }`, applied to every key as keysecondary gates a primary. */
 export function keyHits(keys, text, caseSensitive, wholeWords, { context = 28, limit = 20, matchWindow = 'scan', gate, scope } = {}) {
-    matchScope(scope, 'keyHits');
+    requireScope(scope, 'keyHits');
     const segs = textSegments(text, matchWindow);
     const gateOf = gateNodeFor(gate, caseSensitive, wholeWords, scope);
     return (Array.isArray(keys) ? keys : [])
@@ -835,7 +843,7 @@ export function repeatCurveOf(n, k1, curve = 'presence-log', R = 1) {
 /** BM25-style keyword score for one entry over one segment or scanSegments() output; the defaults are ST's world_info_case_sensitive and world_info_match_whole_words, the entry overriding.
  *  `logWeight` is the author's term weights as a log-odds offset, smartkeys `evaluate`'s, the strongest over every key and segment that matched. */
 export function keywordScore(entry, text, keys = entry.key, { k1, caseSensitiveDefault, wholeWordsDefault, repeatCurve = 'presence-log', repeatR = 1, scope } = {}) {
-    matchScope(scope, 'keywordScore');
+    requireScope(scope, 'keywordScore');
     if (!Array.isArray(keys) || !keys.length) {
         return { score: 0, hits: [], logWeight: 0 };
     }
@@ -1101,7 +1109,7 @@ export function rekeyLatches(record, rekey) {
  *  `delayUntilRecursion` is not skipped — WA emits and core's gate rejects until its level arrives — and a fired
  *  `@@keep_activate_after_match` entry is admitted with no keyword hit at all, past the check below. */
 export function activationAdds(entries, windowFor, opts = {}) {
-    matchScope(opts.scope, 'activationAdds');
+    requireScope(opts.scope, 'activationAdds');
     const out = [];
     for (const entry of entries ?? []) {
         if (!entry || entry.disable || entry.constant) continue;

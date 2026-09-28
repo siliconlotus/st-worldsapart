@@ -768,13 +768,12 @@ function applyMacros(entries) {
 /** The entries WA's own matcher activates over its window; candidacy and the verdict live in matcher.mjs activationAdds. */
 async function keywordActivations(chat) {
     const candidates = await getSortedEntries();
-
-    // Live keys: waOwnsScan is false during this fetch, so onEntriesLoaded does not blank them. The SCAN_DONE feed rematches on these.
-    runState.waCandidates = candidates;
-
     const { windowFor } = await scanWindowFor(chat);
 
     applyMacros(candidates);
+    // Live keys: waOwnsScan is false during this fetch, so onEntriesLoaded does not blank them. The SCAN_DONE feed rematches on these.
+    // After the scope: the feed matches in it, so a failure before this leaves the feed nothing to run.
+    runState.waCandidates = candidates;
     // Register every key up front, secondaries included (K13): a first-seen key mid-loop rebuilds the automaton and drops every cached scan.
     registerKeys(candidates.flatMap(e => {
         const keys = e.disable ? [] : matcher.usableKeys(e.key);
@@ -880,11 +879,12 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 /** Waits out the run in progress, then starts one and returns its token. A run not armed within ARM_WAIT_MS, or still
  *  unfinished RUN_WAIT_MS after arming, is superseded. */
 async function takeRun() {
-    const after = ms => new Promise(r => setTimeout(r, ms));
+    // `promise`, or undefined after `ms`; the timer is cleared whichever settles first.
+    const within = (promise, ms) => { let id; return Promise.race([promise, new Promise(r => { id = setTimeout(r, ms); })]).finally(() => clearTimeout(id)); };
     while (currentRun) {
         const prior = currentRun;
-        const armed = await Promise.race([prior.armed.promise.then(() => true), after(ARM_WAIT_MS)]);
-        const finished = armed && await Promise.race([prior.done.promise, after(RUN_WAIT_MS)]);
+        const armed = await within(prior.armed.promise.then(() => true), ARM_WAIT_MS);
+        const finished = armed && await within(prior.done.promise, RUN_WAIT_MS);
         if (finished || currentRun !== prior) continue;
         console.warn(`WorldsApart: the previous generation had not ${armed ? `finished its World Info scan ${RUN_WAIT_MS / 1000} s after WA armed it` : `armed within ${ARM_WAIT_MS / 1000} s`} — superseding it`);
         toastr.warning(t`A new generation started while the previous one was still scanning World Info. WorldsApart moved to the new one, and the previous one fell back to SillyTavern's own World Info.`, 'WorldsApart', { timeOut: 15000 });
@@ -895,8 +895,9 @@ async function takeRun() {
     return token;
 }
 
-/** Ends the run `token` names, if it is still the current one. */
+/** Ends the run `token` names, if it is still the current one, disarming it: no later scan ranks under an ended run. */
 function endRun(token) {
+    if (runState.armedToken === token) runState.armedToken = null;
     if (!currentRun || currentRun.token !== token) return;
     currentRun.armed.resolve();
     currentRun.done.resolve(true);

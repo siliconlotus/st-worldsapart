@@ -598,6 +598,9 @@ console.log('ok   the docs/smartkeys.md worked example holds');
     eq(countKey('? (copper pipe)~1', 'copper well-known pipe', false, false, createScanScope({ boundary: 'permissive' })), 0, '...and permissive as two');
     eq(countKey("? (=Joe coat)~1", "Joe's coat", false, false, createScanScope({ boundary: 'strict' })), 0, 'a whole-word leaf inside a group reads its scope\'s boundary: strict keeps the apostrophe in the word');
     eq(countKey("? (=Joe coat)~1", "Joe's coat", false, false, createScanScope({ boundary: 'permissive' })), 1, '...and permissive ends the word at it');
+    let threw = false;
+    try { evaluate({ type: 'TERM', value: 'joe', isExact: true, weight: 1 }, 'joe'); } catch { threw = true; }
+    eq(threw, true, 'a whole-word node carrying no boundary mode throws rather than matching as strict');
     const cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
     eq(keywordScore({ key: ['? (copper pipe)~1'] }, 'copper pipe', undefined, { ...cfg, scope: NEUTRAL }).score, 1, 'a proximity group scores as one thing');
     eq(keywordScore({ key: ['? copper pipe'] }, 'copper pipe', undefined, { ...cfg, scope: NEUTRAL }).score, 2, '...where the conjunction is two');

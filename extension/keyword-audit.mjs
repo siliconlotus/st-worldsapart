@@ -4,7 +4,7 @@ import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
 import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
 import { isConstant } from './layout.mjs';
-import { buildAst, cachedCount, createScanScope, expandRegex, hitLiterals, matchScope, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
+import { buildAst, cachedCount, createScanScope, expandRegex, hitLiterals, requireScope, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; common word still applies. */
@@ -65,13 +65,15 @@ function pathsOf(node) {
 // A case-sensitive capitalised term can never be the common word: `? ^Mark` never matches `mark`.
 const commonTerm = (n, isLoose) => { const v = String(n.value ?? '').trim(); return Boolean(v) && isLoose(v) && !(n.isCaseSensitive && v !== v.toLowerCase()); };
 
+/** No macros: a probe keeps its tokens, so each chat counts it under that chat's own values. */
+const PROBE_SCOPE = createScanScope();
+
 /** A SmartKey's paths, each as a probe the chat scan can count — `? =mom =my` — with `common` set on a path made entirely
  *  of common words. The whole product: the path that matches most is the one to name, common or not. */
 function smartPaths(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return [];
     let paths;
-    // A scope of no macros: a probe keeps its tokens, so each chat counts it under that chat's own values.
-    try { paths = pathsOf(buildAst(String(raw), createScanScope())); } catch { return []; }
+    try { paths = pathsOf(buildAst(String(raw), PROBE_SCOPE)); } catch { return []; }
     return paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
 }
 
@@ -130,7 +132,7 @@ export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\
  * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
  * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
  * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
- * @param {object} scope the match context every verdict is reached under; the audit builds its own scopes under it
+ * @param {object} scope the match context every verdict is reached under, used as given: pass a fresh one
  * @returns {{entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
  */
 export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain, translate = s => s, scope } = {}) {
@@ -169,7 +171,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const keysOf = e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])].map(k => String(k).trim()).filter(Boolean);
     const allKeys = [...new Set(allEntries.flatMap(keysOf))];
     // Its OWN scope: sharing the retrieval scope would leave thousands of keys in the live automaton.
-    const scanScope = createScanScope(matchScope(scope, 'buildKeyPruneScan'));
+    const scanScope = requireScope(scope, 'buildKeyPruneScan');
     registerKeys(allKeys, scanScope);
     const comboId = (cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0}`;
     const ck = (key, cs, ww) => `${comboId(cs, ww)} ${cs ? key : String(key).toLowerCase()}`;

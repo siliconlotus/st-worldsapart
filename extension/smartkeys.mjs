@@ -1,7 +1,7 @@
 // smartkeys.mjs — boolean query engine for `?`-prefixed World Info keys. Entry point evaluateSmartKey(); countKey() routes `?` keys here.
 // The grammar is docs/smartkeys.md's; docs/matching-architecture.md holds what each operator is worth.
 
-import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_FLAGS, REGEX_KEY_RE, boundaryAfter, boundaryBefore, wordChar } from './matcher.mjs';
+import { coreReadsAsRegex, countRegexKey, escapeRegex, foldedHay, isRegexKey, keyExcerpts, maskMarkup, REGEX_FLAGS, REGEX_KEY_RE, boundaryAfter, boundaryBefore, boundaryMode, knownBoundary, wordChar } from './matcher.mjs';
 // Re-exported: matcher.mjs, keyword-tools.mjs and studio.mjs import these from here. One copy, or the browser and the server disagree.
 import { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits } from './automaton.mjs';
 export { buildAutomaton, scanAutomaton, fold, keyVariants, normalizeOrthography, ORTHO_FAMILIES, addMessageHits };
@@ -271,7 +271,7 @@ const withBoundary = (node, boundary) => {
 
 /** The AST every consumer builds: parsed, then expanded under the scope's macros and stamped with its boundary. `scope` is read for
  *  those two only; a scope caches the result by the raw key. */
-export const buildAst = (raw, scope) => withBoundary(expandAst(parse(tokenize(raw)), matchScope(scope, 'buildAst').macros), scope.boundary);
+export const buildAst = (raw, scope) => withBoundary(expandAst(parse(tokenize(raw)), requireScope(scope, 'buildAst').macros), scope.boundary);
 
 /** Whether the key matches a text holding none of its terms: an optional node does, a NOT of what does not, an AND of two
  *  that do, an OR of one, an XOR of exactly one. Such a key fires on almost every message. */
@@ -491,7 +491,7 @@ const keyNode = (raw, { caseSensitive = false, wholeWords = false } = {}, weight
  *    AND_ANY  AND(p, OR(s1, s2))    AND_ALL  AND(p, AND(s1, s2))    NOT_ANY  AND(AND(p, NOT(s1)), NOT(s2))    NOT_ALL  AND(p, NOT(AND(s1, s2)))
  *  A non-blank secondary that parses to nothing stays as a null child: evaluate reads null as "did not match", which is core's answer. */
 export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {}, scope) {
-    matchScope(scope, 'synthesizeSecondary');
+    requireScope(scope, 'synthesizeSecondary');
     const p = keyNode(primary, flags, 1, scope);
     if (!p) return null;
 
@@ -516,14 +516,14 @@ export function synthesizeSecondary(primary, secondaries, logic = 0, flags = {},
 export function createScanScope({ macros = {}, boundary = 'strict' } = {}) {
     return {
         macros: Object.freeze(Object.fromEntries(Object.entries(macros ?? {}).map(([k, v]) => [k, String(v ?? '')]))),
-        boundary: String(boundary ?? 'strict'),
+        boundary: boundaryMode(boundary),
         // variantIdx: raw key -> its variants' pattern indices, filled once every variant is interned; the hot path is then a map read.
         termIndex: new Map(), patterns: [], automaton: null, dirty: false, scans: new Map(), scanMax: SCAN_CACHE_MAX, astCache: new Map(), variantIdx: new Map(), typedIdx: new Map(), keysByIdx: null,
     };
 }
 
 /** `scope`, or a throw naming `where` when it is not one: a matching call never falls back to a context of its own. */
-export const matchScope = (scope, where) => {
+export const requireScope = (scope, where) => {
     if (!scope || typeof scope !== 'object' || !('macros' in scope) || !('boundary' in scope)) {
         throw new TypeError(`${where}: a match scope is required (createScanScope)`);
     }
@@ -689,7 +689,7 @@ const leaves = (node, out = []) => {
 function leafSpans(node, text, acHits) {
     if (!evaluateNode(node, text, acHits).matched) return [];
     const isRegex = node.type === 'REGEX';
-    return keyExcerpts(String(node.value), text, !isRegex && !!node.isCaseSensitive, !isRegex && !!node.isExact, 0, Infinity, leafScope(node.boundary)).map(e => ({ at: e.at, to: e.to }));
+    return keyExcerpts(String(node.value), text, !isRegex && !!node.isCaseSensitive, !isRegex && !!node.isExact, 0, Infinity, leafScope(knownBoundary(node.boundary))).map(e => ({ at: e.at, to: e.to }));
 }
 
 /** The ways a group can be satisfied, each `{ reqs, vetoes }`: one span list per conjunct — an alternation of leaves pools into one,
@@ -801,7 +801,7 @@ function ensureAst(scope, id, build) {
 /** Pass 1 (automaton, cached per text) -> build (cached per `id`) -> evaluate. `id` must capture everything the tree depends on:
  *  registerTerms stamps a scope-local index onto each TERM, and a mis-keyed hit evaluates the wrong expression. */
 export function evaluateAst(id, build, text, scope) {
-    matchScope(scope, 'evaluateAst');
+    requireScope(scope, 'evaluateAst');
     const ast = ensureAst(scope, id, build);
     return evaluate(ast, text, ensureScan(scope, text));
 }
@@ -813,7 +813,7 @@ export function evaluateSmartKey(rawKey, text, scope) {
 
 /** Registers keys with the scope's automaton without scanning; once per pass, before any scoring — a new key mid-pass dirties the automaton and discards every cached scan. */
 export function registerKeys(rawKeys, scope) {
-    matchScope(scope, 'registerKeys');
+    requireScope(scope, 'registerKeys');
     for (const key of rawKeys) {
         const raw = String(key ?? '').trim();
         if (!raw || isRegexKey(raw)) continue;
@@ -841,7 +841,7 @@ export function primeScan(rawKeys, text, scope) {
 /** The literal keys among `literals` whose variants the primed scan of `text` found — the automaton's own answer to which
  *  keys a segment can possibly count, so a caller need run countKey for those alone. The reverse map (pattern index -> keys) is built once per interned set and per `literals` list, by identity. */
 export function hitLiterals(scope, text, literals) {
-    matchScope(scope, 'hitLiterals');
+    requireScope(scope, 'hitLiterals');
     // Primed here if it is not: the caller means this text to be scanned, and "every literal" is a guess, not an answer.
     const hit = ensureScan(scope, text);
     if (!scope.keysByIdx || scope.keysByIdx.over !== literals) {
@@ -865,7 +865,7 @@ export function hitLiterals(scope, text, literals) {
 /** A plain key's count from a primed scan, or undefined when the cache cannot answer (unscanned text, unregistered key, pending
  *  rebuild). A 0 is authoritative under any flags: no folded-substring hit means no case-sensitive or whole-word hit. */
 export function cachedCount(raw, text, scope, expand = true) {
-    matchScope(scope, 'cachedCount');
+    requireScope(scope, 'cachedCount');
     if (scope.dirty || scope.automaton === null) return undefined;
     const counts = scope.scans.get(text);
     if (counts === undefined) return undefined;
@@ -890,7 +890,7 @@ export function cachedCount(raw, text, scope, expand = true) {
 
 /** Drops every registered key, cached AST and scan; called on chat switch so the automaton tracks the active books' vocabulary. */
 export function resetSmartKeys(scope) {
-    matchScope(scope, 'resetSmartKeys');
+    requireScope(scope, 'resetSmartKeys');
     scope.termIndex.clear();
     scope.variantIdx?.clear();
     scope.typedIdx?.clear();

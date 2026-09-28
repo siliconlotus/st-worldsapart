@@ -8,7 +8,7 @@ import { KEY_CHAT_COMMON } from '../extension/keyword-audit.mjs';
 import { countKey } from '../extension/matcher.mjs';
 import { createScanScope } from '../extension/smartkeys.mjs';
 
-/** No macros and the strict boundary: what these counts are taken under. */
+/** Plain terms with whole-word off, so neither macros nor the boundary mode reach these counts. */
 const SCOPE = createScanScope();
 
 // --dump <file> writes {pair: killed terms} for a table-vs-table diff.

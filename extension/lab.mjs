@@ -2,7 +2,7 @@
 // injects the settings.
 
 import { dropTags, keyHits, keySpans, mergeSpans, scanSegments, secondaryKeys, splitKeys, usableKeys, WI_LOGIC } from './matcher.mjs';
-import { createScanScope, matchScope } from './smartkeys.mjs';
+import { createScanScope, requireScope } from './smartkeys.mjs';
 
 /** `fn(text, at, scope)` over each part in a scope of its own macros under `scope`'s boundary, or once over `hay` in `scope`; always a
  *  list. A part is `{ text, at, macros }`, `at` its offset into the joined text the caller shows. */
@@ -44,7 +44,7 @@ export const entryFlags = (entry, { caseSensitive = false, wholeWords = false } 
  *  other gate core applies: probability, inclusion groups, delay, cooldown, character and tag filters, decorators,
  *  recursion. `scanned` counts the entries tested, `books` their worlds, `keyList` their hit keys deduped. */
 export function runBook(entries, text, { matchWindow = 'scan', context = 28, defaults, skipVectorized = false, override = {}, parts, scope } = {}) {
-    matchScope(scope, 'runBook');
+    requireScope(scope, 'runBook');
     if (parts?.length) {
         // Each part under its own map, then one run: an entry's rows merged per key, the tallies those of one scan.
         const runs = perPart(parts, text, (t, at, partScope) => {
@@ -81,7 +81,7 @@ export function runBook(entries, text, { matchWindow = 'scan', context = 28, def
 /** A run's spans over `text`, merged across its entries in one pass. Per-entry merging would leave two spans on a word two
  *  entries both hit, which cannot nest in markup. */
 export function runSpans(run, text, { matchWindow = 'scan', defaults, override = {}, parts, scope } = {}) {
-    matchScope(scope, 'runSpans');
+    requireScope(scope, 'runSpans');
     const one = (t, at, scope) => shiftSpans(mergeSpans((run?.entries ?? []).flatMap(({ entry }) => {
         const { caseSensitive, wholeWords } = { ...entryFlags(entry, defaults), ...override };
         return keySpans(usableKeys(entry.key), t, caseSensitive, wholeWords, { matchWindow, gate: entryGate(entry), scope });
@@ -94,7 +94,7 @@ export function runSpans(run, text, { matchWindow = 'scan', defaults, override =
  *  `scope` is the match context of a part-less scan; `parts` carry their own macros under its boundary. */
 export function labScan({ hay = '', keys = '', sec = '', logic = WI_LOGIC.AND_ANY, matchWindow = 'scan',
     caseSensitive = false, wholeWords = false, context = 28, run = null, defaults, override = {}, parts, scope } = {}) {
-    matchScope(scope, 'labScan');
+    requireScope(scope, 'labScan');
     if (run) {
         return { keys: run.keyList, rows: [], gate: null, spans: runSpans(run, hay, { matchWindow, defaults, override, parts, scope }) };
     }
