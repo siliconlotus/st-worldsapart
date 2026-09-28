@@ -35,6 +35,8 @@ export function withMacros(map, fn) {
 export const macroTokens = texts => [...new Set([].concat(...(texts ?? []).map(t => String(t ?? '').match(MACRO_RE) ?? [])))];
 /** The tokens of `texts` through `substitute`: the map setMacros takes, and the one a capture records. */
 export const macroMap = (texts, substitute) => Object.fromEntries(macroTokens(texts).map(tok => [tok, String(substitute(tok) ?? '')]));
+/** The {{user}} a chat names: the name on its last user message; undefined when it has none. */
+export const chatUser = messages => [...(messages ?? [])].reverse().find(m => m?.is_user && m?.name)?.name;
 // A token with a word pick: `{{user}}[2]` is the second word of the value, counting from one, negative from the end.
 const MACRO_PICK_RE = /(\{\{[^{}]+\}\})\[(-?\d+)\]/g;
 /** `text` with each known token replaced by its value, or by one word of it under `[N]`, an unknown token as written; `escape` is

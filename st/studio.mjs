@@ -14,7 +14,7 @@ import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { macroMap, validateSmartKey, withMacros } from '../extension/smartkeys.mjs';
+import { chatUser, macroMap, validateSmartKey, withMacros } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
@@ -115,7 +115,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const searchScope = { title: true, entry: true, keywords: true };   // which fields the search looks in
     let pendingUndo = null;          // { books: [{name, data}] } of the last deletion, offered in the nav undo bar
     let undoTimer = null;            // auto-expiry for the undo bar
-    let entryUndo = null;            // { book, entries, originalData, n, chatId, latches?, rekeyBack?, target? } before the last entry bulk action
+    let entryUndo = null;            // { book, entries, originalData, n, chatId, latches?, rekeyBack?, uidBack?, target? } before the last entry bulk action
     let entryUndoTimer = null;
     const selectedBooks = new Set(); // book names ticked in the nav for book-level bulk actions
     let bookAnchor = null;           // last-ticked book, for shift-click range selection
@@ -212,7 +212,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** ST's substitution, except that with no character selected a character macro stays unresolved rather than naming the system user or, in a group, nobody. */
     const stSubstitute = tok => (/^\{\{char(IfNotGroup)?\}\}$/i.test(tok) && this_chid === undefined ? tok : substituteParams(tok));
     /** The book's macro map, every token its keys carry evaluated now: the audit, the chat scan and the Lab all read it. */
-    const macrosOf = () => macroMap(Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])]), stSubstitute);
+    /** Every key and secondary in the book as written, the whole book: the audit, the chat scan, the macro map and the Lab all read it. */
+    const bookKeyTexts = () => Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])]);
+    const macrosOf = () => macroMap(bookKeyTexts(), stSubstitute);
     const rebuildScan = () => {
         // Every term is judged below, so an edited row drops the false the edit forced.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
@@ -226,10 +228,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }));
     };
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); refreshTabStatus(); };
-    /** Every key in the book — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
-    // Secondaries too: the audit reads a gate's chat attestation off the same counts.
-    const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
-        .flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])].map(k => String(k).trim())).filter(Boolean))];
+    /** Every key in the book, trimmed, once each — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
+    const bookKeys = () => [...new Set(bookKeyTexts().map(k => String(k).trim()).filter(Boolean))];
 
     const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatNames = []; };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
@@ -401,6 +401,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         clearEntryUndo();
         data.entries = u.entries;
         if (u.originalData) data.originalData = u.originalData;
+        // A renumber's per-uid view state goes back to the uids it came from, as the entries do.
+        if (u.uidBack) for (const set of [entryOpen, expanded, tall, advOpen]) {
+            const moved = [...set].filter(uid => u.uidBack.has(uid));
+            for (const uid of moved) set.delete(uid);
+            for (const uid of moved) set.add(u.uidBack.get(uid));
+        }
         selectedEntries.clear(); lastSel = null; sugg.clear();
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
         if (u.target) {
@@ -416,7 +422,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (u.rekeyBack) latchWarn((await rekeyChatLatches(u.rekeyBack, Object.values(u.entries))).failed);
         if (forward?.dropped.length) latchWarn(await putLatchesBack(forward.dropped, u.chatId));
     };
-    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; const snap = snapEntries(); for (const e of sel) fn(e); save(); armEntryUndo({ ...snap, n: sel.length }); sel.forEach(x => renderEntry(x)); consumeSelection(); };
+    const applyBulk = fn => {
+        const sel = selectedList(); if (!sel.length) return;
+        const snap = snapEntries();
+        for (const e of sel) fn(e);
+        // Only what the action changed saves and counts toward the undo; an action that changed nothing offers none.
+        const changed = sel.filter(e => JSON.stringify(e) !== JSON.stringify(snap.entries[e.uid])).length;
+        if (changed) { save(); armEntryUndo({ ...snap, n: changed }); }
+        sel.forEach(x => renderEntry(x)); consumeSelection();
+    };
     const numberPrompt = async (title, label, def, min, max) => {
         const raw = await Popup.show.input(title, label, String(def));
         if (raw == null) return null;
@@ -496,7 +510,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
         const latches = rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))), ordered);
-        armEntryUndo({ ...snap, n, latches, rekeyBack: uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(nu), o]))) });
+        armEntryUndo({ ...snap, n, latches, rekeyBack: uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(nu), o]))), uidBack: new Map(plan.moves.map(([o, nu]) => [nu, o])) });
         latchWarn((await latches).failed);
         toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'WorldsApart');
     };
@@ -2269,7 +2283,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: m.is_user }))
                 : await fetchChatMessages(c));
             if (!got.length) continue;
-            const user = [...got].reverse().find(m => m?.is_user && m?.name)?.name;
+            const user = chatUser(got);
             const chatMap = { ...macros, ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) };
             if (c.open && members.length > 1) {
                 const by = new Map(), typedBy = new Map();
@@ -2612,7 +2626,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             else if (set.size > 1) { labChatMacros[tok] = tok; labChatMixed.add(tok); }
         };
         agree('{{char}}', picked.map(c => c.char));
-        agree('{{user}}', loaded.map(ms => [...(ms ?? [])].reverse().find(m => m?.is_user && m?.name)?.name));
+        agree('{{user}}', loaded.map(chatUser));
         const chatParts = []; let at = 0;
         for (const [i, c] of picked.entries()) {
             const { messages } = labChatMessages(loaded[i], depth === 0 ? Infinity : depth, end);
@@ -2620,7 +2634,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const block = `${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(LAB_JOIN)}`;
             parts.push(block);
             // Each block matches under its own chat's values; `at` is its offset in the text joined below.
-            const user = [...(loaded[i] ?? [])].reverse().find(m => m?.is_user && m?.name)?.name;
+            const user = chatUser(loaded[i]);
             chatParts.push({ text: block, at, macros: { ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) } });
             at += block.length + 2;
         }
@@ -2948,7 +2962,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** Every token the typed keys and the book carry, at SillyTavern's value. */
-    const labBaseMap = () => macroMap([labKeys, labSec, ...Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])])], stSubstitute);
+    const labBaseMap = () => macroMap([labKeys, labSec, ...bookKeyTexts()], stSubstitute);
     /** The map the field shows and a part-less scan matches under: the Lab's overrides, else what the loaded chats agree on, else SillyTavern's value. */
     const labMacroMap = () => Object.fromEntries(Object.entries(labBaseMap()).map(([tok, v]) => [tok, Object.hasOwn(labMacros, tok) ? labMacros[tok] : Object.hasOwn(labChatMacros, tok) ? labChatMacros[tok] : v]));
     /** The loaded chats as parts for the model, each under its own values with the Lab's overrides on top; null without a load. */

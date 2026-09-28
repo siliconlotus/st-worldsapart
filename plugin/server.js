@@ -20,7 +20,7 @@ import { getConfigValue } from '../../src/util.js';
 import { scoreCollection, poolEntries, selectTopK } from './scoring.mjs';
 // Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
 import { WA_METADATA_KEY, countChatHits, dropTags, setBoundaryMode } from './matcher.mjs';
-import { setMacros } from './smartkeys.mjs';
+import { chatUser, setMacros } from './smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
@@ -276,7 +276,7 @@ export async function init(router) {
                 });
                 if (unreadable) partial++;
                 // This file under its own values: the caller's {{char}} for it, and {{user}} off its user messages, over the caller's map.
-                const user = [...texts].reverse().find(t => t.is_user && t.name)?.name;
+                const user = chatUser(texts);
                 setMacros({ ...(request.body?.macros ?? {}), ...(entry?.macros ?? {}), ...(user ? { '{{user}}': user } : {}) });
                 // One file at a time, then merged: a hit is per message, so where the scan is split cannot change the total.
                 const got = countChatHits(keys, texts, unitOpts);
