@@ -1167,7 +1167,8 @@ export function decoratorFields(entry, ctx = {}) {
             if (d === null || d < 0) continue;
             sawPosition = true;
             set('position', WI_POSITION.atDepth);
-            if (patch.position === WI_POSITION.atDepth) set('depth', d);
+            // `waReverseDepth` marks the depth as moving with the chat: the ST half sets it after core hashes the entry.
+            if (patch.position === WI_POSITION.atDepth && !('depth' in patch)) { patch.depth = d; patch.waReverseDepth = n; }
             continue;
         }
 

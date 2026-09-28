@@ -11,10 +11,15 @@ eqDeep(patch('@@depth 7\nx'), { position: WI_POSITION.atDepth, depth: 7 }, '...a
 eqDeep(patch('@@scan_depth 3\nx'), { scanDepth: 3 }, '@@scan_depth sets scanDepth');
 
 // @@reverse_depth counts from the START, so the spec defines it as @@depth <total messages> - N.
-eqDeep(patch('@@reverse_depth 2\nx', {}, 10), { position: WI_POSITION.atDepth, depth: 8 },
+eqDeep(patch('@@reverse_depth 2\nx', {}, 10), { position: WI_POSITION.atDepth, depth: 8, waReverseDepth: 2 },
     '@@reverse_depth 2 in a 10-message chat is depth 8');
-eqDeep(patch('@@reverse_depth 2\nx', {}, 20), { position: WI_POSITION.atDepth, depth: 18 },
+eqDeep(patch('@@reverse_depth 2\nx', {}, 20), { position: WI_POSITION.atDepth, depth: 18, waReverseDepth: 2 },
     '...and the distance from the end grows with the chat, which is what reversed means');
+// Core hashes the patched entry and keys timed effects on the hash, so everything but `depth` must hold still as the chat grows.
+const hashed = n => { const { depth, ...rest } = patch('@@reverse_depth 2\nx', {}, n); return rest; };
+eqDeep(hashed(10), hashed(20), 'the reverse-depth patch minus its depth is the same at every chat length');
+eqDeep(patch('@@depth 3\n@@reverse_depth 2\nx', {}, 10), { position: WI_POSITION.atDepth, depth: 3 },
+    'an earlier @@depth keeps the depth, and nothing marks it as moving');
 eqDeep(patch('@@reverse_depth 30\nx', {}, 10), {}, 'a negative result is out of range and refused');
 eqDeep(patch('@@position before_desc\nx'), { position: WI_POSITION.before }, 'before_desc is before char defs');
 eqDeep(patch('@@position after_desc\nx'), { position: WI_POSITION.after }, 'after_desc is after char defs');

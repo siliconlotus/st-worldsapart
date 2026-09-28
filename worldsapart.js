@@ -888,6 +888,17 @@ async function intercept(chat, _maxContext, _abort, type) {
 }
 
 
+/** The chat length decorators are resolved against: core's scan haystack when a generation is in flight. */
+const decoratorChatLength = () => (runState.scanChat ?? getContext().chat ?? []).length;
+
+/** Sets the `@@reverse_depth` depth onEntriesLoaded withheld, on the entries core activated; runs every scan loop. */
+function applyReverseDepth(args) {
+    const chatLength = decoratorChatLength();
+    for (const entry of args?.activated?.entries?.values?.() ?? []) {
+        if (entry?.waReverseDepth !== undefined) entry.depth = chatLength - entry.waReverseDepth;
+    }
+}
+
 /** Blinds core's keyword matcher on a scan WA owns — keys stashed on `waKeys`/`waSecondary`, then blanked — and takes
  *  the budget off core. REASSIGN `key`, never mutate it: the array is loadWorldInfo's cache. */
 function onEntriesLoaded(loaded) {
@@ -902,10 +913,14 @@ function onEntriesLoaded(loaded) {
 
     // Gated: with WA off the install behaves as it would with WA not installed.
     if (settings().enabled) {
-        const chatLength = (runState.scanChat ?? getContext().chat ?? []).length;
+        const chatLength = decoratorChatLength();
         // Before the stash below, so waSecondary captures the desugared keysecondary.
         for (const entry of entries) {
-            if (entry) Object.assign(entry, matcher.decoratorFields(entry, { chatLength }));
+            if (!entry) continue;
+            const patch = matcher.decoratorFields(entry, { chatLength });
+            // Core hashes the entry after this hook and keys timed effects on the hash: a depth that moves with the chat is set at SCAN_DONE.
+            if (patch.waReverseDepth !== undefined) delete patch.depth;
+            Object.assign(entry, patch);
         }
     }
 
@@ -2434,11 +2449,13 @@ async function initBody() {
     // The panel survives dry-run scans untouched, so it would carry the previous chat's selection across a switch.
     eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; runState.lastLayoutOrder = []; renderDeliveryPanel([]); });
     refreshAttached();
+    // Before onScanDone, which may read `depth`; onScanDone returns early on paths that still build a prompt.
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, applyReverseDepth);
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
     // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at
     // GENERATION_ENDED, so a between-scans getSortedEntries escapes the blanking.
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, (args) => {
-        if (!args?.state?.next) runState.waOwnsScan = false;
+        if (isLastLoop(args)) runState.waOwnsScan = false;
     });
 
     if (settings().enabled) renderDeliveryPanel(runState.lastPromptOrder);

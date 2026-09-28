@@ -91,12 +91,12 @@ never core's own `decorators` field. `hasDecorator` reads `decorators` first and
 content; every live call passes one of core's own two names, for which `decorators` is authoritative.
 
 `decoratorFields(entry, ctx)` is pure and returns a field patch, `{}` when none apply; `ctx` is
-`{ chatLength }`. `onEntriesLoaded` applies it with `Object.assign`.
+`{ chatLength }`. `onEntriesLoaded` applies it with `Object.assign`, except a `depth` the patch marks with `waReverseDepth`: core hashes the entry after that hook and keys timed effects on the hash, so a depth that moves with the chat is set on the activated entries at `WORLDINFO_SCAN_DONE` instead.
 
 | decorator | patch |
 |---|---|
 | `@@depth N` | `position: atDepth, depth: N` |
-| `@@reverse_depth N` | `position: atDepth, depth: chatLength - N` |
+| `@@reverse_depth N` | `position: atDepth, depth: chatLength - N`, `waReverseDepth: N` |
 | `@@role assistant\|system\|user` | `role` (`extension_prompt_roles` number); may also set `position` — see below |
 | `@@scan_depth N` | `scanDepth: N` |
 | `@@position` | `before_desc` -> `before`; `after_desc`, `personality`, `scenario` -> `after` |
