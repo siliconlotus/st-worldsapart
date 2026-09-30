@@ -370,7 +370,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             const caseShare = cased === undefined ? undefined : cased / any;
             const wantWord = !ww && wordShare !== undefined && wordShare <= 1 / 3;
             const wantCase = !cs && caseShare !== undefined && caseShare <= 1 / 3;
-            if (wantWord || wantCase) return { flag: 'substring', bookContent, chatRate, wordShare, caseShare, suggest: `? ${wantWord ? '=' : ''}${wantCase ? '^' : ''}${k}` };
+            // renderTerm quotes a key that would not lex as one term: unquoted, `? =red moon` is `=red AND moon`.
+            if (wantWord || wantCase) return { flag: 'substring', bookContent, chatRate, wordShare, caseShare, wantWord, wantCase, suggest: `? ${renderTerm({ value: k, isExact: wantWord, isCaseSensitive: wantCase })}` };
         }
         // A key that floods the chat, whatever list it is or is not on. Not a `constant` or sticky entry: those are the
         // author declaring the entry ubiquitous, and the flag claims something about the key against this chat, not the wiring.
@@ -482,8 +483,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (p.flag === 'book common') return { label: t`book common (${pct(p.bookContent / nBook)}%)`, severity };
         if (p.flag === 'fragment') return { label: t`phrase fragment`, severity };
         if (p.flag === 'substring') {
-            const how = [p.wordShare !== undefined && p.suggest.includes('=') ? t`${pct(p.wordShare)}% as a word` : null,
-                p.caseShare !== undefined && p.suggest.includes('^') ? t`${pct(p.caseShare)}% in this case` : null].filter(Boolean).join(', ');
+            const how = [p.wantWord ? t`${pct(p.wordShare)}% as a word` : null,
+                p.wantCase ? t`${pct(p.caseShare)}% in this case` : null].filter(Boolean).join(', ');
             return { label: t`matches in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
         }
         if (p.flag === 'variant only') return { label: p.where === 'chat' ? t`chat uses it only un-hyphenated` : t`book uses it only un-hyphenated`, severity };
@@ -494,7 +495,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
         // The same suggestion substring makes, measured over the book: hits mostly inside longer words want `=`.
         const ratio = p.total ? p.clean / p.total : 0;
-        return { label: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} exact)`, severity };
+        return { label: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? ${renderTerm({ value: p.key, isExact: true })}` : t`short (${p.clean}/${p.total} exact)`, severity };
     };
     // Near-duplicates: Jaccard over rare vocabulary; an arc and its member scene are skipped. Advisory only.
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));

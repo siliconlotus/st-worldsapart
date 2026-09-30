@@ -842,7 +842,7 @@
  "severe": "grave",
  "short": "courte",
  "short (${0}/${1} exact)": "courte (${0}/${1} exactes)",
- "short (${0}/${1} exact) — consider ? =${2}": "courte (${0}/${1} exactes) — envisagez ? =${2}",
+ "short (${0}/${1} exact) — consider ? ${2}": "courte (${0}/${1} exactes) — envisagez ? ${2}",
  "sticky": "persistante",
  "straight form": "la forme droite",
  "substring": "sous-chaîne",

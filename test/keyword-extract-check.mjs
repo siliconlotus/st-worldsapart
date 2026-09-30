@@ -484,3 +484,9 @@ import { flagProbe, STUDIO_PRUNE_OPTS } from '../extension/keyword-audit.mjs';
     const flags = buildKeyPruneScan({ entries: { 0: both } }, STUDIO_PRUNE_OPTS, new Set(), { chatScan, scope: createScanScope() }).classifyEntry(both).map(p => p.flag);
     assert.ok(!flags.includes('chat common'), 'a key with both flags is rated by the probe under both, not by its bare hits');
 }
+{
+    const spaced = { uid: 0, key: ['red moon'], content: 'x' };
+    const chatScan = { messagesWith: new Map([['red moon', 5], ['? ="red moon"', 1]]), messages: 10, unit: 'message' };
+    const [p] = buildKeyPruneScan({ entries: { 0: spaced } }, STUDIO_PRUNE_OPTS, new Set(), { chatScan, scope: createScanScope() }).classifyEntry(spaced);
+    assert.strictEqual(p?.suggest, '? ="red moon"', 'a spaced key is suggested quoted, so the flag covers the phrase rather than its first word');
+}

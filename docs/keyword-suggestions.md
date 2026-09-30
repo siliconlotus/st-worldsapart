@@ -30,8 +30,7 @@ recall; a key denoting many sibling entries is outranked, not disqualified.
 
 One ranker for the suggest popup and the Studio: each entry's own terms, scored by tf x idf over the book
 plus `bgDocs`, the open chat's messages pooled into the idf denominator — one
-Aho-Corasick pass, 254ms for 497 keys over 5473 messages, and independent of the key count (P2). The language table is read
-once per build.
+Aho-Corasick pass, 254ms for 497 keys over 5473 messages, and independent of the key count (P2).
 
 **Tokens** (`nameEvidence().wordSeq`): letter runs with internal apostrophes and hyphens; a sentence
 ender emits a `.` sentinel that no gram bridges, and a possessive gets one on both sides. The same pass
@@ -42,8 +41,7 @@ word absent from the table; `I` is excluded.
 **Candidates** are grams of one to `maxN` content words. A function word blocks a gram: the fixed list,
 or a token in more than 30% of entries at fewer than six occurrences per entry that is not a name. A
 linker may sit inside a gram; a name particle (`de`, `van`, `al` …) may also lead, an English linker
-(`of`, `the`) may not, and nothing trails. Ten particles occur across 38 books: `de la los el van
-del du da der le` (S4). Linkers neither spend `maxN` nor earn the length bonus.
+(`of`, `the`) may not, and nothing trails. Linkers neither spend `maxN` nor earn the length bonus.
 
 **Gates**, in the order tested; a candidate must clear all of them:
 
@@ -55,12 +53,13 @@ del du da der le` (S4). Linkers neither spend `maxN` nor earn the length bonus.
 - Literal occurrence: the joined gram occurs as a substring somewhere, since folding bridges punctuation.
 - Short: a unigram of three characters or fewer is cut unless it is an acronym (`excludeShort`).
 - Head: the last word is not a saturated entity (in > 85% of entries), a verb head by the book's own
-  syntax (follows a pronoun or saturated entity in > 40% of its uses and a determiner in < 10%), in the
+  syntax (at least five uses, following a pronoun or saturated entity in > 40% of them and a determiner in < 10%), in the
   table's verb-or-adverb set, a word that takes a determiner after it, a `-ily`/`-ingly`/`-edly` adverb
-  off the table, or a clitic; and no word of a phrase is in the strict verb set. Names outrank all of
-  these.
+  off the table, or a clitic; and no word of a phrase is in the strict verb set or a clitic. A name is
+  exempt from the table's sets, the determiner test and the adverb test; the saturated-entity, verb-head
+  and clitic tests apply to it.
 - Adjectives: a unigram in the table's adjective set is cut; inside a phrase an adjective stays.
-- Shape: an elided form (`d'Orléans`) whose head the entry also uses bare, a roman numeral, a title
+- Shape: an elided form (`d'Orléans`) whose head is off the table and used bare in the entry, a roman numeral, a title
   (`mr`, `dr` …), and — with `excludeDates` — a year, a numeric date or a month with a digit.
 - Frequency: names read as z 0; a unigram in the table (z >= 3.0) is cut; a phrase rides its rarest
   word on a ramp, full weight at z <= 2.5 and gone at z >= 3.8, and is cut outright if any non-linker,
@@ -113,8 +112,9 @@ frequency, stored to 0.1 and packed by decile), `posVAStrict` and `posVA` (verb-
 and 85% dominant tag), `posAdj` (adjectives at 85%), `common` (the audit's common-word list) and a
 `hash`. English is bundled (`wa-pack-en.js`); any other language is fetched once from the data index
 and kept in the user's files, refetched when the index's hash moves, and a failed fetch stands down to a
-table where every word reads rare and every filter is a no-op. The suggester and the audit read the table
-at the top of each build, so a switch takes effect on the next.
+table where every word reads rare and every filter is a no-op. Only the latest switch takes effect. The
+suggester and the audit read whichever table is current when they run, so a switch reaches the suggester's
+next build and the audit's next verdict.
 
 `build-zipf.py` writes the packs. English comes from Google Books eng-fiction 1-grams, 1980 on, with
 wordfreq gating the vocabulary and supplying the POS sets from the dominant tag at 1,000 or more tagged
@@ -148,18 +148,18 @@ Explorer's key chips, where curation happens; only one flag means "delete this k
 |---|---|---|---|
 | `unusable` | the validator refuses the key | severe | the alert's label, its message as the tooltip; a correction, not a deletion |
 | `warning` | the validator warns on the key: legal, and probably not what was meant | moderate | the alert's label, its message as the tooltip |
-| `substring` | a literal key over the chat-common share whose whole-word probe share is <= 1/3, or whose case-sensitive probe share is <= 1/3 where the key has a capital; only a flag the entry lacks is suggested | moderate | `consider ? =k` / `? ^k` |
+| `substring` | a literal key over the chat-common share whose whole-word probe share is <= 1/3, or whose case-sensitive probe share is <= 1/3 where the key has a capital; only a flag the entry lacks is suggested | moderate | `consider ? =k` / `? ^k`, the key quoted where it would not read as one term |
 | `chat common` | in >= `KEY_CHAT_COMMON` (20%) of units; not on a `constant` or sticky entry, the author having declared it ubiquitous | severe at >= `KEY_CHAT_SEVERE` (50%, an assertion), else moderate | the rate, and for a SmartKey the path that matches most; remedies are `constant` or a narrower key |
-| `book common` | no chat scanned; content df >= `KEY_BOOK_COMMON` (45%, an assertion) of a book of at least `KEY_MIN_SHARED_ENTRIES` (10) | moderate | the share |
-| `book shared` | listed as a key by more than 3/4 of `bookShared` (0.75) of the entries | severe at >= `bookShared`, else moderate | the share |
+| `book common` | no chat scanned; content df >= `KEY_BOOK_COMMON` (45%, an assertion) of a book of at least `KEY_MIN_SHARED_ENTRIES` (10); not on a `constant` or sticky entry | moderate | the share |
+| `book shared` | listed as a key by more than 3/4 of `bookShared` (0.75) of the entries of a book of at least `KEY_MIN_SHARED_ENTRIES` (10) | severe at >= `bookShared`, else moderate | the share |
 | `regex orthography` | a pattern that cannot reach a quote or dash form the chat, or failing that the book, uses more than the form it matches | minor | the form, and the class to write |
 | `common word` | no chat scanned; a single literal word on the pack's common list, or a SmartKey with a path made entirely of them | moderate | the word or path |
 | `fragment` | a multi-word literal holding a function word, unless it is a capitalised frame with a name-particle interior, or the book holds its title-cased form case-sensitively | severe | `phrase fragment` |
 | `short` | a literal under `KEY_MIN_LENGTH` (4) on a non-whole-word entry, with hits | minor at every hit clean, severe at <= 1/3, else moderate | `clean/total exact`, and `consider ? =k` at <= 1/3 |
 | `unattested` | df 0 and no chat rate; a proper-looking literal is exempt under `ignoreProper` | none | `unattested` for a literal, `never matches` for a `?` or regex key, naming what was checked |
 | `variant only` | a hyphenated literal the chat, or failing that the book, holds only un-hyphenated | minor | which |
-| `note` | an info-level alert on a key nothing else flags | minor | the alert's label, its message as the tooltip |
 | `regex orthography` | a pattern holding one side of a quote family with no evidence either way | minor | `will not match` the other form |
+| `note` | an info-level alert on a key nothing else flags | minor | the alert's label, its message as the tooltip |
 
 A `short` key's clean count rejects a boundary hit whose surrounding run of digits and currency marks
 holds a digit, so `007` is clean in "Agent 007." and not in "$10,007.08".
