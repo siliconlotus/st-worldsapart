@@ -25,6 +25,8 @@ WorldsApart includes the Lorebook Studio, an interface designed from the ground 
 
 ## Install
 
+WorldsApart needs SillyTavern 1.17.0 or later.
+
 In SillyTavern: **Extensions → Install extension**, and paste
 
 ```

@@ -7,6 +7,7 @@
     "js": "worldsapart.js",
     "author": "siliconlotus",
     "version": "1.0.0-alpha.1+build.2",
+    "minimum_client_version": "1.17.0",
     "auto_update": true,
     "homePage": "https://github.com/siliconlotus/st-worldsapart",
     "hooks": {
