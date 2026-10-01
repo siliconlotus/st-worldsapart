@@ -871,13 +871,13 @@ async function selectAndActivate(chat, token) {
 
 /** The WA run slot: one run at a time, from a generation's interceptor to its armed scan's last loop. */
 const runs = createRuns({
-    isGenerating,
     nextToken: () => ++runState.scanToken,
     onSupersede: why => {
-        // Never reached core's scan: aborted after WA's interceptor, or blocked on the newcomer; either way no scan was cut short.
-        if (why === 'unscanned') { console.info('WorldsApart: the previous generation never reached its World Info scan — superseding it'); return; }
-        console.warn(`WorldsApart: the previous generation had not ${why === 'unfinished' ? `finished its World Info scan ${RUN_WAIT_MS / 1000} s after it started` : `armed within ${ARM_WAIT_MS / 1000} s`} — superseding it`);
-        toastr.warning(t`A new generation started while the previous one was still scanning World Info. WorldsApart moved to the new one, and the previous one fell back to SillyTavern's own World Info.`, 'WorldsApart', { timeOut: 15000 });
+        // Over before its scan: nothing ran under core, so there is nothing to announce.
+        if (why === 'aborted') { console.info('WorldsApart: the previous generation was aborted before its World Info scan — superseding it'); return; }
+        const had = { unscanned: `started its World Info scan ${RUN_WAIT_MS / 1000} s after it armed`, unfinished: `finished its World Info scan ${RUN_WAIT_MS / 1000} s after it started`, unarmed: `armed within ${ARM_WAIT_MS / 1000} s` }[why];
+        console.warn(`WorldsApart: the previous generation had not ${had} — superseding it`);
+        toastr.warning(t`A new generation started before the previous one finished its World Info scan, and WorldsApart moved to the new one. If the previous one is still running, either may use SillyTavern's own World Info this turn.`, 'WorldsApart', { timeOut: 15000 });
     },
 });
 
@@ -900,7 +900,7 @@ function settleRun(token) {
 async function intercept(chat, _maxContext, _abort, type) {
     const enabled = settings().enabled;
     // Before anything is written: a waiting generation must not touch the state of the run it waits on. A quiet generation
-    // never takes ST's lock, so a lock held now is another generation's.
+    // takes ST's lock only after its interceptors, so a lock held now is another generation's.
     const token = enabled ? await runs.take(type !== 'quiet' && isGenerating()) : ++runState.scanToken;
     runState.quietScan = type === 'quiet';
     // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
