@@ -16,24 +16,21 @@ jobs:
   suite:
     runs-on: ubuntu-latest
     steps:
-      # Checked out at its install depth: several checks resolve through stInstall(), which walks up for config.yaml.
       - uses: actions/checkout@v5
         with:
-          path: sillytavern/public/scripts/extensions/third-party/st-worldsapart
+          path: wa
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
-      # The suite runs as it does on a developer's machine: inside an install. acorn (undeclared-check) and tiktoken
-      # (tokens-check) are ST's own dependencies, resolved out of its node_modules rather than declared here.
-      - name: stand up a minimal install around the checkout
-        working-directory: sillytavern
+      # A real SillyTavern at the manifest's minimum_client_version: the plugin checks import its server's src/, and
+      # acorn (undeclared-check) and tiktoken (tokens-check) resolve out of its node_modules.
+      - name: install SillyTavern and place the checkout at its install depth
         run: |
-          printf 'dataRoot: ./data\n' > config.yaml
-          mkdir -p data/default-user
-          # "type": "module" is what ST's own package.json declares, and extension/wa-pack-en.js is ESM in a .js file:
-          # a package.json without it would parse that file as CommonJS and fail every check that loads the language pack.
-          printf '{"name":"sillytavern","private":true,"type":"module"}\n' > package.json
-          npm install --no-audit --no-fund --silent acorn@^8 tiktoken@^1
+          ST_VERSION=$(node -p 'require("./wa/manifest.json").minimum_client_version')
+          git clone --quiet --depth 1 --branch "$ST_VERSION" https://github.com/SillyTavern/SillyTavern.git sillytavern
+          cp sillytavern/default/config.yaml sillytavern/config.yaml
+          (cd sillytavern && npm ci --no-audit --no-fund --silent)
+          mv wa "$WA"
       # eval-data/ is gitignored, so a fresh checkout has none; grade-pending-check and paired-check write scratch files there.
       - name: scratch directory the harness writes into
         run: mkdir -p "$WA/eval/eval-data"
