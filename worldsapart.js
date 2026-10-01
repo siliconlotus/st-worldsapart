@@ -6,6 +6,7 @@ import {
     event_types,
     getRequestHeaders,
     getMaxPromptTokens,
+    isGenerating,
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
@@ -29,6 +30,7 @@ import * as matcher from './extension/matcher.mjs';
 import { createScanScope, macroMap, registerKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
 import * as layout from './extension/layout.mjs';
+import { ARM_WAIT_MS, createRuns, RUN_WAIT_MS } from './extension/runs.mjs';
 import * as delivery from './extension/delivery.mjs';
 import { getTokenCountAsync, getTokenizerModel } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
@@ -867,48 +869,27 @@ async function selectAndActivate(chat, token) {
     runState.waOwnsScan = true;
 }
 
-/** How long a newcomer waits on a run that has armed but not finished its scan. Past it, the run is taken to be blocked on
- *  the newcomer itself — an interceptor after WA's awaiting a generation — and the newcomer supersedes it. */
-const RUN_WAIT_MS = 15_000;
-/** How long a newcomer waits for a run to arm: a hang detector past the longest retrieval a first sync can take. */
-const ARM_WAIT_MS = 600_000;
-
-/** The WA run in progress, from a generation's interceptor to its armed scan's last loop: `{ token, armed, done }`. */
-let currentRun = null;
-
-const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
-
-/** Waits out the run in progress, then starts one and returns its token. A run not armed within ARM_WAIT_MS, or still
- *  unfinished RUN_WAIT_MS after arming, is superseded. */
-async function takeRun() {
-    // `promise`, or undefined after `ms`; the timer is cleared whichever settles first.
-    const within = (promise, ms) => { let id; return Promise.race([promise, new Promise(r => { id = setTimeout(r, ms); })]).finally(() => clearTimeout(id)); };
-    while (currentRun) {
-        const prior = currentRun;
-        const armed = await within(prior.armed.promise.then(() => true), ARM_WAIT_MS);
-        const finished = armed && await within(prior.done.promise, RUN_WAIT_MS);
-        if (finished || currentRun !== prior) continue;
-        console.warn(`WorldsApart: the previous generation had not ${armed ? `finished its World Info scan ${RUN_WAIT_MS / 1000} s after WA armed it` : `armed within ${ARM_WAIT_MS / 1000} s`} — superseding it`);
+/** The WA run slot: one run at a time, from a generation's interceptor to its armed scan's last loop. */
+const runs = createRuns({
+    isGenerating,
+    nextToken: () => ++runState.scanToken,
+    onSupersede: why => {
+        // Never reached core's scan: aborted after WA's interceptor, or blocked on the newcomer; either way no scan was cut short.
+        if (why === 'unscanned') { console.info('WorldsApart: the previous generation never reached its World Info scan — superseding it'); return; }
+        console.warn(`WorldsApart: the previous generation had not ${why === 'unfinished' ? `finished its World Info scan ${RUN_WAIT_MS / 1000} s after it started` : `armed within ${ARM_WAIT_MS / 1000} s`} — superseding it`);
         toastr.warning(t`A new generation started while the previous one was still scanning World Info. WorldsApart moved to the new one, and the previous one fell back to SillyTavern's own World Info.`, 'WorldsApart', { timeOut: 15000 });
-        break;
-    }
-    const token = ++runState.scanToken;
-    currentRun = { token, armed: deferred(), done: deferred() };
-    return token;
-}
+    },
+});
 
 /** Ends the run `token` names, if it is still the current one, disarming it: no later scan ranks under an ended run. */
 function endRun(token) {
     if (runState.armedToken === token) runState.armedToken = null;
-    if (!currentRun || currentRun.token !== token) return;
-    currentRun.armed.resolve();
-    currentRun.done.resolve(true);
-    currentRun = null;
+    runs.end(token);
 }
 
 /** After selectAndActivate: an armed run lasts until its scan's last loop; one that did not arm ends now. */
 function settleRun(token) {
-    if (runState.armedToken === token) currentRun?.token === token && currentRun.armed.resolve();
+    if (runState.armedToken === token) runs.armed(token);
     else endRun(token);
 }
 
@@ -918,8 +899,9 @@ function settleRun(token) {
  *  generation, never a reader, so it is not taken. Quiet generations scan like visible ones; ST skips its dry runs. */
 async function intercept(chat, _maxContext, _abort, type) {
     const enabled = settings().enabled;
-    // Before anything is written: a waiting generation must not touch the state of the run it waits on.
-    const token = enabled ? await takeRun() : ++runState.scanToken;
+    // Before anything is written: a waiting generation must not touch the state of the run it waits on. A quiet generation
+    // never takes ST's lock, so a lock held now is another generation's.
+    const token = enabled ? await runs.take(type !== 'quiet' && isGenerating()) : ++runState.scanToken;
     runState.quietScan = type === 'quiet';
     // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
     runState.scanChat = chat.slice();
@@ -956,6 +938,8 @@ function onEntriesLoaded(loaded) {
     if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
 
+    // The armed run's scan has started: a newcomer now waits for it to finish rather than superseding it.
+    if (runState.waOwnsScan && !runState.generationIsDryRun && runState.armedToken !== null) runs.scanning(runState.armedToken);
     // Core's scan returns before any WORLDINFO_SCAN_DONE when it loads no entries, so the run it belongs to ends here.
     if (!entries.length && runState.waOwnsScan && !runState.generationIsDryRun) { endRun(runState.armedToken); runState.waOwnsScan = false; }
 
@@ -1733,7 +1717,7 @@ async function dryRun(verbose = false) {
     if (identity) console.log(`WorldsApart: ${identity}`);
 
     // Before the flags below, which the run it waits on would read.
-    const token = await takeRun();
+    const token = await runs.take();
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
     // This scan is not ST's, and nothing else clears the flag: GENERATION_ENDED never fires for a dry Generate.
@@ -2503,7 +2487,7 @@ async function initBody() {
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
     eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
     // A stopped generation is superseded: the interceptor's `abort` cannot be read, so the token carries the stop.
-    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; endRun(currentRun?.token); });
+    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; endRun(runs.current()); });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 
