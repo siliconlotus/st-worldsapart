@@ -190,12 +190,13 @@ export async function init(router) {
             if (!Array.isArray(collectionIds) || !searchText) {
                 return response.status(400).send({ error: 'collectionIds and searchText are required' });
             }
-            // Bounds, not validation: every collection id costs a full index load, and the query is forwarded to the embedder.
+            // A bound, not validation: every collection id costs a full index load.
             if (collectionIds.length > 64) {
                 return response.status(400).send({ error: 'too many collectionIds (max 64)' });
             }
-            if (typeof searchText !== 'string' || searchText.length > 65536) {
-                return response.status(400).send({ error: 'searchText must be a string of at most 65536 characters' });
+            // No length bound: the embedder's context is the limit, and its own error comes back as a 502.
+            if (typeof searchText !== 'string') {
+                return response.status(400).send({ error: 'searchText must be a string' });
             }
 
             // 422 and 502 are the provider's, never a version mismatch: the client falls back without reporting skew.
