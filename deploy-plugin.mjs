@@ -1,9 +1,9 @@
-// deploy-plugin.mjs — copies plugin/ into ST's /plugins/worlds-apart/ (a generated copy, never hand-edited), removes
-// top-level files the manifest no longer names, and enables server plugins in config.yaml. Restart ST afterwards.
+// deploy-plugin.mjs — writes ST's /plugins/worlds-apart/: the loader as index.js, which imports this install's plugin/server.js
+// at every ST start, and source.json naming this install. Removes the files an older copying deploy left, and enables server
+// plugins in config.yaml. Needed once per install, and again only when the loader changes; restart ST afterwards.
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
-import { PLUGIN_FILES, pluginFingerprint } from './plugin/fingerprint.mjs';
 import { stInstall } from './eval/lib/st-install.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
@@ -18,23 +18,26 @@ const PACKAGE_JSON = JSON.stringify({
     private: true,
 }, null, 4) + '\n';
 
+// Relative to the ST root when this install sits inside it, so moving the whole ST folder keeps the plugin pointed here.
+const rel = path.relative(ST.root, SRC);
+const install = rel.startsWith('..') || path.isAbsolute(rel) ? SRC : rel;
+const SOURCE_JSON = JSON.stringify({ install }, null, 4) + '\n';
+
 // Everything the deploy may leave behind; any other top-level file in DEST is stale by definition.
-const KEEP = new Set([...PLUGIN_FILES.map(([, to]) => to), 'package.json']);
+const KEEP = new Set(['index.js', 'package.json', 'source.json']);
 
 fs.mkdirSync(DEST, { recursive: true });
 
-for (const [from, to] of PLUGIN_FILES) {
-    const src = path.join(SRC, 'plugin', from);
-    const dst = path.join(DEST, to);
-    // tmp then rename, not a copy onto dst: ST may be loading it, and a torn file throws. Per file only, so a mid-loop failure leaves a mixed set.
-    const tmp = `${dst}.deploying`;
-    fs.copyFileSync(src, tmp);
-    fs.renameSync(tmp, dst);
-    console.log(`copied  ${path.relative(SRC, src)}  ->  plugins/worlds-apart/${to}`);
-}
-
-fs.writeFileSync(path.join(DEST, 'package.json'), PACKAGE_JSON);
-console.log('wrote    package.json');
+/** `text` to DEST/name by tmp then rename, never onto the file: ST may be loading it, and a torn file throws. */
+const write = (name, text) => {
+    const dst = path.join(DEST, name);
+    fs.writeFileSync(`${dst}.deploying`, text);
+    fs.renameSync(`${dst}.deploying`, dst);
+    console.log(`wrote    plugins/worlds-apart/${name}`);
+};
+write('index.js', fs.readFileSync(path.join(SRC, 'plugin', 'loader.js'), 'utf8'));
+write('package.json', PACKAGE_JSON);
+write('source.json', SOURCE_JSON);
 
 // Top-level files only, never directories: a node_modules is the user's to remove.
 for (const name of fs.readdirSync(DEST)) {
@@ -54,7 +57,7 @@ for (const name of fs.readdirSync(DEST)) {
         continue;
     }
     fs.rmSync(stale);
-    console.log(`removed  plugins/worlds-apart/${name}  (not in the manifest)`);
+    console.log(`removed  plugins/worlds-apart/${name}  (not part of the loader)`);
 }
 
 const configPath = path.join(ST.root, 'config.yaml');
@@ -80,5 +83,4 @@ if (cfg === null) {
     console.log('NOTE     enableServerPlugins not found in config.yaml — set it to true manually');
 }
 
-const fp = pluginFingerprint(...PLUGIN_FILES.map(([from]) => fs.readFileSync(path.join(SRC, 'plugin', from), 'utf8')));
-console.log(`\nDeployed to ${DEST}\nfingerprint ${fp} — the settings panel should show this once ST restarts.\nRestart SillyTavern for the plugin to reload.`);
+console.log(`\nThe plugin now loads WorldsApart from ${SRC}.\nRestart SillyTavern. From now on, updating the extension and restarting SillyTavern updates the plugin too.`);

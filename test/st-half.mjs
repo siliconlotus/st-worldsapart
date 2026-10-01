@@ -11,7 +11,7 @@ export const ST_HALF = [
     'st/lang-store.mjs',
 ];
 
-/** ST's SERVER half, a different coupling: server.js runs inside ST's node process and imports `../../src/`, which
- *  resolves from the DEPLOY location (/plugins/worlds-apart/), not from here — so it is not node-importable either.
- *  Apart from ST_HALF because i18n-check's tag lint is about what a user reads: server strings are not translated. */
+/** ST's SERVER half, a different coupling: server.js runs inside ST's node process and loads ST's src/ through fromST(), from
+ *  the root plugin/loader.js passes it, so it is not node-importable either. Apart from ST_HALF because i18n-check's tag lint
+ *  is about what a user reads: server strings are not translated. */
 export const ST_SERVER = ['plugin/server.js'];

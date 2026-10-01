@@ -1,42 +1,51 @@
-// server.js — WorldsApart server plugin (source); /plugins/worlds-apart/ is the generated copy, so edit here and
-// `node deploy-plugin.mjs`. Mounts at /api/plugins/worlds-apart; imports ST internals (src/vectors/*) by relative path.
+// server.js — WorldsApart server plugin, loaded from the extension install by plugin/loader.js (deployed as
+// /plugins/worlds-apart/index.js). Mounts at /api/plugins/worlds-apart; reaches ST's internals through fromST().
 
 import path from 'node:path';
 import fs from 'node:fs';
 import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
-import sanitize from 'sanitize-filename';
-import { LocalIndex } from 'vectra';
-import { getTransformersVector } from '../../src/vectors/embedding.js';
-import { getOllamaVector } from '../../src/vectors/ollama-vectors.js';
-import { getVllmVector } from '../../src/vectors/vllm-vectors.js';
-import { getOpenAIVector } from '../../src/vectors/openai-vectors.js';
-import { getCohereVector } from '../../src/vectors/cohere-vectors.js';
-import { getLlamaCppVector } from '../../src/vectors/llamacpp-vectors.js';
-import { getNomicAIVector } from '../../src/vectors/nomicai-vectors.js';
-import { getExtrasVector } from '../../src/vectors/extras-vectors.js';
-import { getMakerSuiteVector, getVertexVector } from '../../src/vectors/google-vectors.js';
-import { getConfigValue } from '../../src/util.js';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scoreCollection, poolEntries, selectTopK, admitCeiling } from './scoring.mjs';
-// Deployed flat beside this file from extension/ (fingerprint.mjs's manifest), so the server matches on the shipped matcher.
-import { BOUNDARY_MODES, MATCH_WINDOWS, WA_METADATA_KEY, countChatHits, dropTags } from './matcher.mjs';
-import { chatUser, createScanScope } from './smartkeys.mjs';
+import { BOUNDARY_MODES, MATCH_WINDOWS, WA_METADATA_KEY, countChatHits, dropTags } from '../extension/matcher.mjs';
+import { chatUser, createScanScope } from '../extension/smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
 
-// Deployed location: <root>/plugins/worlds-apart/index.js.
 const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
-// Walked, not counted: the same rule as eval/lib/st-install.mjs, which this cannot import — only PLUGIN_FILES deploys.
-// Falls back to two up, the deployed depth, when no config.yaml is reachable.
-const ST_ROOT = (() => {
+/** What the loader passed on this module's URL; absent when something imported server.js directly. */
+const PASSED = new URL(import.meta.url).searchParams;
+// Walked, as eval/lib/st-install.mjs walks, only when no loader passed the root.
+const ST_ROOT = PASSED.get('stRoot') ?? (() => {
     for (let d = PLUGIN_DIR; ; d = path.dirname(d)) {
         if (fs.existsSync(path.join(d, 'config.yaml'))) return d;
-        if (path.dirname(d) === d) return path.resolve(PLUGIN_DIR, '..', '..');
+        if (path.dirname(d) === d) throw new Error('server.js: no SillyTavern root passed by the loader and no config.yaml above this file');
     }
 })();
-// The deployed copy's own fingerprint; the extension compares it with the same hash over its source files.
-const readDeployed = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
-const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(([, deployed]) => readDeployed(deployed)));
+/** The install this was loaded from as source.json names it, and the deployed loader's version; null outside the loader. */
+const INSTALL = PASSED.get('install');
+const LOADER = Number(PASSED.get('loader')) || null;
+
+/** A module of SillyTavern's, by path from its root. Every ST import goes through here: st-boundary-check reads the calls. */
+const fromST = rel => import(pathToFileURL(path.join(ST_ROOT, rel)).href);
+/** A package from ST's node_modules, which this file, outside ST's tree under a relocated dataRoot, cannot resolve by name. */
+const stPackage = name => import(pathToFileURL(createRequire(path.join(ST_ROOT, 'package.json')).resolve(name)).href);
+
+const [
+    { default: sanitize }, { LocalIndex },
+    { getTransformersVector }, { getOllamaVector }, { getVllmVector }, { getOpenAIVector }, { getCohereVector },
+    { getLlamaCppVector }, { getNomicAIVector }, { getExtrasVector }, { getMakerSuiteVector, getVertexVector }, { getConfigValue },
+] = await Promise.all([
+    stPackage('sanitize-filename'), stPackage('vectra'),
+    fromST('src/vectors/embedding.js'), fromST('src/vectors/ollama-vectors.js'), fromST('src/vectors/vllm-vectors.js'),
+    fromST('src/vectors/openai-vectors.js'), fromST('src/vectors/cohere-vectors.js'), fromST('src/vectors/llamacpp-vectors.js'),
+    fromST('src/vectors/nomicai-vectors.js'), fromST('src/vectors/extras-vectors.js'), fromST('src/vectors/google-vectors.js'),
+    fromST('src/util.js'),
+]);
+
+// The files as this process loaded them; the browser hashes the same list as it serves them, and a mismatch means a restart is due.
+const readSource = f => { try { return fs.readFileSync(path.join(PLUGIN_DIR, f), 'utf8'); } catch { return ''; } };
+const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(readSource));
 
 export const info = {
     id: 'worlds-apart',
@@ -478,7 +487,9 @@ export async function init(router) {
     });
 
     router.post('/ping', (request, response) => {
-        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT });
+        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT, loader: LOADER, install: INSTALL,
+            // Where the deploy command for a per-user install lives: dataRoot may be relocated outside the ST root.
+            dataRoot: path.resolve(ST_ROOT, String(getConfigValue('dataRoot', './data'))) });
     });
 
     console.log('[WorldsApart] server plugin ready at /api/plugins/worlds-apart');

@@ -13,7 +13,8 @@ import {
     extension_prompt_types,
     name1,
 } from '../../../../script.js';
-import { extension_settings, getContext } from '../../../extensions.js';
+import { extension_settings, extensionTypes, getContext } from '../../../extensions.js';
+import { getCurrentUserHandle, isAdmin } from '../../../user.js';
 import { t } from '../../../i18n.js';
 
 import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_max_recursion_steps, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
@@ -22,7 +23,7 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { getStringHash, escapeHtml, getCharaFilename } from '../../../utils.js';
-import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
+import { LOADER_VERSION, pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import { admitCeiling } from './plugin/scoring.mjs';
 import * as query from './extension/query.mjs';
 import * as entity from './extension/entity.mjs';
@@ -177,7 +178,17 @@ async function hasPlugin() {
     try {
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir: EXT_DIR }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
         runState.pluginAvailable = response.ok;
-        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
+        if (response.ok) {
+            // Each field absent from an older plugin, whose copy predates the loader: `loader` null is what asks for the redeploy.
+            try {
+                const d = await response.json();
+                runState.pluginRoot = d?.root ?? null;
+                runState.pluginFP = d?.fingerprint ?? null;
+                runState.pluginLoader = Number(d?.loader) || null;
+                runState.pluginInstall = d?.install ?? null;
+                runState.pluginDataRoot = d?.dataRoot ?? null;
+            } catch { /* no JSON body: nothing more is known */ }
+        }
     } catch {
         runState.pluginAvailable = false;
     }
@@ -186,14 +197,14 @@ async function hasPlugin() {
     return runState.pluginAvailable;
 }
 
-/** Fingerprint of this extension's source plugin files, hashed exactly as the plugin hashes its deployed copy; cached. */
+/** Fingerprint of the plugin files as this page serves them, hashed exactly as the server hashes what it loaded; cached. */
 async function computeSourceFingerprint() {
     if (runState.sourceFP !== null) return runState.sourceFP;
     try {
         const texts = await Promise.all(
             // `r.ok` checked, or a 404 hashes the error page: a fetch only rejects at the network layer, so a
             // PLUGIN_FILES entry naming a missing file would fingerprint as drift for ever.
-            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
+            PLUGIN_FILES.map(src => fetch(new URL(`./plugin/${src}`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
                 .then(r => { if (!r.ok) throw new Error(`${src}: ${r.status}`); return r.text(); })),
         );
         runState.sourceFP = pluginFingerprint(...texts);
@@ -201,17 +212,55 @@ async function computeSourceFingerprint() {
     return runState.sourceFP;
 }
 
-/** The deployed plugin is not the source this extension ships. A null fingerprint — a plugin predating the field, or a
- *  source file that would not load — reads as no drift: the check cannot tell, and a false alarm is worse. */
+/** The server runs other plugin files than this page serves. A null fingerprint — a source file that would not load — reads
+ *  as no drift: the check cannot tell, and a false alarm is worse. */
 const pluginDrifted = () => Boolean(runState.pluginAvailable && runState.sourceFP && runState.pluginFP !== runState.sourceFP);
 
-/** Fills the plugin setup box with copyable install and redeploy commands, and the drift banner. */
+/** This install as the deploy records it: a per-user copy lives under its user's data folder, a global one under public/. */
+const IS_LOCAL = () => extensionTypes[`third-party/${EXT_DIR}`] === 'local';
+const userHandle = () => getCurrentUserHandle();
+
+/** Whether the server loads this copy. Unknown — a plugin predating the field — reads as yes, as an unknown drift does. */
+const pluginIsMine = () => {
+    const at = String(runState.pluginInstall ?? '').replace(/\\/g, '/');
+    if (!at) return true;
+    return at.endsWith(IS_LOCAL() ? `/${userHandle()}/extensions/${EXT_DIR}` : `public/scripts/extensions/third-party/${EXT_DIR}`);
+};
+
+/** The command that points the plugin at this install: absolute once the plugin has reported where ST and its data live. */
+function deployCommand() {
+    const root = runState.pluginRoot?.replace(/\\/g, '/');
+    const data = runState.pluginDataRoot?.replace(/\\/g, '/');
+    const script = IS_LOCAL()
+        ? `${data ?? 'data'}/${userHandle()}/extensions/${EXT_DIR}/deploy-plugin.mjs`
+        : `${root ? `${root}/` : ''}public/scripts/extensions/third-party/${EXT_DIR}/deploy-plugin.mjs`;
+    // Quoted: a folder name may hold a space.
+    return `node "${script}"`;
+}
+
+/** What the plugin's state asks of the person reading: `text` for the banner and the startup toast, and `cmd` true where an
+ *  admin's fix is the deploy command. Null when nothing is due; an absent plugin is renderPluginSetup's install box. A user who
+ *  is not an admin is told to ask one, since the fix is a server restart or a command they cannot run. */
+function pluginAdvice() {
+    if (!runState.pluginAvailable) return null;
+    const admin = isAdmin();
+    if ((runState.pluginLoader ?? 0) < LOADER_VERSION) {
+        return admin
+            ? { text: t`⚠ The server plugin needs one more deploy, to switch it to loading WorldsApart directly. After that, restarting SillyTavern is all an update needs:`, cmd: true }
+            : { text: t`⚠ The server plugin is out of date. Ask your SillyTavern admin to update it.` };
+    }
+    if (!pluginDrifted()) return null;
+    if (!admin) return { text: t`⚠ The server plugin runs a different version of WorldsApart. Ask your SillyTavern admin to update it and restart SillyTavern.` };
+    return pluginIsMine()
+        ? { text: t`⚠ WorldsApart has changed since SillyTavern started, and the server plugin still runs the old version. Restart SillyTavern.` }
+        : { text: t`⚠ The server plugin loads WorldsApart from ${runState.pluginInstall}, a different copy from this one. Deploy from this copy to switch it, then restart SillyTavern:`, cmd: true };
+}
+
+/** Fills the plugin setup box and the drift banner from pluginAdvice. */
 function renderPluginSetup() {
     const box = $('#wa_plugin_setup');
     if (!box.length) return;
-    const rel = `public/scripts/extensions/third-party/${EXT_DIR}/deploy-plugin.mjs`;
-    // Quoted either way: a folder name may hold a space.
-    const deployCmd = runState.pluginRoot ? `node "${runState.pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node "${rel}"`;
+    const deployCmd = deployCommand();
     const row = (cmd) => {
         const r = $('<div class="flex-container alignItemsCenter flexnowrap" style="gap:6px;margin:3px 0;"></div>');
         const code = $('<code style="flex:1;overflow-x:auto;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--black30a,rgba(0,0,0,0.2));"></code>').text(cmd);
@@ -231,30 +280,32 @@ function renderPluginSetup() {
     box.empty();
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     if (runState.pluginAvailable) {
-        const stale = pluginDrifted();
-        const warn = t`⚠ Server plugin out of date — the deployed copy differs from this extension's source. Redeploy and restart:`;
-        // One box and one command for both facts: a route that failed this load, in red, above the drift it comes with.
+        const advice = pluginAdvice();
+        // One box for both facts: a route that failed this load, in red, above whatever else is due.
         const lines = [];
         const routes = [...runState.pluginFailures].join(', ');
         if (routes) lines.push(line(t`⚠ Server plugin has demonstrated incompatibility with this extension version; WA is falling back to running without it wherever it fails (${routes}).`, RED));
-        if (stale) lines.push(line(warn, AMBER));
-        if (lines.length) alert.append(banner(...lines, row(deployCmd)));
-        if (stale) {
-            box.append(line(warn, AMBER));
-            box.append(row(deployCmd));
+        if (advice) lines.push(line(advice.text, AMBER));
+        if (lines.length) alert.append(banner(...lines, ...(advice?.cmd ? [row(deployCmd)] : [])));
+        if (advice) {
+            box.append(line(advice.text, AMBER));
+            if (advice.cmd) box.append(row(deployCmd));
             return;
         }
         box.append($('<div style="color:var(--active,#7ac);"></div>').text(runState.sourceFP ? t`✓ Server plugin active — up to date (build ${runState.sourceFP}).` : t`✓ Server plugin active.`));
-        box.append($('<div style="margin-top:3px;"></div>').text(t`After editing plugin code, redeploy and restart SillyTavern:`));
-        box.append(row(deployCmd));
+        if (runState.pluginInstall) box.append($('<div style="margin-top:3px;"></div>').text(t`It loads WorldsApart from ${runState.pluginInstall}, so updating WorldsApart and restarting SillyTavern updates it.`));
         return;
     }
     const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
     alert.append(banner(line(absent, AMBER)));
+    if (!isAdmin()) {
+        box.append($('<div></div>').text(t`${absent} Ask your SillyTavern admin to install it.`));
+        return;
+    }
     box.append($('<div></div>').text(t`${absent} To install:`));
     box.append($('<div style="margin-top:3px;"></div>').text(t`1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):`));
     box.append(row(deployCmd));
-    box.append($('<div style="margin-top:3px;"></div>').text(t`2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.`));
+    box.append($('<div style="margin-top:3px;"></div>').text(t`2. Restart SillyTavern. From then on, updating WorldsApart and restarting SillyTavern updates the plugin too.`));
 }
 
 /** Multi-collection query through the plugin's mean-centered search, or the no-plugin path (ST's own /api/vector)
@@ -2458,7 +2509,8 @@ async function initBody() {
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();
         // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
-        if (pluginDrifted()) toastr.warning(t`Server plugin is out of date. Redeploy it and restart SillyTavern.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+        const advice = pluginAdvice();
+        if (advice) toastr.warning(advice.text, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
     });
     bind('#wa_debug_log', 'debugLog', 'checked');
     document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {

@@ -5,6 +5,7 @@ import { markExcerptText } from '../extension/matcher.mjs';
 import { DOMPurify } from '../../../../../lib.js';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
+import { isAdmin } from '../../../../user.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from '../extension/sort.mjs';
 import { runState } from '../extension/state.mjs';
 
@@ -564,6 +565,12 @@ export function pluginFallback(route, cause) {
     if (runState.pluginFailures.has(route)) return;
     const first = !runState.pluginFailures.size;
     runState.pluginFailures.add(route);
-    if (first) toastr.warning(t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Redeploy the plugin and restart SillyTavern.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+    if (first) {
+        // The fix is a restart or a deploy, so a user who is not an admin is told who can make it.
+        toastr.warning(isAdmin()
+            ? t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Restart SillyTavern, and if this persists, redeploy the plugin from WorldsApart's settings.`
+            : t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Ask your SillyTavern admin to update the server plugin.`,
+        'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+    }
     document.dispatchEvent(new CustomEvent('wa-plugin-fallback'));   // a new route repaints the settings bar's list
 }

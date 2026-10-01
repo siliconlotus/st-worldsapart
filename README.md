@@ -55,22 +55,20 @@ node data/default-user/extensions/st-worldsapart/deploy-plugin.mjs
 (if you have multi-user enabled and are using a different account, replace `default-user` with the user handle.
 
 This does two things:
-- It copies the plugin files from the extension install into the plugins/ directory
+- It puts a small loader in the plugins/ directory, which loads the plugin straight from the WorldsApart install you ran it from
 - It edits your config.yaml to set `enableServerPlugins: true`, because plugins are off by default.
 (If you would like to verify that that's true, see [deploy-plugin.mjs](deploy-plugin.mjs))
 
 Then restart SillyTavern.
 
 On restart the server console prints `[WorldsApart] server plugin ready`, and WA settings show
-**✓ Server plugin active** — with a copyable redeploy command that's now a full absolute path (the
-running plugin reports the SillyTavern root, so you can run it from any terminal, not just the ST
-folder).
+**✓ Server plugin active**, with the WorldsApart install it loads.
 
-**After changing anything in `plugin/`**, re-run the deploy command and restart — no version to bump.
-The extension fingerprints its source copies of those files and the running plugin fingerprints its
-deployed copies (`/ping`); if they differ, WA settings
-shows **⚠ Server plugin out of date — redeploy**. The check fires only when those files actually
-changed, so unrelated extension updates never trigger it.
+**You only deploy once.** When WorldsApart updates, restart SillyTavern and the plugin runs the new
+version; until you do, WA settings show a warning. Because the plugin runs the code in the install you
+deployed from, an update to that install changes the server's code on the next restart. If you deployed
+before this version, WA settings will ask you to deploy one more time. On a SillyTavern with user accounts,
+users who are not admins are asked to contact the admin instead.
 
 ---
 

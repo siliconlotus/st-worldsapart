@@ -139,7 +139,7 @@ matched expression is worth goes in the second.
 Every module under `extension/` and `plugin/` is ST-free and node-importable, so the evals exercise the
 shipped code. The ST-coupled files are `st/` plus `worldsapart.js`, which is the ST half proper and sits
 at the root because `manifest.json` names it; `plugin/server.js` is coupled to ST's SERVER half
-(`../../src/`) instead, on a path that resolves from the deploy location, so it is not node-importable
+instead, loading ST's `src/` through `fromST()` from the root the loader passes it, so it is not node-importable
 either. `test/st-half.mjs` declares both lists; `st-boundary-check.mjs` fails when anything else reaches
 past the repo root, and when a pure module imports the ST half. Settings and ST globals are injected by
 the caller, never imported; `state.mjs` binds ST's store rather than importing it, so the harness can
@@ -182,17 +182,21 @@ printable delimiter can collide with content, so U+241F is not it either.
 
 Defects in ST core itself go in `upstream-st.md`, in the SillyTavern root — not in this repo.
 
-## Plugin changes need a redeploy
+## Plugin changes need a restart
 
-Editing anything in `plugin/` requires `node deploy-plugin.mjs` and an ST restart. `/plugins/worlds-apart/`
-is a generated copy; the settings panel shows a drift banner until the fingerprints match, and the
-deploy prints the fingerprint.
+ST's `/plugins/worlds-apart/` holds only the loader: `plugin/loader.js` as `index.js`, and `source.json` naming the
+install `deploy-plugin.mjs` ran from. The loader imports that install's `plugin/server.js` at every ST start, so editing
+anything in `plugin/`, or `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`, which the server imports from
+`../extension/`, takes an ST restart and no deploy. The settings panel shows a drift banner while the server runs other
+files than the browser serves.
 
-**`PLUGIN_FILES` is the whole contents, not just what gets copied.** The deploy removes any top-level
-file the manifest no longer names, so retiring a plugin module is one edit to `fingerprint.mjs`.
-Directories are left alone.
+**A deploy is needed once per install, and again when `loader.js` changes.** Bump `LOADER_VERSION` in both `loader.js`
+and `fingerprint.mjs` with any change to the loader: `/ping` reports the deployed one, an older one asks for the deploy,
+and `fingerprint-check.mjs` fails when the two differ. The loader is deployed alone, so it may import `node:*` only.
 
-**The matcher deploys into the plugin, so editing `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`
-needs a redeploy too.** The manifest names them with `../extension/` paths and copies them FLAT beside
-`index.js`: they may import each other only by bare `./name`, and nothing else in `extension/`.
-`test/plugin-deploy-check.mjs` is what fails when that breaks — the server would otherwise fail at load.
+**`PLUGIN_FILES` is what both sides hash.** List every file the server loads from the install; one left out can change
+without the banner noticing.
+
+**`server.js` reaches ST through `fromST()` and ST's packages through `stPackage()`**, from the root the loader passes
+on its URL: it is not in `plugins/`, so a relative `../../src` path would point nowhere. `st-boundary-check.mjs` reads
+the `fromST` calls as the server's ST imports.

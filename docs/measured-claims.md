@@ -152,7 +152,7 @@ does not carry "rare in one corpus" as a reason.
  under Qwen3-8B (text and properNouns compensating); the signal ORDER inverts across models — bge-m3:
  text +0.794 / cosine +0.465 / keys −0.006 (8924 rows, 69 scenes); Qwen3-8B-4bit: cosine +0.762 /
  text +0.567 / keys +0.137 (6051 rows, 102 scenes). — `worldsapart.js init`;
- `test/relevance-model-check.mjs`; `CLAUDE.md Plugin changes need a redeploy`.
+ `test/relevance-model-check.mjs`; `CLAUDE.md Plugin changes need a restart`.
 
 ## F — Stages 3–4: the relevance model
 

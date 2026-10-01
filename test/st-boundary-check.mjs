@@ -19,11 +19,14 @@ const files = ['extension', 'st', 'plugin'].flatMap(d => walk(join(ROOT, d))).co
 
 // A relative specifier that resolves outside the repo is an ST import; a bare one would be a node_modules dependency.
 const IMPORT = /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s*['"](\.[^'"]*)['"]/g;
+// server.js loads ST at runtime from the root its loader passes, through fromST(): those calls are its ST imports.
+const RUNTIME_ST = /\bfromST\(\s*['"]([^'"]+)['"]/g;
 const escapes = [];
 for (const file of files) {
     const src = readFileSync(file, 'utf8');
     const outside = [...src.matchAll(IMPORT)].map(m => m[1])
-        .filter(spec => relative(ROOT, resolve(dirname(file), spec)).startsWith('..'));
+        .filter(spec => relative(ROOT, resolve(dirname(file), spec)).startsWith('..'))
+        .concat([...src.matchAll(RUNTIME_ST)].map(m => `ST:${m[1]}`));
     if (outside.length) escapes.push([relative(ROOT, file), outside]);
 }
 

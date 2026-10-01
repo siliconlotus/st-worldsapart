@@ -1,26 +1,23 @@
-// The real deploy-plugin.mjs, run into a sandbox root: what it copies, what its sweep removes and leaves, and that the
-// FLAT result stands alone in node. A cross-tree import added to the matcher breaks the server at load, not here.
-import { createScanScope } from '../extension/smartkeys.mjs';
+// The real deploy-plugin.mjs, run into a sandbox root: it writes the loader, names this install in source.json, and sweeps
+// what an older copying deploy left. Loading through the loader is embed-sources-check's and plugin-routes-check's.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { PLUGIN_FILES } from '../plugin/fingerprint.mjs';
-import { countChatHits } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 import { deploySandbox } from './plugin-sandbox.mjs';
 
-const source = new URL('../plugin/', import.meta.url);
+const REPO = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 const lstat = p => { try { return fs.lstatSync(p); } catch { return null; } };
 
-// A previous deploy's leftovers: a retired module, a failed run's temp file, a link to nothing, and a directory.
+// A copying deploy's leftovers: its flat modules, a failed run's temp file, a link to nothing, and a directory.
 const box = deploySandbox({
     prepare: root => {
         const dest = path.join(root, 'plugins', 'worlds-apart');
         fs.mkdirSync(path.join(dest, 'node_modules'), { recursive: true });
         fs.writeFileSync(path.join(dest, 'node_modules', 'kept.js'), '');
-        fs.writeFileSync(path.join(dest, 'retired.mjs'), 'export {};\n');
+        for (const flat of ['scoring.mjs', 'matcher.mjs', 'smartkeys.mjs', 'fingerprint.mjs']) fs.writeFileSync(path.join(dest, flat), 'export {};\n');
         fs.writeFileSync(path.join(dest, 'matcher.mjs.deploying'), 'half a file');
-        fs.writeFileSync(path.join(dest, 'index.js'), '// an older deploy\n');
+        fs.writeFileSync(path.join(dest, 'index.js'), '// an older, copied server.js\n');
         fs.symlinkSync(path.join(root, 'nowhere.mjs'), path.join(dest, 'dangling.mjs'));
     },
 });
@@ -28,34 +25,26 @@ const at = name => path.join(box.dir, name);
 try {
     eq(box.run.status, 0, `the deploy ran (${box.run.stderr.trim() || 'no stderr'})`);
 
-    for (const [from, to] of PLUGIN_FILES) {
-        eq(fs.readFileSync(at(to), 'utf8') === fs.readFileSync(fileURLToPath(new URL(from, source)), 'utf8'), true, `${to} is a byte copy of ${from}`);
-    }
-    eq(JSON.parse(fs.readFileSync(at('package.json'), 'utf8')).type, 'module', 'package.json marks the flat copy as ESM');
+    eq(fs.readFileSync(at('index.js'), 'utf8') === fs.readFileSync(path.join(REPO, 'plugin', 'loader.js'), 'utf8'), true, 'index.js is a byte copy of the loader');
+    eq(JSON.parse(fs.readFileSync(at('package.json'), 'utf8')).type, 'module', 'package.json marks the loader as ESM');
+    const { install } = JSON.parse(fs.readFileSync(at('source.json'), 'utf8'));
+    eq(path.resolve(box.root, install), REPO, 'source.json names the install the deploy ran from');
+    eq(path.isAbsolute(install), true, '...absolute, since this one sits outside the sandbox root');
 
-    eq(lstat(at('retired.mjs')), null, 'the sweep removes a file the manifest no longer names');
-    eq(lstat(at('matcher.mjs.deploying')), null, "a failed run's temp file is taken over by the next run's copy and rename");
-    eq(lstat(at('dangling.mjs')), null, 'the sweep removes a link to nothing, which has no stat to read');
+    for (const flat of ['scoring.mjs', 'matcher.mjs', 'smartkeys.mjs', 'fingerprint.mjs']) eq(lstat(at(flat)), null, `the sweep removes the copied ${flat}`);
+    eq(lstat(at('matcher.mjs.deploying')), null, "and a failed run's temp file");
+    eq(lstat(at('dangling.mjs')), null, 'and a link to nothing, which has no stat to read');
     eq(fs.existsSync(at('node_modules/kept.js')), true, '...but leaves a directory, and what is in it, alone');
-    const expected = new Set([...PLUGIN_FILES.map(([, to]) => to), 'package.json', 'node_modules']);
-    eq(fs.readdirSync(box.dir).filter(n => !expected.has(n)).join(', '), '', 'nothing else is left beside the manifest');
+    const expected = new Set(['index.js', 'package.json', 'source.json', 'node_modules']);
+    eq(fs.readdirSync(box.dir).filter(n => !expected.has(n)).join(', '), '', 'nothing else is left beside the loader');
 
-    // index.js imports ST internals that exist only in an install; everything else must load with nothing around it.
-    for (const [, to] of PLUGIN_FILES) {
-        if (to === 'index.js' || !/\.(mjs|js)$/.test(to)) continue;
-        await import(pathToFileURL(at(to)).href);
-    }
-    console.log(`ok   every deployed module resolves flat (${PLUGIN_FILES.length - 1} of ${PLUGIN_FILES.length}; index.js needs the install)`);
-
-    // /scan-chats calls countChatHits off the deployed copy, so the deployed one must answer as the source does.
-    const deployed = await import(pathToFileURL(at('matcher.mjs')).href);
-    const msgs = ['The copper pipe burst', 'copper, but no plumbing', 'Colonel Vasquez called', 'nothing here'];
-    const keys = ['copper', '? copper pipe', '? =cop', '/vasqu[ei]z/i'];
-    const here = countChatHits(keys, msgs, { scope: createScanScope() }), there = deployed.countChatHits(keys, msgs, { scope: createScanScope() });
-    eq(there.messages, here.messages, 'the deployed matcher counts the same messages');
-    for (const k of keys) eq(there.messagesWith.get(k), here.messagesWith.get(k), `...and the same hits for ${k}`);
-    eq(here.messagesWith.get('? =cop'), 0, 'and a `=` term is live server-side: it rejects "copper" where a plain term would hit');
-    console.log('ok   the server scans chats through the shipped matcher, not a copy of it');
+    // Without source.json the loader must still import, exporting a plugin that registers nothing, or ST's loader would throw.
+    fs.rmSync(at('source.json'));
+    const quiet = console.error;
+    console.error = () => {};
+    let bare;
+    try { bare = await import(`${pathToFileURL(at('index.js')).href}?nosource`); } finally { console.error = quiet; }
+    eq(typeof bare.default.init === 'function' && bare.EMBED_SOURCES.length === 0, true, 'a loader with no source.json loads and registers nothing');
 } finally {
     box.cleanup();
 }

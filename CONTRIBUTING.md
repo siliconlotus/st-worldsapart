@@ -51,9 +51,9 @@ same PR. Design discussion belongs in an issue; a doc carries the outcome, not t
 strings use the `t` tag, one whole sentence per template so a translator can reorder it.
 `test/i18n-check.mjs` fails otherwise. Console output and slash-command help are not translated.
 
-**If you touch `plugin/`, or `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`,** run
-`node deploy-plugin.mjs` and restart SillyTavern — those deploy into the server plugin, and without a
-redeploy you are testing the old copy. The settings panel says so when they have drifted.
+**If you touch `plugin/`, or `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`,** restart SillyTavern — the
+server plugin loads them from your checkout at startup, and until a restart you are testing the old code. The
+settings panel says so when they have drifted. Run `node deploy-plugin.mjs` once, so the plugin loads your checkout.
 
 ## Sending graded scenes
 

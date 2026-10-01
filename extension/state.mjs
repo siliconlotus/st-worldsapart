@@ -108,8 +108,11 @@ export const runState = {
     generationIsDryRun: false,    // true while ST's own dry-run generation is in flight
     pluginAvailable: null,        // did the server plugin answer /ping
     pluginRoot: null,             // absolute ST root from /ping
-    pluginFP: null,               // fingerprint the deployed plugin reports
-    sourceFP: null,               // fingerprint of this extension's source plugin files
+    pluginFP: null,               // fingerprint of the plugin files the server loaded, as /ping reports it
+    pluginLoader: null,           // the deployed loader's version; null for a plugin copied before the loader
+    pluginInstall: null,          // the install the server loads, as source.json names it
+    pluginDataRoot: null,         // ST's absolute data root, for a per-user install's deploy command
+    sourceFP: null,               // fingerprint of the plugin files as this page serves them
     pluginFailures: new Set(),    // plugin routes that failed this load, or answered without a field the extension reads
     noCosineWarned: false,        // has the cosine-free retrieval warning been printed this load
     lastLayoutOrder: [],          // the last scan's LAYOUT order, pre-cut — what the caps take a prefix of; the capture's population
