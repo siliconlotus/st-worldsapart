@@ -397,9 +397,7 @@ const gradesOnScale = root => popup => {
     if (!bad.length) return true;
     bad[0].scrollIntoView({ block: 'center' });
     bad[0].focus();
-    toastr.warning(bad.length === 1
-        ? t`${bad.length} grade is not a whole number from 0 to ${GRADE_SCALE}. Fix it, or clear it to leave the row ungraded.`
-        : t`${bad.length} grades are not whole numbers from 0 to ${GRADE_SCALE}. Fix them, or clear them to leave the rows ungraded.`, 'WorldsApart');
+    toastr.warning(t`Grades must be a whole number between 0 and ${GRADE_SCALE}, not ${String(bad[0].value).trim()}.`, 'WorldsApart');
     return false;
 };
 

@@ -233,37 +233,38 @@ const pluginIsMine = () => {
     return at.endsWith(IS_LOCAL() ? `/${userHandle()}/extensions/${EXT_DIR}` : `public/scripts/extensions/third-party/${EXT_DIR}`);
 };
 
-/** The command that points the plugin at this install: absolute once the plugin has reported where ST and its data live. */
-function deployCommand() {
+/** The folder the browser's WorldsApart is served from: absolute once the plugin has reported where ST and its data live. */
+function installDir() {
     const root = runState.pluginRoot?.replace(/\\/g, '/');
     const data = runState.pluginDataRoot?.replace(/\\/g, '/');
-    const script = IS_LOCAL()
-        ? `${data ?? 'data'}/${userHandle()}/extensions/${EXT_DIR}/deploy-plugin.mjs`
-        : `${root ? `${root}/` : ''}public/scripts/extensions/third-party/${EXT_DIR}/deploy-plugin.mjs`;
-    // Quoted: a folder name may hold a space.
-    return `node "${script}"`;
+    return IS_LOCAL()
+        ? `${data ?? 'data'}/${userHandle()}/extensions/${EXT_DIR}`
+        : `${root ? `${root}/` : ''}public/scripts/extensions/third-party/${EXT_DIR}`;
 }
 
-/** What the plugin's state asks of the person reading: `text` for the banner and the startup toast, and `cmd` true where an
- *  admin's fix is the deploy command; `panelOnly` keeps it out of the startup toast. Null when nothing is due; an absent plugin is renderPluginSetup's install box. A user who
- *  is not an admin is told to ask whoever runs the server, since the fix is a restart or a command run there. */
+/** The command that points the plugin at installDir. Quoted: a folder name may hold a space. */
+const deployCommand = () => `node "${installDir()}/deploy-plugin.mjs"`;
+
+/** What the plugin's state asks of the person reading: `text` is the remedy, for the banner and the startup toast; `why` the cause,
+ *  for its tooltip; `cmd` true where an admin's fix is the deploy command; `panelOnly` keeps it out of the startup toast. Null when
+ *  nothing is due; an absent plugin is renderPluginSetup's install box. A user who is not an admin gets one remedy for every cause. */
 function pluginAdvice() {
     if (!runState.pluginAvailable) return null;
-    const admin = isAdmin();
-    if ((runState.pluginLoader ?? 0) < LOADER_VERSION) {
-        return admin
-            ? { text: t`⚠ The server plugin needs redeploying. Run this, then restart SillyTavern:`, cmd: true }
-            : { text: t`⚠ The server plugin is out of date. Ask whoever runs this SillyTavern server to update it.` };
-    }
+    let why, remedy = 'deploy';
+    if ((runState.pluginLoader ?? 0) < LOADER_VERSION) why = t`The deployed plugin loader is from an older version of WorldsApart.`;
     // Whatever the versions: the copy this user can update is not the one whose files run.
-    if (isShadowing()) {
+    else if (isShadowing()) {
         return { text: t`⚠ WorldsApart is installed in both "all users" and "just for me" modes. This is likely to cause unexpected behavior due to SillyTavern load precedence; we recommend removing the user copy.`, panelOnly: true };
     }
-    if (!pluginDrifted()) return null;
-    if (!admin) return { text: t`⚠ The server plugin runs a different version of WorldsApart. Ask whoever runs this SillyTavern server to update it and restart SillyTavern.` };
-    return pluginIsMine()
-        ? { text: t`⚠ WorldsApart has changed since SillyTavern started, and the server plugin still runs the old version. Restart SillyTavern.` }
-        : { text: t`⚠ The server plugin loads WorldsApart from ${String(runState.pluginInstall).replace(/\\/g, '/')}, a different copy from this one. Deploy from this copy to switch it, then restart SillyTavern:`, cmd: true };
+    else if (!pluginDrifted()) return null;
+    else if (pluginIsMine()) { why = t`The server plugin loads its code when SillyTavern starts, and WorldsApart has changed since.`; remedy = 'restart'; }
+    else { why = t`SillyTavern runs the server plugin from one copy and the extension from the other, so the two can disagree.`; remedy = 'remove'; }
+    if (!isAdmin()) return { text: t`⚠ The server plugin is out of date. Ask whoever runs this SillyTavern server to update it.`, why };
+    if (remedy === 'restart') return { text: t`⚠ WorldsApart has changed since SillyTavern started. Restart SillyTavern.`, why };
+    if (remedy === 'remove') {
+        return { text: t`⚠ WorldsApart is also installed at ${String(runState.pluginInstall).replace(/\\/g, '/')}, and the server plugin runs from there. Remove that copy, then restart SillyTavern.`, why };
+    }
+    return { text: t`⚠ The server plugin needs redeploying. Run this, then restart SillyTavern:`, why, cmd: true };
 }
 
 /** Fills the plugin setup box and the drift banner from pluginAdvice. */
@@ -286,7 +287,8 @@ function renderPluginSetup() {
     // Top of the drawer, so neither state needs the setup box open to be seen.
     const AMBER = 'var(--golden, #e0a86c)', RED = '#e06c6c';
     const banner = (...children) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>').append(...children);
-    const line = (text, colour) => $(`<div style="color:${colour};"></div>`).text(text);
+    const line = (text, colour, why) => $(`<div style="color:${colour};"></div>`).text(text)
+        .append(why ? [' ', $('<span class="fa-solid fa-circle-question note-link-span"></span>').attr('title', why)] : []);
     box.empty();
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     // With accounts on, a per-user copy is one of several the server plugin can load, each updated on its own.
@@ -299,10 +301,10 @@ function renderPluginSetup() {
         const lines = [];
         const routes = [...runState.pluginFailures].join(', ');
         if (routes) lines.push(line(t`⚠ Server plugin has demonstrated incompatibility with this extension version; WA is falling back to running without it wherever it fails (${routes}).`, RED));
-        if (advice) lines.push(line(advice.text, AMBER));
+        if (advice) lines.push(line(advice.text, AMBER, advice.why));
         if (lines.length) alert.append(banner(...lines, ...(advice?.cmd ? [row(deployCmd)] : [])));
         if (advice) {
-            box.append(line(advice.text, AMBER));
+            box.append(line(advice.text, AMBER, advice.why));
             if (advice.cmd) box.append(row(deployCmd));
             return;
         }
