@@ -222,6 +222,11 @@ const IS_LOCAL = () => extensionTypes[`third-party/${EXT_DIR}`] === 'local';
 const userHandle = () => getCurrentUserHandle();
 
 /** Whether the server loads this copy. Unknown — a plugin predating the field — reads as yes, as an unknown drift does. */
+/** This user has a copy of the folder name installed for all users: ST lists and updates theirs but serves the shared copy's files,
+ *  static public/ being mounted ahead of the per-user route. Read off `install` too: a shared copy that old may predate `shared`. */
+const isShadowing = () => IS_LOCAL() && (runState.pluginShared
+    || String(runState.pluginInstall ?? '').replace(/\\/g, '/').endsWith(`public/scripts/extensions/third-party/${EXT_DIR}`));
+
 const pluginIsMine = () => {
     const at = String(runState.pluginInstall ?? '').replace(/\\/g, '/');
     if (!at) return true;
@@ -250,9 +255,9 @@ function pluginAdvice() {
             ? { text: t`⚠ The server plugin needs redeploying. Run this, then restart SillyTavern:`, cmd: true }
             : { text: t`⚠ The server plugin is out of date. Ask whoever runs this SillyTavern server to update it.` };
     }
-    // A per-user copy hides the shared one from its user, whatever the versions: ST lists the user's copy alone.
-    if (IS_LOCAL() && runState.pluginShared) {
-        return { text: t`⚠ Your own copy of WorldsApart hides the one installed for all users, so it is not updated with it or with the server plugin. Delete your copy from the Extensions panel to use the shared one.`, panelOnly: true };
+    // Whatever the versions: the copy this user can update is not the one whose files run.
+    if (isShadowing()) {
+        return { text: t`⚠ WorldsApart is installed in both "all users" and "just for me" modes. This is likely to cause unexpected behavior due to SillyTavern load precedence; we recommend removing the user copy.`, panelOnly: true };
     }
     if (!pluginDrifted()) return null;
     if (!admin) return { text: t`⚠ The server plugin runs a different version of WorldsApart. Ask whoever runs this SillyTavern server to update it and restart SillyTavern.` };
@@ -285,7 +290,7 @@ function renderPluginSetup() {
     box.empty();
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     // With accounts on, a per-user copy is one of several the server plugin can load, each updated on its own.
-    if (accountsEnabled && IS_LOCAL() && isAdmin() && !runState.pluginShared) {
+    if (accountsEnabled && IS_LOCAL() && isAdmin() && !isShadowing()) {
         box.append($('<div style="margin-bottom:3px;"></div>').text(t`With user accounts on, install WorldsApart for all users instead of per user: the server plugin and every user then share one copy to update.`));
     }
     if (runState.pluginAvailable) {

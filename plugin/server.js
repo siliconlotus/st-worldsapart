@@ -487,7 +487,7 @@ export async function init(router) {
     });
 
     router.post('/ping', (request, response) => {
-        // Whether an install for all users sits under the caller's folder name; a per-user copy of that name hides it from that user.
+        // Whether an install for all users sits under the caller's folder name, whose files ST serves over a per-user copy of that name.
         const dir = sanitize(String(request.body?.dir ?? ''));
         const shared = Boolean(dir) && fs.existsSync(path.join(ST_ROOT, 'public', 'scripts', 'extensions', 'third-party', dir, 'manifest.json'));
         response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT, loader: LOADER, install: INSTALL, shared,

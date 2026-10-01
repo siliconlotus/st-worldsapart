@@ -112,7 +112,7 @@ export const runState = {
     pluginLoader: null,           // the deployed loader's version; null for a plugin copied before the loader
     pluginInstall: null,          // the install the server loads, as source.json names it
     pluginDataRoot: null,         // ST's absolute data root, for a per-user install's deploy command
-    pluginShared: false,          // an install for all users exists under this page's folder name
+    pluginShared: false,          // an install for all users exists under this page's folder name, and ST serves its files
     sourceFP: null,               // fingerprint of the plugin files as this page serves them
     pluginFailures: new Set(),    // plugin routes that failed this load, or answered without a field the extension reads
     noCosineWarned: false,        // has the cosine-free retrieval warning been printed this load
