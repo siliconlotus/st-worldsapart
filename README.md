@@ -40,6 +40,8 @@ The box will also ask you which branch you want; we use the same branch names as
 Updates stay on the channel you chose. SillyTavern checks at startup and tells you when one is waiting; it installs
 updates by itself only when SillyTavern's own version changes.
 
+If you use a multi-user setup, we recommend installing for all users to allow the system administrator to manage updates and prevent version mismatches across users.
+
 ### Server plugin
 > [!IMPORTANT]
 > **WorldsApart ships with a plugin.** SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search. Entries still get retrieved by similarity, but ST's endpoint doesn't return the similarity scores, so relevance is predicted from text, proper nouns and density alone — technically still better than ST alone, but noticeably worse than with the plugin (about four points of F2 across all entries, concentrated on vectorized entries).
@@ -54,7 +56,7 @@ From your SillyTavern root folder, run:
 ```bash
 node data/default-user/extensions/st-worldsapart/deploy-plugin.mjs
 ```
-(If you have user accounts enabled, install WorldsApart for all users instead: the plugin runs one copy, and per-user copies each have to be updated separately. An existing per-user install can be moved with SillyTavern's own Move button; restart SillyTavern afterwards and the plugin follows it. Otherwise, if you are using a different account, replace `default-user` with your user handle.)
+<sub>(If you installed WA into only the user account of a different user, replace `default-user` with the user handle. Again, we recommend installing for all users to prevent versioning issues.)</sub>
 
 This does two things:
 - It puts a small loader in the plugins/ directory, which loads the plugin straight from the WorldsApart install you ran it from
