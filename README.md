@@ -42,10 +42,17 @@ updates by itself only when SillyTavern's own version changes.
 > [!IMPORTANT]
 > **WorldsApart ships with a plugin.** SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search. Entries still get retrieved by similarity, but ST's endpoint doesn't return the similarity scores, so relevance is predicted from text, proper nouns and density alone — technically still better than ST alone, but noticeably worse than with the plugin (about four points of F2 across all entries, concentrated on vectorized entries).
 
+**If you installed WorldsApart for all users:**
 From your SillyTavern root folder, run:
 ```bash
 node public/scripts/extensions/third-party/st-worldsapart/deploy-plugin.mjs
 ```
+**If you installed WorldsApart for one user:**
+From your SillyTavern root folder, run:
+```bash
+node data/default-user/extensions/st-worldsapart/deploy-plugin.mjs
+```
+(if you have multi-user enabled and are using a different account, replace `default-user` with the user handle.
 
 This does two things:
 - It copies the plugin files from the extension install into the plugins/ directory
