@@ -1,7 +1,7 @@
 // capture-ui.mjs — the capture commands: /wa-grade, /wa-super-grade, /wa-super-eval and /wa-versus. The popups
 // around grading.mjs; drives the pipeline through `host` and is called back by nothing in it.
 
-import { getContext, extension_settings } from '../../../../extensions.js';
+import { getContext, extension_settings, extensionTypes } from '../../../../extensions.js';
 import { loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_max_recursion_steps, world_info_recursive } from '../../../../world-info.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
@@ -83,8 +83,8 @@ export async function extensionIdentity() {
         const r = await fetch('/api/extensions/version', {
             method: 'POST',
             headers: getRequestHeaders(),
-            // Global extensions are served from public/scripts/extensions/third-party; a per-user install is not.
-            body: JSON.stringify({ extensionName: dir, global: path.includes('/scripts/extensions/third-party/') }),
+            // Both global and per-user installs are served under /scripts/extensions/third-party/, so the URL cannot tell them apart.
+            body: JSON.stringify({ extensionName: dir, global: extensionTypes[`third-party/${dir}`] === 'global' }),
         });
         const d = r.ok ? await r.json() : null;
         if (d?.currentCommitHash) {
