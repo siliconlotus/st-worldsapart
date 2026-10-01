@@ -1443,7 +1443,8 @@ async function onScanDone(args) {
         return;
     }
     if (runState.generationIsDryRun) {
-        skip('it is an ST dry generation');
+        // skip() prints only during /wa-dry, so a reader of this line ran one that SillyTavern's own dry generation overlapped.
+        skip('SillyTavern ran its own dry generation during this /wa-dry, as it does on load and on opening a chat; run /wa-dry again in a few seconds');
         // Recorded, never ranked: ranking a keyword-only scan would overwrite the panel and the /wa-dry state.
         recordCoreSet(activated, args, 'ST dry run — keyword route only, interceptors skipped');
         return;
