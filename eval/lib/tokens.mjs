@@ -2,7 +2,7 @@
 // offset measured off captures (G12). An unlisted tokenizer THROWS; count it against a running SillyTavern.
 import { createRequire } from 'node:module';
 import { stInstall } from './scene.mjs';
-import { armNames, openBundle } from '../../extension/grading.mjs';
+import { armNames, openBundle, rowKey } from '../../extension/grading.mjs';
 
 /** Offsets are MEASURED, not chosen; tokens-check.mjs re-derives them. */
 export const TOKENIZER_OFFSET = {
@@ -47,13 +47,13 @@ export function deriveOffsets(manifests) {
         for (const arm of armNames(m)) {
             const S = openBundle(m, arm);
             const byUid = new Map();
-            for (const [book, bk] of Object.entries(m.books ?? {})) for (const e of Object.values(bk)) byUid.set(`${book}${e.uid}`, e);
+            for (const [book, bk] of Object.entries(m.books ?? {})) for (const e of Object.values(bk)) byUid.set(rowKey({ book, uid: e.uid }), e);
             if (!encs.has(tok)) encs.set(tok, tiktoken.encoding_for_model(tok));
             const enc = encs.get(tok);
 
             for (const c of S.candidates ?? []) {
                 const real = Number(c.tokens);
-                const text = byUid.get(`${c.book}${c.uid}`)?.content;
+                const text = byUid.get(rowKey(c))?.content;
                 if (!(real > 0) || !text) continue;
                 const d = real - enc.encode(text).length;
                 const a = acc.get(tok) ?? { min: Infinity, max: -Infinity, n: 0, first: d };

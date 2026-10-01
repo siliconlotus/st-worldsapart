@@ -1,7 +1,5 @@
 // global-basis.mjs — the shared half of all-but-the-top: the mean and leading components of memory-tier prose across every OTHER lineage, per book.
-// Leave one LINEAGE out, not one file; memory tier only, archived included (R17).
-// Usage (from eval/):
-//   node global-basis.mjs <sample.json ...> [--m 8] [--force]
+// Leave one LINEAGE out, not one file; memory tier only, archived included (R17). The CLI is eval/global-basis.mjs.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { corpusMean, norm } from '../../plugin/vector.mjs';
