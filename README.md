@@ -42,7 +42,7 @@ updates by itself only when SillyTavern's own version changes.
 
 If you use a multi-user setup, we recommend installing for all users to allow the system administrator to manage updates and prevent version mismatches across users.
 
-### Server plugin
+### Server plugin bootstrap
 > [!IMPORTANT]
 > **WorldsApart ships with a plugin.** SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search. Entries still get retrieved by similarity, but ST's endpoint doesn't return the similarity scores, so relevance is predicted from text, proper nouns and density alone — technically still better than ST alone, but noticeably worse than with the plugin (about four points of F2 across all entries, concentrated on vectorized entries).
 
@@ -68,10 +68,7 @@ Then restart SillyTavern.
 On restart the server console prints `[WorldsApart] server plugin ready`, and WA settings show
 **✓ Server plugin active**, with the WorldsApart install it loads.
 
-**You only deploy once.** When WorldsApart updates, restart SillyTavern and the plugin runs the new
-version; until you do, WA settings show a warning. Because the plugin runs the code in the install you
-deployed from, an update to that install changes the server's code on the next restart. On a SillyTavern with user accounts,
-users who are not admins are asked to contact whoever runs the server instead.
+After installing the plugin the first time, subsequent updates will be automatic and require only a server restart.
 
 ---
 
