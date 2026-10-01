@@ -860,11 +860,12 @@ async function selectAndActivate(chat, token, stop = null) {
     try {
         winners = await retrieve(chat, stop);
     } catch (error) {
-        // A Stop is the user's, not a failure: the superseded() return below ends the run.
+        // A Stop is the user's, not a failure: the return below ends the run.
         if (error?.name !== 'AbortError') reportFailure(t`retrieval failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
         runState.lastScores.clear();
     }
-    if (superseded()) return;
+    // A generation's Stop also supersedes it; a slash command's Stop only aborts the signal.
+    if (superseded() || stop?.aborted) return;
 
     let adds = [];
     try {
@@ -1726,8 +1727,20 @@ async function rankOwnedScan(activated, args, skip) {
 
 // Dry run
 
-/** Runs retrieval and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED. */
-async function dryRun(verbose = false) {
+/** A slash command's Stop as an AbortSignal, or null outside a command. `command` is the callback's `_abortController`, ST's own event target. */
+function commandStop(command) {
+    if (typeof command?.addEventListener !== 'function') return null;
+    const stop = new AbortController();
+    if (command.signal?.aborted) stop.abort();
+    else command.addEventListener('abort', () => stop.abort());
+    return stop.signal;
+}
+
+/** Runs retrieval and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED.
+ *  @param {object} [command] the slash command's `_abortController`: its Stop ends the run before the scan
+ *  @returns {Promise<string>} '' for the slash command; a stopped run returns before reporting anything */
+async function dryRun(verbose = false, command = null) {
+    const stop = commandStop(command);
     const context = getContext();
     // is_system first: ST filters them out of `coreChat` before any interceptor, so production never sees them (G9).
     const rawChat = context.chat ?? [];
@@ -1771,8 +1784,12 @@ async function dryRun(verbose = false) {
     // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
         runState.quietScan = false;
-        await selectAndActivate(chat, token);
+        if (!stop?.aborted) await selectAndActivate(chat, token, stop);
         settleRun(token);
+        if (stop?.aborted) {
+            console.info('WorldsApart: dry run stopped before its scan');
+            return '';
+        }
 
         await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
@@ -2584,14 +2601,14 @@ async function initBody() {
 
     addWaCommand({
         name: 'wa-dry',
-        callback: () => dryRun(false),
+        callback: named => dryRun(false, named?._abortController),
         helpString: 'WorldsApart: run retrieval and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-debug',
-        callback: () => dryRun(true),
+        callback: named => dryRun(true, named?._abortController),
         helpString: 'WorldsApart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
         returns: 'nothing',
     });

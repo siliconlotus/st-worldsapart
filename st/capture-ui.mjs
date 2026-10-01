@@ -88,9 +88,9 @@ export async function extensionIdentity() {
         });
         const d = r.ok ? await r.json() : null;
         if (d?.currentCommitHash) {
-            // `isUpToDate` is also true when the checkout has no remotes, so it means "no update found".
+            // `isUpToDate` is false when HEAD and origin differ either way (ST logs HEAD...origin), and true with no remotes.
             identityCache = `${d.currentBranchName || '?'}@${String(d.currentCommitHash).slice(0, 7)} on disk`
-                + (d.isUpToDate ? '' : ` \u2014 behind origin/${d.currentBranchName}`);
+                + (d.isUpToDate ? '' : ` \u2014 differs from origin/${d.currentBranchName}`);
         }
     } catch { /* offline, or not a git checkout: identity unknown is normal */ }
     return identityCache;
@@ -152,6 +152,9 @@ async function loadBooks() {
 /** Resolves an entry out of an embedded book map — how the grading tables find text for a row. */
 const entryResolver = books => (world, uid) => books[world]?.[uid];   // keyByUid keys by uid, and a property read coerces a numeric one
 
+/** Whether the slash command's Stop ended the run: the dry run returned before its scan, so there is nothing to report. */
+const stopped = named => Boolean(named?._abortController?.signal?.aborted);
+
 /**
  * The provenance stamps every capture writes; `primaryBook` comes off the ranking per arm, the chat's bound book as the keyword-only fallback.
  * @param {object} books loadBooks() output, passed in so /wa-super-grade stamps N arms off one load
@@ -199,10 +202,11 @@ export async function versusCore(named) {
     const wanted = Math.max(1, Number(named?.candidates ?? 30));
     runState.gradeCutoff = { maxVectorEntries: wanted };
     try {
-        await host.dryRun(true);
+        await host.dryRun(true, named?._abortController);
     } finally {
         runState.gradeCutoff = null;
     }
+    if (stopped(named)) return;
 
     const population = runState.lastLayoutOrder;
     if (!runState.lastCandidates?.length || !population?.length) { toastr.info(t`Nothing ranked — the scan activated no entries.`, 'WorldsApart'); return; }
@@ -439,12 +443,13 @@ export async function gradeScene(named) {
     let rows = [];
     let entries = [];
     try {
-        await host.dryRun(true);
+        await host.dryRun(true, named?._abortController);
         rows = runState.lastCandidates ?? [];
         entries = runState.lastCandidateEntries ?? [];
     } finally {
         runState.gradeCutoff = null;
     }
+    if (stopped(named)) return '';
 
     if (!rows.length) {
         toastr.warning(t`Nothing was activated — nothing to grade.`, 'WorldsApart');
@@ -555,7 +560,7 @@ export const POOL_ARMS = {
  * @param {number} wanted Candidate depth
  * captureParams and paramSnapshot must be read inside the window. ponytail: the override is live across awaits, so a generation firing mid-capture would use the arm's settings.
  */
-async function captureArm(overrides, wanted) {
+async function captureArm(overrides, wanted, command = null) {
     const s = settings();
     const saved = {};
     for (const k of Object.keys(overrides)) saved[k] = s[k];
@@ -563,7 +568,7 @@ async function captureArm(overrides, wanted) {
     runState.gradeCutoff = { maxVectorEntries: wanted };
 
     try {
-        await host.dryRun(true);
+        await host.dryRun(true, command);
         return {
             rows: runState.lastCandidates ?? [],
             entries: runState.lastCandidateEntries ?? [],
@@ -816,7 +821,8 @@ export async function superGradeScene(named) {
     for (const [n, arm] of picked.entries()) {
         toastr.info(t`Arm ${n + 1}/${picked.length}: ${arm}`, 'WorldsApart', { timeOut: 2500 });
         // Sequential, not Promise.all: the arms share one live settings object and one retrieval pipeline.
-        const cap = await captureArm(POOL_ARMS[arm], wanted);
+        const cap = await captureArm(POOL_ARMS[arm], wanted, named?._abortController);
+        if (stopped(named)) return '';
         if (!cap.rows.length) {
             console.warn(`WorldsApart: arm "${arm}" activated nothing — skipped`);
             continue;
