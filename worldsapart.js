@@ -240,7 +240,7 @@ function deployCommand() {
 }
 
 /** What the plugin's state asks of the person reading: `text` for the banner and the startup toast, and `cmd` true where an
- *  admin's fix is the deploy command. Null when nothing is due; an absent plugin is renderPluginSetup's install box. A user who
+ *  admin's fix is the deploy command; `panelOnly` keeps it out of the startup toast. Null when nothing is due; an absent plugin is renderPluginSetup's install box. A user who
  *  is not an admin is told to ask whoever runs the server, since the fix is a restart or a command run there. */
 function pluginAdvice() {
     if (!runState.pluginAvailable) return null;
@@ -252,13 +252,13 @@ function pluginAdvice() {
     }
     // A per-user copy hides the shared one from its user, whatever the versions: ST lists the user's copy alone.
     if (IS_LOCAL() && runState.pluginShared) {
-        return { text: t`⚠ Your own copy of WorldsApart hides the one installed for all users, so it is not updated with it or with the server plugin. Delete your copy from the Extensions panel to use the shared one.` };
+        return { text: t`⚠ Your own copy of WorldsApart hides the one installed for all users, so it is not updated with it or with the server plugin. Delete your copy from the Extensions panel to use the shared one.`, panelOnly: true };
     }
     if (!pluginDrifted()) return null;
     if (!admin) return { text: t`⚠ The server plugin runs a different version of WorldsApart. Ask whoever runs this SillyTavern server to update it and restart SillyTavern.` };
     return pluginIsMine()
         ? { text: t`⚠ WorldsApart has changed since SillyTavern started, and the server plugin still runs the old version. Restart SillyTavern.` }
-        : { text: t`⚠ The server plugin loads WorldsApart from ${runState.pluginInstall}, a different copy from this one. Deploy from this copy to switch it, then restart SillyTavern:`, cmd: true };
+        : { text: t`⚠ The server plugin loads WorldsApart from ${String(runState.pluginInstall).replace(/\\/g, '/')}, a different copy from this one. Deploy from this copy to switch it, then restart SillyTavern:`, cmd: true };
 }
 
 /** Fills the plugin setup box and the drift banner from pluginAdvice. */
@@ -302,7 +302,7 @@ function renderPluginSetup() {
             return;
         }
         box.append($('<div style="color:var(--active,#7ac);"></div>').text(runState.sourceFP ? t`✓ Server plugin active — up to date (build ${runState.sourceFP}).` : t`✓ Server plugin active.`));
-        if (runState.pluginInstall) box.append($('<div style="margin-top:3px;"></div>').text(t`It loads WorldsApart from ${runState.pluginInstall}, so updating WorldsApart and restarting SillyTavern updates it.`));
+        if (runState.pluginInstall) box.append($('<div style="margin-top:3px;"></div>').text(t`Loading WorldsApart from ${String(runState.pluginInstall).replace(/\\/g, '/')}.`));
         return;
     }
     const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
@@ -2520,7 +2520,7 @@ async function initBody() {
         renderPluginSetup();
         // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
         const advice = pluginAdvice();
-        if (advice) toastr.warning(advice.text, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+        if (advice && !advice.panelOnly) toastr.warning(advice.text, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
     });
     bind('#wa_debug_log', 'debugLog', 'checked');
     document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
