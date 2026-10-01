@@ -1666,13 +1666,9 @@ async function rankOwnedScan(activated, args, skip) {
     const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w), w.cap]).filter(([n]) => n));
 
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
-        const dynamicSet = new Set(results);
-        const promotedSet = new Set(promoted);
         const { survivors, tokens, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
-            isDynamic: item => dynamicSet.has(item),
-            // Capacity's population is dynamic plus promoted: promotion exempts from relevance, not from the caps.
-            isCapped: item => dynamicSet.has(item) || promotedSet.has(item),
+            ...delivery.budgetRoles({ promoted, results }),
             // The tag, not retrieval provenance.
             isVector: item => Boolean(item.entry?.vectorized),
             maxTokens,

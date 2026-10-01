@@ -6,6 +6,13 @@ export function walkOrder({ sticky = [], constant = [], promoted = [], results =
     return [...constant, ...sticky, ...promoted, ...results];
 }
 
+/** applyBudget's two populations over layoutOrder's blocks: dynamic is `results`, and the caps add `promoted`. */
+export function budgetRoles({ promoted = [], results = [] }) {
+    const dynamic = new Set(results);
+    const capped = new Set([...results, ...promoted]);
+    return { isDynamic: item => dynamic.has(item), isCapped: item => capped.has(item) };
+}
+
 /** What ships when WA owns activation and the ranking failed: constants, `@@activate` and armed stickies — the rows that never
  *  needed a decision. Deletes every other entry from `activated` and returns how many survive; an entry it cannot read is undecided. */
 export function dropUndecided(activated, isStickyArmed = () => false) {

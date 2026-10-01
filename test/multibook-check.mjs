@@ -88,4 +88,15 @@ eq(await delivered({}), 4, 'no cap: the budget alone delivers every row');
 eq(await delivered({ bookCaps: { B: 1 } }), 3, 'a cap of 1 on B drops one of B\'s two rows and neither of A\'s');
 eq(await delivered({ bookCaps: { A: 1, B: 1 } }), 2, '...and capping both leaves one of each');
 
+// --- stage 5 charges the book's constants first, as the runtime walks them, and grades none ---------------------------
+// Every entry here is "text XN", 1 token at the chars-per-token fallback; the constant is 10.
+const constant = extra => ({ uid: 9, world: 'A', comment: 'A-9', content: 'c'.repeat(49), key: [], constant: true, ...extra });
+const withConstant = async (extra) => {
+    const r = await scoreScene({ sample: sample(), overrides: { wordBoundary: 'strict', budgetTokens: 12, relevanceFit: 'bge-m3', memoryCutoff: 0 }, scene: { ...scene, entries: [...scene.entries, constant(extra)] }, qv: QV });
+    return `${r.atBudget.n}/${r.atBudget.tokens}`;
+};
+eq(await withConstant({}), '2/12', 'a constant spends the budget ahead of the graded rows, and is not one of them');
+eq(await withConstant({ disable: true }), '4/4', '...a disabled one spends nothing');
+eq(await withConstant({ ignoreBudget: true }), '4/4', '...nor does an ignoreBudget one, with exempt entries unbudgeted');
+
 rmSync(DIR, { recursive: true, force: true });

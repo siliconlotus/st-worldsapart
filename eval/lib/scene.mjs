@@ -16,6 +16,7 @@ import { knownBoundary } from '../../extension/matcher.mjs';
 import { hasPromoteDecorator } from '../../extension/matcher.mjs';
 import { isDurable, openBundle } from '../../extension/grading.mjs';
 import * as selection from '../../extension/selection.mjs';
+import * as layout from '../../extension/layout.mjs';
 import { isConstant, layoutScore } from '../../extension/layout.mjs';
 import * as delivery from '../../extension/delivery.mjs';
 import { buildContentIndex, scoreContent, entryKey } from '../../extension/content-lexical.mjs';
@@ -509,6 +510,20 @@ export const makeKeywordScore = P => { const result = makeKeywordResult(P); retu
  * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores. `topK` is stage 1's own bound and counts ENTRIES.
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, haystackFor: (entry: object) => string[]) => object[]}
  */
+/** The capture's gate inputs (eval/bundle-schema.md, 3.1); a field the bundle does not carry leaves its gate OFF. */
+const gateOptsOf = gates => ({
+    assistantCount: gates.assistantCount,
+    greetingIndex: gates.greetingIndex,
+    personaName: gates.personaName,
+    chatLength: gates.chatLength,
+    fired: gates.firedLatches,   // the record, not a key set: a duration reads the firing turn
+});
+
+/** Whether core activates `e` with no key: a gate-passing constant or `@@activate` entry. */
+const coreActivatesUnconditionally = (e, gateOpts) => !e.disable
+    && (matcher.hasDecorator(e, '@@activate') || (e.constant && !matcher.hasDecorator(e, '@@dont_activate')))
+    && matcher.gateVerdict(e, gateOpts) !== 'skip';
+
 export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, topK = admitCeiling(true), gates = {} }) {
     const keywordResult = makeKeywordResult(P);
     // The stage-3 text index, one per book as bookIndexes keys it: pooling the books would pool their IDF.
@@ -548,15 +563,8 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         // disabled entry (F49), and on the initial pass never a delayUntilRecursion one. Its LEVEL is not modelled:
         // core walks distinct levels (world-info.js currentRecursionDelayLevel), this admits at the first pass.
         // With recursion off it runs no pass at all: core forces one per level past the first, and WA ends it (upstream-st.md #19).
-        // The capture's gate inputs (eval/bundle-schema.md, 3.1). A field the bundle does not carry leaves its
-        // gate OFF, and every gate left off is reported: absent is not the same as "nothing was latched".
-        const gateOpts = {
-            assistantCount: gates.assistantCount,
-            greetingIndex: gates.greetingIndex,
-            personaName: gates.personaName,
-            chatLength: gates.chatLength,
-            fired: gates.firedLatches,   // the record, not a key set: a duration reads the firing turn
-        };
+        // Every gate left off is reported: absent is not the same as "nothing was latched".
+        const gateOpts = gateOptsOf(gates);
         const missing = matcher.unmodelledGates(entries, gateOpts);
         if (missing.length) {
             console.error(`  ${missing.join(', ')}: gate(s) this bundle carries no input for, so rows they would have gated OUT are admitted here`);
@@ -566,8 +574,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         const feeds = e => P.recursive && !e.preventRecursion && Boolean(String(e.content ?? '').trim());
         const buffer = rows.map(r => r.entry).filter(feeds).map(e => String(e.content).trim());
         // Core activates every gate-passing constant and `@@activate` entry, retrieved or not (delayUntilRecursion ones on pass 1, read from pass 2); seeded, the keyword route must not push one again.
-        const unconditional = e => !e.disable && (matcher.hasDecorator(e, '@@activate') || (e.constant && !matcher.hasDecorator(e, '@@dont_activate')))
-            && matcher.gateVerdict(e, gateOpts) !== 'skip' && !admitted.has(entryKey(e)) && feeds(e);
+        const unconditional = e => coreActivatesUnconditionally(e, gateOpts) && !admitted.has(entryKey(e)) && feeds(e);
         const seeded = new Set();
         const seed = e => { seeded.add(entryKey(e)); buffer.push(String(e.content).trim()); };
         for (const e of entries) if (unconditional(e) && !e.delayUntilRecursion) seed(e);
@@ -814,14 +821,17 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
 
     let atBudget = null;
     if (P.budgetTokens > 0) {
+        // Core's activation of the book's constants is modelled; their block, its order and the walk are production's.
+        const durable = scene.entries
+            .filter(e => coreActivatesUnconditionally(e, gateOptsOf(scene.gates)) && (!e.delayUntilRecursion || P.recursive))
+            .map(entry => ({ entry }));
+        const items = [...durable, ...ranked.filter(admits)];
+        for (const { entry } of items) entry.waOriginalOrder ??= entry.order ?? 0;   // as worldsapart.js stamps it; layoutOrder's authored order reads it
+        const blocks = layout.layoutOrder(items, { isPromoted: hasPromoteDecorator });
+        const roles = delivery.budgetRoles(blocks);
         const kept = await delivery.applyBudget({
-            // Classified as the runtime walks it: isDynamic excludes promoted rows; the capacity caps take the wider population.
-            walk: delivery.walkOrder({
-                promoted: ranked.filter(r => admits(r) && promotedRow(r)),
-                results: ranked.filter(r => admits(r) && !promotedRow(r)),
-            }),
-            isDynamic: r => !promotedRow(r),
-            isCapped: () => true,
+            walk: delivery.walkOrder(blocks),
+            ...roles,
             maxTokens: P.budgetTokens,
             maxTotal: P.maxTotalEntries ?? 0,
             maxDynamic: 0,
@@ -830,8 +840,8 @@ export async function scoreScene({ sample: S, overrides = {}, k = 10, vectors, m
             capOf: r => Number(P.bookCaps?.[r.entry?.world]) || 0,
             tokensOf,
         });
-        // survivors is a Set walked in layout order, which scoreWindow reads positionally.
-        atBudget = scoreWindow([...kept.survivors]);
+        // survivors is a Set walked in layout order, which scoreWindow reads positionally; durable rows spend but are never graded.
+        atBudget = scoreWindow([...kept.survivors].filter(roles.isCapped));
         atBudget.dropped = kept.dropped;
         atBudget.tokens = kept.budgeted;
     }
