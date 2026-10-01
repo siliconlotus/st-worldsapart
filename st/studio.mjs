@@ -442,7 +442,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bulkTrigger = async () => { const v = await numberPrompt(t`Trigger % — selected entries`, t`Probability (0–100):`, 100, 0, 100); if (v != null) applyBulk(e => { e.probability = Math.round(v); e.useProbability = true; }); };
     const bulkDelay = async () => { const v = await numberPrompt(t`Delay — selected entries`, t`Messages before first activation (0 = none):`, 0, 0); if (v != null) applyBulk(e => e.delay = Math.floor(v) || null); };
     const bulkCooldown = async () => { const v = await numberPrompt(t`Cooldown — selected entries`, t`Messages before it can re-activate (0 = none):`, 0, 0); if (v != null) applyBulk(e => e.cooldown = Math.floor(v) || null); };
-    const bulkScanDepth = async () => { const v = await numberPrompt(t`Scan depth — selected entries`, t`Messages to scan (0 = global default):`, 0, 0); if (v != null) applyBulk(e => e.scanDepth = Math.floor(v) > 0 ? Math.floor(v) : null); };
+    // Not numberPrompt, which reads a blank as 0: blank is the global depth here, and 0 is authored.
+    const bulkScanDepth = async () => {
+        const raw = await Popup.show.input(t`Scan depth — selected entries`, t`Messages to scan (blank = global default, 0 = none):`, '');
+        if (raw == null) return;
+        const s = String(raw).trim(), n = Math.floor(Number(s));
+        if (s && !(n >= 0)) return;
+        applyBulk(e => e.scanDepth = s ? n : null);
+    };
     const bulkOrderSet = async () => { const v = await numberPrompt(t`Order — selected entries`, t`Order value for every selected entry:`, 100); if (v != null) applyBulk(e => e.order = Math.floor(v)); };
     /** The fields a PLACEMENTS choice writes; an at-depth or outlet one asks for its depth or name first, and a cancel answers null.
      *  @param {object} [cur] The entry whose depth and name the prompts start from */
@@ -1384,7 +1391,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ),
             col(t`Budget / scan`,
                 chk(t`Ignore budget`, () => !!e.ignoreBudget, v => e.ignoreBudget = v),
-                numRow(t`Scan depth`, () => (e.scanDepth ? e.scanDepth : ''), v => { const n = Math.floor(Number(v) || 0); e.scanDepth = n > 0 ? n : null; }, t`global`),
+                // As core's editor: blank is null (the global depth), and 0 is authored, the chat triggering nothing.
+                numRow(t`Scan depth`, () => (e.scanDepth ?? ''), v => { const s = String(v).trim(); e.scanDepth = s === '' ? null : Math.max(0, Math.floor(Number(s) || 0)); }, t`global`),
             ),
         );
         return adv;
@@ -2677,7 +2685,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
         const e = book?.entries?.[entrySel.value];
         if (!e) return null;
-        const sec = e.selective ? secondaryKeys(e) : [];
+        // secondaryKeys reads `selective` itself; a truthiness test here dropped the gate of an entry with no such field.
+        const sec = secondaryKeys(e);
         return { keys: usableKeys(e.key), sec, logic: String(e.selectiveLogic ?? WI_LOGIC.AND_ANY) };
     };
 

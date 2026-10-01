@@ -118,29 +118,35 @@ function updateEmbedInfo() {
     $('#wa_embed_info').text(t`Embed: ${endpoint} · ${model}`);
 }
 
-// Time bounds for the generation path's fetches. A query is one embedding round-trip — legitimate answers arrive in
-// well under ten seconds, so past that the endpoint is wedged and the stock fallback or the cosine-free fit is the
-// better turn. The bulk embed is the exception: its bound is a hang-detector, not a patience bound, because the
-// server finishes and persists the embed regardless of the client, and the next turn's `list` picks the chunks up.
+/** The bound on a fetch that embeds nothing: a ping, a list, a file. */
 const QUERY_TIMEOUT_MS = 10_000;
-const SYNC_TIMEOUT_MS = 300_000;
+/** The bound on a fetch that embeds, query or bulk: a hang detector, since a cold model can take minutes and Stop ends the wait. */
+const EMBED_TIMEOUT_MS = 300_000;
 
-async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
+/** A fetch signal ending at `ms` or at `stop` (the generation's Stop), whichever is first. */
+const until = (ms, stop) => (stop ? AbortSignal.any([AbortSignal.timeout(ms), stop]) : AbortSignal.timeout(ms));
+
+/** The embedding source a request body names, as the user knows it. */
+const targetOf = body => (body.apiUrl ? `${body.source} (${body.apiUrl})` : body.source);
+
+/** The error a timed-out embedding fetch throws, its `explanation` the toast's text. */
+const timedOut = (route, target, ms) => Object.assign(new Error(`WorldsApart: ${route}: ${target} did not answer within ${ms / 1000} s`),
+    { explanation: [t`The embedding source ${target} did not answer within ${ms / 1000} seconds.`] });
+
+/** @param {AbortSignal} [stop] the generation's Stop; a stopped fetch throws its AbortError unchanged */
+async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS, stop = null) {
     const body = vectorRequestBody(args);
-    const target = body.apiUrl ? `${body.source} (${body.apiUrl})` : body.source;
+    const target = targetOf(body);
     let response;
     try {
         response = await fetch(`/api/vector/${route}`, {
             method: 'POST',
             headers: getRequestHeaders(),
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(timeoutMs),
+            signal: until(timeoutMs, stop),
         });
     } catch (error) {
-        if (error?.name === 'TimeoutError') {
-            throw Object.assign(new Error(`WorldsApart: /api/vector/${route}: ${target} did not answer within ${timeoutMs / 1000} s`),
-                { explanation: [t`The embedding source ${target} did not answer within ${timeoutMs / 1000} seconds.`] });
-        }
+        if (error?.name === 'TimeoutError') throw timedOut(`/api/vector/${route}`, target, timeoutMs);
         throw error;
     }
 
@@ -159,6 +165,9 @@ async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
 }
 
 
+/** The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not. */
+const EXT_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/+$/, '').split('/').pop();
+
 /** Whether the WA server plugin is loaded, checked once; absent is the stock install, not an error. */
 async function hasPlugin() {
     if (runState.pluginAvailable !== null) {
@@ -166,9 +175,7 @@ async function hasPlugin() {
     }
 
     try {
-        // The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not.
-        const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
-        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
+        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir: EXT_DIR }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
         runState.pluginAvailable = response.ok;
         if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
     } catch {
@@ -202,9 +209,9 @@ const pluginDrifted = () => Boolean(runState.pluginAvailable && runState.sourceF
 function renderPluginSetup() {
     const box = $('#wa_plugin_setup');
     if (!box.length) return;
-    const extDir = new URL('.', import.meta.url).pathname.replace(/\/+$/, '').split('/').pop();
-    const rel = `public/scripts/extensions/third-party/${extDir}/deploy-plugin.mjs`;
-    const deployCmd = runState.pluginRoot ? `node "${runState.pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node ${rel}`;
+    const rel = `public/scripts/extensions/third-party/${EXT_DIR}/deploy-plugin.mjs`;
+    // Quoted either way: a folder name may hold a space.
+    const deployCmd = runState.pluginRoot ? `node "${runState.pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node "${rel}"`;
     const row = (cmd) => {
         const r = $('<div class="flex-container alignItemsCenter flexnowrap" style="gap:6px;margin:3px 0;"></div>');
         const code = $('<code style="flex:1;overflow-x:auto;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--black30a,rgba(0,0,0,0.2));"></code>').text(cmd);
@@ -252,45 +259,58 @@ function renderPluginSetup() {
 
 /** Multi-collection query through the plugin's mean-centered search, or the no-plugin path (ST's own /api/vector)
  *  when the plugin is absent or errors. */
-async function queryCollections(args) {
+async function queryCollections(args, stop = null) {
     // The model's query prefix goes on here and only here: the caller's `searchText` also feeds queryTermWeights.
     const prefix = queryPrefix(vectorRequestBody().model);
     if (prefix) args = { ...args, searchText: prefix + args.searchText };
 
-    // The ceiling is chosen per path here, since the no-plugin path can fire mid-request. Gated on the plugin's
-    // presence, not on `meanCentered`, which is a plugin parameter.
-    if (await hasPlugin()) {
-        try {
-            const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
-            const response = await fetch('/api/plugins/worlds-apart/query-multi', {
-                method: 'POST',
-                headers: getRequestHeaders(),
-                body: JSON.stringify({
-                    ...body,
-                    centered: settings().meanCentered,
-                    // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
-                    sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
-                }),
-                signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
-            });
+    const target = targetOf(vectorRequestBody());
+    let slowToast = null;
+    const slow = setTimeout(() => {
+        slowToast = toastr.info(t`Waiting for ${target} to embed the query. Press Stop to give up.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+    }, 3000);
+    try {
+        // The ceiling is chosen per path here, since the no-plugin path can fire mid-request. Gated on the plugin's
+        // presence, not on `meanCentered`, which is a plugin parameter.
+        if (await hasPlugin()) {
+            try {
+                const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
+                const response = await fetch('/api/plugins/worlds-apart/query-multi', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({
+                        ...body,
+                        centered: settings().meanCentered,
+                        // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
+                        sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
+                    }),
+                    signal: until(EMBED_TIMEOUT_MS, stop),
+                });
 
-            // 422: a source the plugin cannot embed; 502: the provider failed. Neither is skew, and the no-plugin path reports the provider's error.
-            if (response.status === 422 || response.status === 502) {
-                console.warn(`WorldsApart: the plugin could not embed the query (${response.status} ${await response.text()}), taking the no-plugin path`);
-            } else {
-                if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
-                const results = await response.json();
-                // Only what stage 1 reads: a scored metadata array per collection answered. Anything more is fine.
-                if (!results || typeof results !== 'object' || !Object.values(results).every(g => Array.isArray(g?.metadata) && g.metadata.every(x => typeof x?.score === 'number'))) throw new Error('unscored or missing metadata');
-                return results;
+                // 422: a source the plugin cannot embed; 502: the provider failed. Neither is skew, and the no-plugin path reports the provider's error.
+                if (response.status === 422 || response.status === 502) {
+                    console.warn(`WorldsApart: the plugin could not embed the query (${response.status} ${await response.text()}), taking the no-plugin path`);
+                } else {
+                    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+                    const results = await response.json();
+                    // Only what stage 1 reads: a scored metadata array per collection answered. Anything more is fine.
+                    if (!results || typeof results !== 'object' || !Object.values(results).every(g => Array.isArray(g?.metadata) && g.metadata.every(x => typeof x?.score === 'number'))) throw new Error('unscored or missing metadata');
+                    return results;
+                }
+            } catch (error) {
+                // A Stop or a hang ends the query: the no-plugin path would only ask the same embedder again, and neither is a version mismatch.
+                if (error?.name === 'AbortError') throw error;
+                if (error?.name === 'TimeoutError') throw timedOut('query-multi', target, EMBED_TIMEOUT_MS);
+                pluginFallback('query-multi', error);
             }
-        } catch (error) {
-            pluginFallback('query-multi', error);
         }
-    }
 
-    // No threshold and no server-side pooling here, so K counts chunks.
-    return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }) ?? {};
+        // No threshold and no server-side pooling here, so K counts chunks.
+        return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }, EMBED_TIMEOUT_MS, stop) ?? {};
+    } finally {
+        clearTimeout(slow);
+        if (slowToast) toastr.clear(slowToast);
+    }
 }
 
 // Retrieval
@@ -298,11 +318,12 @@ async function queryCollections(args) {
 /** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
 const US = '';
 
-/** Chunks a book's entries and brings its vector collection in sync with them.
+/** Chunks a book's entries and brings its vector collection in sync with them. A Stop ends the wait on the server, never the embed.
+ *  @param {AbortSignal} [stop] the generation's Stop
  *  @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>} owners: chunk hash -> `${world}.${uid}` */
-async function syncWorld(world, entries) {
+async function syncWorld(world, entries, stop = null) {
     const collectionId = `wa_${getStringHash(world)}`;
-    const saved = await vectorPost('list', { collectionId }) ?? [];
+    const saved = await vectorPost('list', { collectionId }, QUERY_TIMEOUT_MS, stop) ?? [];
 
     const items = [];
     /** @type {Map<number, string[]>} A list, because identical (text, uid) in two attached books collides once scoreEntriesUnsafe merges these. */
@@ -335,7 +356,7 @@ async function syncWorld(world, entries) {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({ collectionId, hashes: newItems.map(x => x.hash), source: sourceSettings.source, sourceSettings }),
-                signal: AbortSignal.timeout(SYNC_TIMEOUT_MS),
+                signal: until(EMBED_TIMEOUT_MS, stop),
             });
             if (!response.ok) throw new Error(`${response.status}`);
             const j = await response.json();
@@ -346,7 +367,9 @@ async function syncWorld(world, entries) {
                 console.log(`WorldsApart: adopted ${adopted.size} chunks for "${world}" from another collection under the same model`);
             }
         } catch (error) {
-            pluginFallback('adopt', error);
+            if (error?.name === 'AbortError') throw error;
+            if (error?.name === 'TimeoutError') console.warn(`WorldsApart: adopting chunks for "${world}" did not finish within ${EMBED_TIMEOUT_MS / 1000} s, embedding them instead`);
+            else pluginFallback('adopt', error);
         }
     }
 
@@ -359,7 +382,7 @@ async function syncWorld(world, entries) {
         }, 3000);
         const started = Date.now();
         try {
-            await vectorPost('insert', { collectionId, items: newItems }, SYNC_TIMEOUT_MS);
+            await vectorPost('insert', { collectionId, items: newItems }, EMBED_TIMEOUT_MS, stop);
         } finally {
             clearTimeout(slow);
         }
@@ -605,15 +628,15 @@ let retrievalQueue = Promise.resolve();
 /** Scores every entry with content against arbitrary query text; shared by retrieval and /wa-query.
  *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>, retrieved: Set<string>}>}
  *           `retrieved` is stage 2's admission set, `scores` the stage-3 cosine column; the no-plugin path fills only the first. */
-function scoreEntries(searchText) {
-    const run = () => scoreEntriesUnsafe(searchText);
+function scoreEntries(searchText, stop = null) {
+    const run = () => scoreEntriesUnsafe(searchText, stop);
     const result = retrievalQueue.then(run, run);
     // The catch is on the queue, not on `result`: `return result.catch(...)` would make a failure look like retrieve()'s empties.
     retrievalQueue = result.catch(() => {});
     return result;
 }
 
-async function scoreEntriesUnsafe(searchText) {
+async function scoreEntriesUnsafe(searchText, stop = null) {
     const allEntries = await getSortedEntries();
     // Every entry with content, not only the vectorized: `vectorized` decides what stage 1 retrieves, a cosine is a column stage 3 reads (F35).
     const targets = allEntries.filter(x => !x.disable && x.content);
@@ -633,7 +656,7 @@ async function scoreEntriesUnsafe(searchText) {
     const owners = new Map();
 
     for (const [world, entries] of byWorld) {
-        const synced = await syncWorld(world, entries);
+        const synced = await syncWorld(world, entries, stop);
         collectionIds.push(synced.collectionId);
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
@@ -648,7 +671,7 @@ async function scoreEntriesUnsafe(searchText) {
         collectionIds,
         searchText,
         centroidUids,
-    });
+    }, stop);
 
     // The max is a no-op against a current plugin (one pooled record per entry) and keeps an un-redeployed one, which
     // still returns raw chunks, pooling. `rankOnly` counts chunks with no score: the no-plugin path answered.
@@ -710,7 +733,7 @@ function reportVectorCandidates(scores, targets, searchText) {
 }
 
 /** Retrieval over the chat; returns the vectorized entries that scored. The emit is selectAndActivate's. */
-async function retrieve(chat) {
+async function retrieve(chat, stop = null) {
     runState.lastScores.clear();
     // Cleared, not just reassigned below: the no-query-text return sits ABOVE that assignment, so a turn with nothing
     // to query on would otherwise leave the PREVIOUS turn's standing for contentTextScores to score BM25 against.
@@ -736,7 +759,7 @@ async function retrieve(chat) {
     runState.lastQueryChat = queryChat;
 
     // No entity filter here: stage 1 has no BM25 to spend its terms on (plugin/scoring.mjs).
-    const { targets, scores, retrieved } = await scoreEntries(searchText);
+    const { targets, scores, retrieved } = await scoreEntries(searchText, stop);
 
     if (!targets.length) {
         console.log('WorldsApart: no entries with content in the active books, so retrieval has nothing to score');
@@ -817,7 +840,7 @@ function reportFailure(stage, consequence, error, { severity = 'error', loud = f
 /** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
  *  `token` is the generation's identity: after every await a superseded generation bails rather than write scan
  *  state or emit activations into whoever's prompt is now current. A stop bumps the token, so it supersedes too. */
-async function selectAndActivate(chat, token) {
+async function selectAndActivate(chat, token, stop = null) {
     const superseded = () => token !== runState.scanToken;
 
     chat = dropChatTags(chat);
@@ -835,9 +858,10 @@ async function selectAndActivate(chat, token) {
 
     let winners = [];
     try {
-        winners = await retrieve(chat);
+        winners = await retrieve(chat, stop);
     } catch (error) {
-        reportFailure(t`retrieval failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
+        // A Stop is the user's, not a failure: the superseded() return below ends the run.
+        if (error?.name !== 'AbortError') reportFailure(t`retrieval failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
         runState.lastScores.clear();
     }
     if (superseded()) return;
@@ -895,27 +919,37 @@ function settleRun(token) {
 
 // Hooks
 
+/** One AbortController per interceptor in flight; GENERATION_STOPPED aborts them all, as Stop stops every generation. */
+const liveStops = new Set();
+
 /** Generation interceptor. ST calls it (chat, contextSize, abort, type); `abort` is a setter that CANCELS the
  *  generation, never a reader, so it is not taken. Quiet generations scan like visible ones; ST skips its dry runs. */
 async function intercept(chat, _maxContext, _abort, type) {
     const enabled = settings().enabled;
-    // Before anything is written: a waiting generation must not touch the state of the run it waits on. A quiet generation
-    // takes ST's lock only after its interceptors, so a lock held now is another generation's.
-    const token = enabled ? await runs.take(type !== 'quiet' && isGenerating()) : ++runState.scanToken;
-    runState.quietScan = type === 'quiet';
-    // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
-    runState.scanChat = chat.slice();
-    // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
-    runState.waOwnsScan = false;
-
-    if (!enabled) {
-        return;
-    }
-
+    // Registered before the wait below, so a Stop pressed while this generation waits on the run in progress reaches it too.
+    const stop = new AbortController();
+    liveStops.add(stop);
     try {
-        await selectAndActivate(chat, token);
+        // Before anything is written: a waiting generation must not touch the state of the run it waits on. A quiet generation
+        // takes ST's lock only after its interceptors, so a lock held now is another generation's.
+        const token = enabled ? await runs.take(type !== 'quiet' && isGenerating()) : ++runState.scanToken;
+        runState.quietScan = type === 'quiet';
+        // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
+        runState.scanChat = chat.slice();
+        // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
+        runState.waOwnsScan = false;
+
+        if (!enabled) {
+            return;
+        }
+
+        try {
+            if (!stop.signal.aborted) await selectAndActivate(chat, token, stop.signal);
+        } finally {
+            settleRun(token);
+        }
     } finally {
-        settleRun(token);
+        liveStops.delete(stop);
     }
 }
 
@@ -2454,15 +2488,18 @@ async function initBody() {
     bind('#wa_world_priority_mode', 'worldPriorityMode', 'string');
     $('#wa_world_priority_mode').on('change', renderWorldPriority);
     const $wp = $('#wa_world_priority_list');
-    const editField = (field, el) => {
-        const l = charPriority();
-        if (!l) return;
-        l[$(el).closest('.wa-world-row').data('i')][field] = Number($(el).val());
+    const editField = (field, el, ev) => {
+        const cfg = charPriority()?.[$(el).closest('.wa-world-row').data('i')];
+        if (!cfg) return;
+        const raw = String($(el).val()).trim(), n = Number(raw);
+        // As bind(): a cleared box is mid-edit, never a zero, and on commit it snaps back to the value in force.
+        if (!raw || !Number.isFinite(n)) { if (ev.type === 'change') $(el).val(cfg[field] ?? 0); return; }
+        cfg[field] = n;
         saveSettingsDebounced();
     };
-    $wp.on('input change', '.wa-world-weight', function () { editField('weight', this); });
-    $wp.on('input change', '.wa-world-offset', function () { editField('offset', this); });
-    $wp.on('input change', '.wa-world-cap', function () { editField('cap', this); });
+    $wp.on('input change', '.wa-world-weight', function (ev) { editField('weight', this, ev); });
+    $wp.on('input change', '.wa-world-offset', function (ev) { editField('offset', this, ev); });
+    $wp.on('input change', '.wa-world-cap', function (ev) { editField('cap', this, ev); });
     // Swap with the adjacent VISIBLE row, not the array neighbour: a filtered-out book between them must not absorb the move.
     const moveWorld = (i, dir) => {
         const scoped = scopedPriority();
@@ -2487,7 +2524,8 @@ async function initBody() {
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
     eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
     // A stopped generation is superseded: the interceptor's `abort` cannot be read, so the token carries the stop.
-    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; endRun(runs.current()); });
+    // Aborts every interceptor's fetches too: ST shows Stop while interceptors run, and stopGeneration emits this unconditionally.
+    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; endRun(runs.current()); for (const stop of liveStops) stop.abort(); });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 
