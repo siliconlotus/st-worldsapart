@@ -693,7 +693,7 @@ const leaves = (node, out = []) => {
 function leafSpans(node, text, acHits) {
     if (!evaluateNode(node, text, acHits).matched) return [];
     const isRegex = node.type === 'REGEX';
-    return keyExcerpts(String(node.value), text, !isRegex && !!node.isCaseSensitive, !isRegex && !!node.isExact, 0, Infinity, leafScope(knownBoundary(node.boundary))).map(e => ({ at: e.at, to: e.to }));
+    return keyExcerpts(String(node.value), text, !isRegex && !!node.isCaseSensitive, !isRegex && !!node.isExact, 0, Infinity, leafScope(knownBoundary(node.boundary)), !isRegex).map(e => ({ at: e.at, to: e.to }));
 }
 
 /** The ways a group can be satisfied, each `{ reqs, vetoes }`: one span list per conjunct — an alternation of leaves pools into one,

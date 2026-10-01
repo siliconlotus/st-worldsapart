@@ -531,3 +531,14 @@ console.log('ok   keyVariants: only an interior hyphen opens to a space');
     eq(codes(`/${DE}(/`), 'error:regex-invalid', 'a pattern that cannot compile reports only that');
 }
 console.log('ok   regex-decomposed: a pattern the haystack composes out of reach is warned');
+{
+    // A compound key's leaves report where the TERM itself sits, never what its value reads as when re-parsed as a key.
+    const S = createScanScope();
+    const [row] = keyHits(['? "/re/" fire'], 'there is fire and /re/', false, false, { scope: S });
+    const leaf = row.segments[0].leaves.find(l => l.term === '/re/');
+    eq(leaf?.n, 1, 'a quoted /re/ counts its literal occurrences, not the pattern re');
+    const ex = row.segments[0].excerpts.find(e => e.term === '/re/');
+    eq(ex && 'there is fire and /re/'.slice(ex.at, ex.to), '/re/', '...and its excerpt marks the literal');
+    const [q] = keyHits(['? "?x" fire'], 'fire, then ?x and x', false, false, { scope: S });
+    eq(q.segments[0].leaves.find(l => l.term === '?x')?.n, 1, 'a quoted ?x counts the text ?x, not a SmartKey for x');
+}

@@ -780,3 +780,8 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(matches('? ^=(A B)', 'AB'), false, 'both flags combine on a group as on a term');
     eq(matches('? ^=(A B)', 'A B'), true);
 }
+// A quoted term shaped like a pattern or a SmartKey is text in a proximity group, as it is anywhere else.
+eq(countKey('? ("/re/" fire)~0', 'fire burns. later and later: /re/', false, false, NEUTRAL), 0, 'a quoted /re/ is not read as a pattern for its spans');
+eq(countKey('? ("/re/" fire)~0', 'fire /re/', false, false, NEUTRAL), 1, '...and is still near where it sits beside the other term');
+eq(countKey('? ("?x" fire)~0', 'fire x, later ?x', false, false, NEUTRAL), 0, 'a quoted ?x is not re-read as a SmartKey, whose bare x would sit beside fire');
+eq(countKey('? ("?x" fire)~0', 'fire ?x', false, false, NEUTRAL), 1, '...and is near where it sits');

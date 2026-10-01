@@ -507,16 +507,17 @@ export const markExcerptText = ex => (ex
     ? `${ex.text.slice(0, ex.start)}«${ex.text.slice(ex.start, ex.end)}»${ex.text.slice(ex.end)}`
     : null);
 
-/** Every place a key matched, up to `limit`, as excerpts with match offsets; display only. A compound SmartKey returns nothing; a single-term one uses its own flags. */
-export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, scope) {
+/** Every place a key matched, up to `limit`, as excerpts with match offsets; display only. A compound SmartKey returns nothing; a single-term one uses its own flags.
+ *  `literal`: `key` is a parsed TERM's value, expanded already and matched as text whatever it looks like (`? "/re/"`, `? "?x"`). */
+export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, limit = 20, scope, literal = false) {
     requireScope(scope, 'keyExcerpts');
     const out = [];
-    let raw = String(key ?? '').trim();
+    let raw = literal ? String(key ?? '') : String(key ?? '').trim();
     if (!raw || limit < 1) return out;
     // A TERM's value is a literal whatever it looks like: `? "/re/"` is the hatch validateSmartKey recommends, and
     // re-reading its shape below would mark it as a pattern that countKey never ran.
-    let literalOnly = false;
-    if (raw.startsWith('?')) {
+    let literalOnly = literal;
+    if (!literal && raw.startsWith('?')) {
         let node = null;
         try { node = buildAst(raw, scope); } catch { return out; }
         if (!node) return out;
@@ -528,7 +529,7 @@ export function keyExcerpts(key, text, caseSensitive, wholeWords, context = 28, 
         wholeWords = node.type === 'REGEX' ? wholeWords : !!node.isExact;
     }
     // A bare key expands within its kind: a pattern escaped, a literal as text. A `?` key's node values are expanded already.
-    else raw = isRegexKey(raw) ? expandRegex(raw, scope.macros) : expandMacros(raw, scope.macros);
+    else if (!literal) raw = isRegexKey(raw) ? expandRegex(raw, scope.macros) : expandMacros(raw, scope.macros);
     // Folded -> source offset, folding one character at a time; the source must be NFC first or offsets drift.
     // Prefix sums, built once per segment: srcIndex runs twice per match and `limit` is Infinity on the proximity path.
     let sumsFor = null, sums = null;
@@ -623,13 +624,9 @@ function leafNodes(node, negated = false, out = []) {
 }
 
 /** One leaf's occurrences in `text` under its own flags; a REGEX leaf carries its flags in the pattern. */
-const leafCount = (id, text, scope) => {
-    const v = String(id?.value ?? '');
-    const cs = id?.type !== 'REGEX' && !!id?.isCaseSensitive, ww = id?.type !== 'REGEX' && !!id?.isExact;
-    // A TERM shaped like a pattern is still a literal (`? "/re/"`), so it is re-quoted rather than handed to countKey bare.
-    const literal = id?.type !== 'REGEX' && isRegexKey(v) && !v.includes('"');
-    return countKey(literal ? `? ${ww ? '=' : ''}${cs ? '^' : ''}"${v}"` : v, text, cs, ww, scope);
-};
+const leafCount = (id, text, scope) => (id?.type === 'REGEX'
+    ? countRegexKey(String(id.value ?? ''), text)
+    : branchExcerpts(id, text, 0, Infinity, scope).length);
 
 /** One excerpt per leaf that matched, at its first occurrence, ordered by position: `term` is the leaf's value and `n` its
  *  occurrences in that segment. Reports leaves whatever the key's verdict — a false key's leaves come off the AST, since
@@ -650,15 +647,13 @@ function compoundExcerpts(node, text, context, limit, scope) {
                 .filter(u => u.n > 0);
         const found = [];
         for (const { id, n } of positive) {
-            const isRegex = id?.type === 'REGEX';
-            const [ex] = keyExcerpts(String(id?.value ?? ''), segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1, scope);
+            const [ex] = branchExcerpts(id, segment, context, 1, scope);
             if (ex) found.push({ ...ex, term: String(id?.value ?? ''), n });
         }
         for (const { node: id } of leaves.filter(l => l.negated)) {
-            const isRegex = id?.type === 'REGEX';
             const value = String(id?.value ?? '');
             const n = leafCount(id, segment, scope);
-            const [ex] = n ? keyExcerpts(value, segment, !isRegex && !!id.isCaseSensitive, !isRegex && !!id.isExact, context, 1, scope) : [];
+            const [ex] = n ? branchExcerpts(id, segment, context, 1, scope) : [];
             // No hit, no offset: sorted last.
             found.push({ ...(ex ?? { at: Number.MAX_SAFE_INTEGER, to: Number.MAX_SAFE_INTEGER }), term: value, n, negated: true });
         }
@@ -695,7 +690,7 @@ const branchesOf = (key, node, caseSensitive, wholeWords, scope) => (node
 /** Every place one branch landed in `text`, under its own flags; a REGEX branch carries its flags in the pattern. */
 const branchExcerpts = (id, text, context, limit, scope) => {
     const isRegex = id?.type === 'REGEX';
-    return keyExcerpts(String(id?.value ?? ''), text, !isRegex && !!id?.isCaseSensitive, !isRegex && !!id?.isExact, context, limit, scope);
+    return keyExcerpts(String(id?.value ?? ''), text, !isRegex && !!id?.isCaseSensitive, !isRegex && !!id?.isExact, context, limit, scope, !isRegex);
 };
 
 /** The AST a key is matched by: its gate's if it has one, its own if it is a `?` key, and none at all if it is a plain term. */
