@@ -14,7 +14,7 @@ import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets
 import { entryKey } from '../extension/content-lexical.mjs';
 import { gradeOrder } from '../extension/sort.mjs';
 import { isConstant, layoutScore } from '../extension/layout.mjs';
-import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
+import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, isGrade, keyByUid, mergeGrades, openBundle, reviewRows, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
 
 /** The pipeline entry points the capture flows drive, injected once at registration.
  * @typedef {{chatBook: Function, coreSelection: Function, dryRun: Function, effectiveTokenBudget: Function, paramSnapshot: Function, scopedPriority: Function, vectorRequestBody: Function}} CaptureHost */
@@ -386,6 +386,19 @@ const fillZerosButton = root => ({
     },
 });
 
+/** The grading popups' `onClosing` over `root`: a save with a typed grade off the scale stays open on the first such row. */
+const gradesOnScale = root => popup => {
+    if (popup.result !== POPUP_RESULT.AFFIRMATIVE) return true;
+    const bad = [...root.querySelectorAll('.wa-grade')].filter(input => String(input.value).trim() !== '' && !isGrade(Number(input.value)));
+    if (!bad.length) return true;
+    bad[0].scrollIntoView({ block: 'center' });
+    bad[0].focus();
+    toastr.warning(bad.length === 1
+        ? t`${bad.length} grade is not a whole number from 0 to ${GRADE_SCALE}. Fix it, or clear it to leave the row ungraded.`
+        : t`${bad.length} grades are not whole numbers from 0 to ${GRADE_SCALE}. Fix them, or clear them to leave the rows ungraded.`, 'WorldsApart');
+    return false;
+};
+
 function fillReadZeros(root) {
     const idOf = input => input.dataset.key ?? input.dataset.i;
     const touched = new Set();
@@ -477,7 +490,7 @@ export async function gradeScene(named) {
 
     wireFolds(wrap, i => entries[i]);
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(wrap)], okButton: t`Save sample`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(wrap)], onClosing: gradesOnScale(wrap), okButton: t`Save sample`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     const result = await popup.show();
 
     if (result !== POPUP_RESULT.AFFIRMATIVE) {
@@ -682,7 +695,7 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                 const pkey = rowKey(row);
                 const key = `${si}${String.fromCharCode(31)}${pkey}`;
                 const done = priorOf.has(pkey);
-                // Prior rows are inputs pre-filled with the earlier grade; an edit re-emits the row and mergeGrades is last-wins. A dirty edit stays dirty across repaints.
+                // Prior rows are inputs pre-filled with the earlier grade; an edit appends a human verdict, which outranks the earlier ones when read (gradeValue). A dirty edit stays dirty across repaints.
                 const cell = isDurable(row)
                     ? `<span style="opacity:0.5;font-size:0.85em;">${esc(row.block === 'constant' ? t`const` : t`sticky`)}</span>`
                     : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(pkey) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
@@ -758,7 +771,7 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
 
     paint();
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(body)], okButton, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(body)], onClosing: gradesOnScale(body), okButton, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
         return null;
     }
@@ -770,18 +783,17 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
             const { sec, row } = flat[Number(input.dataset.i)];
             return { sec, g: { title: row.title, grade: Number(input.value), book: row.book, uid: row.uid } };
         });
-    const who = { user: raterId(), now: today() };
-    // Per section: mergeGrades keys on world+uid, and a shared merge would land one scene's verdict on another's row.
+    // Per section, bare `grade` rows: apply-review is the merge for a review file, and mergeGrades would lift the grade out of reach.
     if (multi) {
         return {
             sections: secs.map((sc, si) => ({
                 file: sc.file ?? sc.name,
-                grades: mergeGrades(sc.prior ?? [], edited.filter(e => e.sec === si).map(e => e.g), who),
+                grades: edited.filter(e => e.sec === si).map(e => e.g),
             })),
             edited: edited.length,
         };
     }
-    return { grades: mergeGrades(prior, edited.map(e => e.g), who) };
+    return { grades: mergeGrades(prior, edited.map(e => e.g), { user: raterId(), now: today() }) };
 }
 
 /**
@@ -969,7 +981,6 @@ export async function superEvalScene() {
     // `captureId` is what apply-review resolves on (a basename can be renamed); the judge's prior verdicts ride along for the reviewer and apply-review strips them.
     const reviewed = done.sections.map((sec, si) => {
         const src = openBundle(secs[si].manifest);
-        const priorOf = new Map((src.entries ?? []).map(g => [rowKey(g), g]));
         return {
             captureId: secs[si].manifest?.captureId,
             file: sec.file,
@@ -978,16 +989,7 @@ export async function superEvalScene() {
             generatedFrom: src.generatedFrom,
             query: src.query ?? '',
             scanChat: src.scanChat ?? [],
-            grades: sec.grades.map(g => {
-                const p = priorOf.get(rowKey(g)) ?? {};
-                const entry = secs[si].entryOf(g.book, g.uid);
-                return {
-                    ...g,
-                    ...(p.grades?.length ? { grades: p.grades } : {}),
-                    // `entryText` is for the reviewer; apply-review strips it, the bundle's books being where entry text lives.
-                    ...(entry?.content ? { entryText: String(entry.content) } : {}),
-                };
-            }),
+            grades: reviewRows(sec.grades, src.entries, g => secs[si].entryOf(g.book, g.uid)?.content),
         };
     });
     const all = reviewed.flatMap(r => r.grades);

@@ -180,7 +180,8 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     console.log('\nsignal quality — Spearman against the human grade (absent signal counts as 0)');
     for (const sc of scenes) {
-        const gm = new Map((sc.S.entries ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), gradeValue(x) || 0]));
+        // Finite only: a row with no verdict is ungraded, never a 0.
+        const gm = new Map((sc.S.entries ?? []).filter(x => x.uid !== undefined && Number.isFinite(gradeValue(x))).map(x => [rowKey(x), gradeValue(x)]));
         const rs = (sc.S.candidates ?? []).filter(c => !isDurable(c) && gm.has(rowKey(c)));
         if (rs.length < 5) { console.log(`  ${sc.name.slice(0, 34).padEnd(34)} only ${rs.length} judged candidate rows — skipped`); continue; }
         const gv = rs.map(r => gm.get(rowKey(r)));

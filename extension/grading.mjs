@@ -145,6 +145,18 @@ export function mergeGrades(prior, fresh, who = {}) {
     return [...by.values()];
 }
 
+/** A /wa-super-eval section's review rows: one per row the reviewer touched, its bare `grade` the verdict apply-review appends,
+ *  beside the verdicts it was weighed against, which apply-review strips. An untouched row is absent, so it stays unreviewed.
+ *  @param {(row: object) => string|null} [textOf] the entry text shown to the reviewer */
+export const reviewRows = (edited, prior, textOf = () => null) => {
+    const priorOf = new Map((prior ?? []).map(g => [rowKey(g), g]));
+    return (edited ?? []).map(g => {
+        const p = priorOf.get(rowKey(g));
+        const text = textOf(g);
+        return { ...g, ...(p?.grades?.length ? { grades: p.grades } : {}), ...(text ? { entryText: String(text) } : {}) };
+    });
+};
+
 /** The sample's `primaryBook`: the book contributing the most retrieved rows (`cosine !== null`, never truthiness — a 0 cosine is retrieved), or null. */
 export function searchedBook(rows) {
     const counts = new Map();
@@ -472,6 +484,8 @@ export const GRADE_ANCHORS = [
     'Directly relevant; should absolutely be included',
 ];
 export const GRADE_SCALE = GRADE_ANCHORS.length - 1;
+/** A value a verdict may carry: a whole number on the scale. */
+export const isGrade = v => Number.isInteger(v) && v >= 0 && v <= GRADE_SCALE;
 
 export function sampleFile(sample) {
     const slug = String(sample.name || 'scene').trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scene';

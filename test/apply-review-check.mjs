@@ -108,3 +108,32 @@ eq(gradeValue(stripped.grades[0]), 3, '...but the human verdict is');
 
     rmSync(dir, { recursive: true, force: true });
 }
+
+// --- /wa-super-eval's review rows (grading.mjs reviewRows) through mergeReview: the round trip the file exists for
+{
+    const { reviewRows } = await import('../extension/grading.mjs');
+    const prior = bundle();
+    // Row 1 re-graded, row 2 retyped at the judge's own 0, row 3 untouched (absent from `edited`), row 9 never graded before.
+    const edited = [{ book: 'W', uid: 1, grade: 4 }, { book: 'W', uid: 2, grade: 0 }, { book: 'W', uid: 9, grade: 2 }];
+    const rows = reviewRows(edited, prior, g => (g.uid === 1 ? 'entry one' : null));
+    eq(rows.length, 3, 'a review row per touched row, and none for an untouched one');
+    eq(rows[0].grade, 4, 'the reviewer\'s grade rides as a bare `grade`, which apply-review reads');
+    eq(rows[0].grades.map(v => v.kind).join(','), 'llm', '...beside the verdicts it was weighed against');
+    eq(rows[0].entryText, 'entry one', '...and the text the reviewer read');
+
+    const applied = mergeReview(prior, rows, ME);
+    const row = uid => applied.grades.find(g => g.uid === uid);
+    eq(humansIn(row(1)).map(v => v.grade).join(','), '4', 'an edit lands as a new human verdict');
+    eq(llmsIn(row(1)).length, 1, '...appended, the judge\'s verdict kept');
+    eq(humansIn(row(2)).map(v => v.grade).join(','), '0', 'a retyped value is a human verdict agreeing with the judge');
+    eq(humansIn(row(3)).length, 1, 'an untouched row gains nothing');
+    eq(humansIn(row(9)).map(v => v.grade).join(','), '2', 'a row with no prior verdict gains its first');
+    eq(Number.isFinite(gradeValue({ book: 'W', uid: 10 })), false, 'a row never graded reads as no value, not 0');
+}
+
+// --- the grading popups' save gate (grading.mjs isGrade): a verdict is a whole number on the scale
+{
+    const { isGrade, GRADE_SCALE } = await import('../extension/grading.mjs');
+    eq([0, 1, GRADE_SCALE].every(isGrade), true, 'every whole number on the scale is a grade');
+    eq([-1, GRADE_SCALE + 1, 33, 2.5, NaN].some(isGrade), false, 'off the scale, a fraction or no number is not');
+}
