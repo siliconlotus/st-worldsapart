@@ -12,7 +12,7 @@ export const PLUGIN_FILES = [
 ];
 
 /** plugin/loader.js's own LOADER_VERSION, which /ping reports: an older deployed loader asks for one redeploy. Keep the two equal. */
-export const LOADER_VERSION = 1;
+export const LOADER_VERSION = 2;
 
 function hashText(str) {
     let h = 5381;

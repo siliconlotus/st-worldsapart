@@ -569,7 +569,7 @@ export function pluginFallback(route, cause) {
         // The fix is a restart or a deploy, so a user who is not an admin is told who can make it.
         toastr.warning(isAdmin()
             ? t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Restart SillyTavern, and if this persists, redeploy the plugin from WorldsApart's settings.`
-            : t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Ask your SillyTavern admin to update the server plugin.`,
+            : t`Extension and server plugin versions are incompatible; WA fell back to running without the plugin. Ask whoever runs this SillyTavern server to update the server plugin.`,
         'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
     }
     document.dispatchEvent(new CustomEvent('wa-plugin-fallback'));   // a new route repaints the settings bar's list

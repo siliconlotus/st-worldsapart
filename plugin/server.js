@@ -487,7 +487,10 @@ export async function init(router) {
     });
 
     router.post('/ping', (request, response) => {
-        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT, loader: LOADER, install: INSTALL,
+        // Whether an install for all users sits under the caller's folder name; a per-user copy of that name hides it from that user.
+        const dir = sanitize(String(request.body?.dir ?? ''));
+        const shared = Boolean(dir) && fs.existsSync(path.join(ST_ROOT, 'public', 'scripts', 'extensions', 'third-party', dir, 'manifest.json'));
+        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT, loader: LOADER, install: INSTALL, shared,
             // Where the deploy command for a per-user install lives: dataRoot may be relocated outside the ST root.
             dataRoot: path.resolve(ST_ROOT, String(getConfigValue('dataRoot', './data'))) });
     });

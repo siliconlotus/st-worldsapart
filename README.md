@@ -52,7 +52,7 @@ From your SillyTavern root folder, run:
 ```bash
 node data/default-user/extensions/st-worldsapart/deploy-plugin.mjs
 ```
-(if you have multi-user enabled and are using a different account, replace `default-user` with the user handle.
+(If you have user accounts enabled, install WorldsApart for all users instead: the plugin runs one copy, and per-user copies each have to be updated separately. An existing per-user install can be moved with SillyTavern's own Move button; restart SillyTavern afterwards and the plugin follows it. Otherwise, if you are using a different account, replace `default-user` with your user handle.)
 
 This does two things:
 - It puts a small loader in the plugins/ directory, which loads the plugin straight from the WorldsApart install you ran it from
@@ -66,9 +66,8 @@ On restart the server console prints `[WorldsApart] server plugin ready`, and WA
 
 **You only deploy once.** When WorldsApart updates, restart SillyTavern and the plugin runs the new
 version; until you do, WA settings show a warning. Because the plugin runs the code in the install you
-deployed from, an update to that install changes the server's code on the next restart. If you deployed
-before this version, WA settings will ask you to deploy one more time. On a SillyTavern with user accounts,
-users who are not admins are asked to contact the admin instead.
+deployed from, an update to that install changes the server's code on the next restart. On a SillyTavern with user accounts,
+users who are not admins are asked to contact whoever runs the server instead.
 
 ---
 

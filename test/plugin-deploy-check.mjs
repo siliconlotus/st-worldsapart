@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { eq } from '../eval/lib/metrics.mjs';
 import { deploySandbox } from './plugin-sandbox.mjs';
+import { stInstall } from '../eval/lib/st-install.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 const lstat = p => { try { return fs.lstatSync(p); } catch { return null; } };
@@ -47,6 +48,38 @@ try {
     eq(typeof bare.default.init === 'function' && bare.EMBED_SOURCES.length === 0, true, 'a loader with no source.json loads and registers nothing');
 } finally {
     box.cleanup();
+}
+
+// ST's "move to global" leaves source.json naming a per-user folder that is gone; the loader takes the shared one of that name.
+{
+    const st = stInstall();
+    if (!st) console.log('ok   (no SillyTavern install reachable — a moved install cannot be loaded)');
+    else {
+        const name = path.basename(REPO);
+        const moved = deploySandbox({ st, prepare: root => {
+            fs.mkdirSync(path.join(root, 'public', 'scripts', 'extensions', 'third-party'), { recursive: true });
+            fs.symlinkSync(REPO, path.join(root, 'public', 'scripts', 'extensions', 'third-party', name), 'dir');
+        } });
+        try {
+            fs.writeFileSync(path.join(moved.dir, 'source.json'), JSON.stringify({ install: `data/default-user/extensions/${name}` }));
+            const quiet = console.warn;
+            console.warn = () => {};
+            let plugin;
+            try { plugin = await moved.load(); } finally { console.warn = quiet; }
+            eq(plugin.EMBED_SOURCES.length > 0, true, 'a recorded per-user install that is gone loads the shared one of the same name');
+            const routes = new Map();
+            const log = console.log; console.log = () => {};
+            try { await plugin.default.init({ post: (r, h) => routes.set(r, h), get: (r, h) => routes.set(r, h) }); } finally { console.log = log; }
+            let sent;
+            routes.get('/ping')({ body: {} }, { send: x => { sent = x; } });
+            eq(sent.install, path.join('public', 'scripts', 'extensions', 'third-party', name), '...and /ping names the install it loaded, not the stale record');
+            eq(sent.shared, false, 'a ping with no folder name reports no shared install');
+            routes.get('/ping')({ body: { dir: name } }, { send: x => { sent = x; } });
+            eq(sent.shared, true, 'and one naming a folder installed for all users reports it, so a per-user copy of it can say it hides it');
+            routes.get('/ping')({ body: { dir: '../../../etc' } }, { send: x => { sent = x; } });
+            eq(sent.shared, false, 'a folder name is sanitised before it reaches the filesystem');
+        } finally { moved.cleanup(); }
+    }
 }
 
 // config.yaml: patched only from false, by rename; the original backed up once and never retaken; a failure is its own error.

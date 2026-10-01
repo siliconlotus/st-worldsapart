@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Must equal plugin/fingerprint.mjs LOADER_VERSION; bump both when this file changes. */
-const LOADER_VERSION = 1;
+const LOADER_VERSION = 2;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Walked, as eval/lib/st-install.mjs walks; two up, the deployed depth, when no config.yaml is reachable.
@@ -21,8 +21,18 @@ const readSource = () => {
     try { return JSON.parse(fs.readFileSync(path.join(HERE, 'source.json'), 'utf8')).install ?? null; } catch { return null; }
 };
 
+/** `recorded`, or the shared install of the same folder name when `recorded` is gone: where ST's "move to global" puts a
+ *  per-user copy. Never the other way: only an admin can write the shared folder. */
+const resolveInstall = recorded => {
+    if (!recorded || fs.existsSync(path.join(path.resolve(ST_ROOT, recorded), 'plugin', 'server.js'))) return recorded;
+    const shared = path.join('public', 'scripts', 'extensions', 'third-party', path.basename(path.resolve(ST_ROOT, recorded)));
+    if (!fs.existsSync(path.join(ST_ROOT, shared, 'plugin', 'server.js'))) return recorded;
+    console.warn(`[WorldsApart] ${recorded} is gone; loading the shared install ${shared}. Run its deploy-plugin.mjs to record it.`);
+    return shared;
+};
+
 let plugin = null;
-const install = readSource();
+const install = resolveInstall(readSource());
 try {
     if (!install) throw new Error('no source.json beside the loader; run deploy-plugin.mjs from the WorldsApart install');
     const url = pathToFileURL(path.join(path.resolve(ST_ROOT, install), 'plugin', 'server.js'));

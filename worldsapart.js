@@ -14,7 +14,7 @@ import {
     name1,
 } from '../../../../script.js';
 import { extension_settings, extensionTypes, getContext } from '../../../extensions.js';
-import { getCurrentUserHandle, isAdmin } from '../../../user.js';
+import { accountsEnabled, getCurrentUserHandle, isAdmin } from '../../../user.js';
 import { t } from '../../../i18n.js';
 
 import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_max_recursion_steps, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
@@ -187,6 +187,7 @@ async function hasPlugin() {
                 runState.pluginLoader = Number(d?.loader) || null;
                 runState.pluginInstall = d?.install ?? null;
                 runState.pluginDataRoot = d?.dataRoot ?? null;
+                runState.pluginShared = d?.shared === true;
             } catch { /* no JSON body: nothing more is known */ }
         }
     } catch {
@@ -240,17 +241,21 @@ function deployCommand() {
 
 /** What the plugin's state asks of the person reading: `text` for the banner and the startup toast, and `cmd` true where an
  *  admin's fix is the deploy command. Null when nothing is due; an absent plugin is renderPluginSetup's install box. A user who
- *  is not an admin is told to ask one, since the fix is a server restart or a command they cannot run. */
+ *  is not an admin is told to ask whoever runs the server, since the fix is a restart or a command run there. */
 function pluginAdvice() {
     if (!runState.pluginAvailable) return null;
     const admin = isAdmin();
     if ((runState.pluginLoader ?? 0) < LOADER_VERSION) {
         return admin
-            ? { text: t`⚠ The server plugin needs one more deploy, to switch it to loading WorldsApart directly. After that, restarting SillyTavern is all an update needs:`, cmd: true }
-            : { text: t`⚠ The server plugin is out of date. Ask your SillyTavern admin to update it.` };
+            ? { text: t`⚠ The server plugin needs redeploying. Run this, then restart SillyTavern:`, cmd: true }
+            : { text: t`⚠ The server plugin is out of date. Ask whoever runs this SillyTavern server to update it.` };
+    }
+    // A per-user copy hides the shared one from its user, whatever the versions: ST lists the user's copy alone.
+    if (IS_LOCAL() && runState.pluginShared) {
+        return { text: t`⚠ Your own copy of WorldsApart hides the one installed for all users, so it is not updated with it or with the server plugin. Delete your copy from the Extensions panel to use the shared one.` };
     }
     if (!pluginDrifted()) return null;
-    if (!admin) return { text: t`⚠ The server plugin runs a different version of WorldsApart. Ask your SillyTavern admin to update it and restart SillyTavern.` };
+    if (!admin) return { text: t`⚠ The server plugin runs a different version of WorldsApart. Ask whoever runs this SillyTavern server to update it and restart SillyTavern.` };
     return pluginIsMine()
         ? { text: t`⚠ WorldsApart has changed since SillyTavern started, and the server plugin still runs the old version. Restart SillyTavern.` }
         : { text: t`⚠ The server plugin loads WorldsApart from ${runState.pluginInstall}, a different copy from this one. Deploy from this copy to switch it, then restart SillyTavern:`, cmd: true };
@@ -279,6 +284,10 @@ function renderPluginSetup() {
     const line = (text, colour) => $(`<div style="color:${colour};"></div>`).text(text);
     box.empty();
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
+    // With accounts on, a per-user copy is one of several the server plugin can load, each updated on its own.
+    if (accountsEnabled && IS_LOCAL() && isAdmin() && !runState.pluginShared) {
+        box.append($('<div style="margin-bottom:3px;"></div>').text(t`With user accounts on, install WorldsApart for all users instead of per user: the server plugin and every user then share one copy to update.`));
+    }
     if (runState.pluginAvailable) {
         const advice = pluginAdvice();
         // One box for both facts: a route that failed this load, in red, above whatever else is due.
@@ -299,7 +308,7 @@ function renderPluginSetup() {
     const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
     alert.append(banner(line(absent, AMBER)));
     if (!isAdmin()) {
-        box.append($('<div></div>').text(t`${absent} Ask your SillyTavern admin to install it.`));
+        box.append($('<div></div>').text(t`${absent} Ask whoever runs this SillyTavern server to install it.`));
         return;
     }
     box.append($('<div></div>').text(t`${absent} To install:`));

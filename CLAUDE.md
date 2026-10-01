@@ -185,7 +185,8 @@ Defects in ST core itself go in `upstream-st.md`, in the SillyTavern root — no
 ## Plugin changes need a restart
 
 ST's `/plugins/worlds-apart/` holds only the loader: `plugin/loader.js` as `index.js`, and `source.json` naming the
-install `deploy-plugin.mjs` ran from. The loader imports that install's `plugin/server.js` at every ST start, so editing
+install `deploy-plugin.mjs` ran from. The loader imports that install's `plugin/server.js` at every ST start, or the shared install of the same folder name
+when the recorded one is gone, which is where ST's "move to global" puts a per-user copy; so editing
 anything in `plugin/`, or `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`, which the server imports from
 `../extension/`, takes an ST restart and no deploy. The settings panel shows a drift banner while the server runs other
 files than the browser serves.
