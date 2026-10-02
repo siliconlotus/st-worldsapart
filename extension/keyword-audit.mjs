@@ -322,7 +322,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const known = named.get(k);
         if (known !== undefined) return known;
         const titled = titledOf(k);
-        // scanScope, as the twin probe and onDemand pass: the module default is the LIVE retrieval scope this pass must not touch.
+        // scanScope, as the twin probe and onDemand pass: the module default is the LIVE runtime scope this pass must not touch.
         const found = Boolean(titled) && contentSegments.some(segments => segments.some(seg => countKey(titled, seg, true, false, scanScope) > 0));
         named.set(k, found);
         return found;

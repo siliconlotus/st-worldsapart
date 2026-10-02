@@ -312,7 +312,7 @@ function renderPluginSetup() {
         if (runState.pluginInstall) box.append($('<div style="margin-top:3px;"></div>').text(t`Loading WorldsApart from ${String(runState.pluginInstall).replace(/\\/g, '/')}.`));
         return;
     }
-    const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
+    const absent = t`⚠ Server plugin not installed — activation by similarity runs on ST's own vector search, without mean-centering or server-side pooling.`;
     alert.append(banner(line(absent, AMBER)));
     if (!isAdmin()) {
         box.append($('<div></div>').text(t`${absent} Ask whoever runs this SillyTavern server to install it.`));
@@ -360,7 +360,7 @@ async function queryCollections(args, stop = null) {
                 } else {
                     if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
                     const results = await response.json();
-                    // Only what stage 1 reads: a scored metadata array per collection answered. Anything more is fine.
+                    // Only what the similarity query reads: a scored metadata array per collection answered. Anything more is fine.
                     if (!results || typeof results !== 'object' || !Object.values(results).every(g => Array.isArray(g?.metadata) && g.metadata.every(x => typeof x?.score === 'number'))) throw new Error('unscored or missing metadata');
                     return results;
                 }
@@ -380,7 +380,7 @@ async function queryCollections(args, stop = null) {
     }
 }
 
-// Retrieval
+// The similarity query
 
 /** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
 const US = '';
@@ -552,7 +552,7 @@ function loadRelevanceModel() {
         fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
             .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((file) => {
-                // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, retrieval outage).
+                // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, a failed query).
                 const m = file?.byModel?.[key] ?? file?.byModel?.[UNFITTED_FALLBACK] ?? file?.noCosine ?? null;
                 if (m) m.noCosine = file?.noCosine ?? null;
                 if (m && !file?.byModel?.[key]) {
@@ -585,7 +585,7 @@ function loadRelevanceModel() {
 const entriesByWorld = async (entries = null) => Map.groupBy(entries ?? await getSortedEntries(), e => e.world);
 
 /**
- * Fills the stage-4 relevance column: `properNouns`, `density`, then `E[credit]` per entry. Cuts nothing.
+ * Fills the relevance column selection reads: `properNouns`, `density`, then `E[credit]` per entry. Cuts nothing.
  * @param {Function} windowFor The scan window builder; eval/scene.mjs `haystackFor` calls the same one with the same inputs
  */
 async function scoreRelevanceColumn(items, windowFor, entries = null) {
@@ -644,7 +644,7 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
     }
 }
 
-/** BM25 of the query against every entry's content — the stage-3 text signal.
+/** BM25 of the query against every entry's content — the scoring text signal.
  *  @returns {Promise<Map<string, number>>} `${world}.${uid}` -> best chunk score; empty when unavailable */
 async function contentTextScores(query, entries = null) {
     if (!query) return new Map();
@@ -689,23 +689,23 @@ async function queryTermWeights(searchText, { entries = null } = {}) {
     return termWeights;
 }
 
-/** Serialises retrieval so a query cannot read a half-built index. */
-let retrievalQueue = Promise.resolve();
+/** Serialises the similarity query so one cannot read a half-built index. */
+let similarityQueue = Promise.resolve();
 
-/** Scores every entry with content against arbitrary query text; shared by retrieval and /wa-query.
+/** Scores every entry with content against arbitrary query text; shared by activation and /wa-query.
  *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>, retrieved: Set<string>}>}
- *           `retrieved` is stage 2's admission set, `scores` the stage-3 cosine column; the no-plugin path fills only the first. */
+ *           `retrieved` is activation's admission set, `scores` the scoring cosine column; the no-plugin path fills only the first. */
 function scoreEntries(searchText, stop = null) {
     const run = () => scoreEntriesUnsafe(searchText, stop);
-    const result = retrievalQueue.then(run, run);
-    // The catch is on the queue, not on `result`: `return result.catch(...)` would make a failure look like retrieve()'s empties.
-    retrievalQueue = result.catch(() => {});
+    const result = similarityQueue.then(run, run);
+    // The catch is on the queue, not on `result`: `return result.catch(...)` would make a failure look like similarityActivations()'s empties.
+    similarityQueue = result.catch(() => {});
     return result;
 }
 
 async function scoreEntriesUnsafe(searchText, stop = null) {
     const allEntries = await getSortedEntries();
-    // Every entry with content, not only the vectorized: `vectorized` decides what stage 1 retrieves, a cosine is a column stage 3 reads (F35).
+    // Every entry with content, not only the vectorized: `vectorized` decides what the similarity query activates, a cosine is a column scoring reads (F35).
     const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
@@ -752,8 +752,8 @@ async function scoreEntriesUnsafe(searchText, stop = null) {
                 return;
             }
 
-            // Admission is retrieval identity, not magnitude: the no-plugin path returns the same chunks, so the same
-            // entries are stage-2 candidates whichever path answered. The Set is the pooling — K counts chunks there.
+            // Admission is which chunks came back, not their magnitude: the no-plugin path returns the same chunks, so the same
+            // entries are activation candidates whichever path answered. The Set is the pooling — K counts chunks there.
             for (const owner of chunkOwners) retrieved.add(owner);
 
             // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit.
@@ -773,7 +773,7 @@ async function scoreEntriesUnsafe(searchText, stop = null) {
     // Once per load: running without the plugin is a supported configuration, not a per-turn fault.
     if (rankOnly && !runState.noCosineWarned) {
         runState.noCosineWarned = true;
-        console.warn(`WorldsApart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
+        console.warn(`WorldsApart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so no entry has a cosine. `
             + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
             + 'Check that the server plugin is loaded and that its query is not failing.');
     }
@@ -799,8 +799,8 @@ function reportVectorCandidates(scores, targets, searchText) {
     })));
 }
 
-/** Retrieval over the chat; returns the vectorized entries that scored. The emit is selectAndActivate's. */
-async function retrieve(chat, stop = null) {
+/** The similarity query over the chat; returns the vectorized entries it activates. The emit is selectAndActivate's. */
+async function similarityActivations(chat, stop = null) {
     runState.lastScores.clear();
     // Cleared, not just reassigned below: the no-query-text return sits ABOVE that assignment, so a turn with nothing
     // to query on would otherwise leave the PREVIOUS turn's standing for contentTextScores to score BM25 against.
@@ -813,7 +813,7 @@ async function retrieve(chat, stop = null) {
     const rawText = query.joinQueryMessages(queryChat);
 
     if (!rawText) {
-        dbg('WorldsApart: no query text, skipping retrieval');
+        dbg('WorldsApart: no query text, skipping the similarity query');
         return [];
     }
 
@@ -825,11 +825,11 @@ async function retrieve(chat, stop = null) {
     // ST's own {name, mes} shape, so query.buildQuery can re-run offline at any depth <= this one; not recoverable by splitting `lastQuery`.
     runState.lastQueryChat = queryChat;
 
-    // No entity filter here: stage 1 has no BM25 to spend its terms on (plugin/scoring.mjs).
+    // No entity filter here: the similarity query has no BM25 to spend its terms on (plugin/scoring.mjs).
     const { targets, scores, retrieved } = await scoreEntries(searchText, stop);
 
     if (!targets.length) {
-        console.log('WorldsApart: no entries with content in the active books, so retrieval has nothing to score');
+        console.log('WorldsApart: no entries with content in the active books, so the similarity query has nothing to score');
         return [];
     }
     if (!retrieved.size) {
@@ -837,11 +837,11 @@ async function retrieve(chat, stop = null) {
         return [];
     }
 
-    // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for stage 3.
+    // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for scoring.
     const vectorizedKeys = new Set(targets.filter(x => x.vectorized).map(x => `${x.world}.${x.uid}`));
     const winnerKeys = new Set([...retrieved].filter(k => vectorizedKeys.has(k)));
 
-    // Every scored entry, not the winners: stage 3 looks its cosine up here.
+    // Every scored entry, not the winners: scoring looks its cosine up here.
     for (const [key, value] of scores) {
         runState.lastScores.set(key, value.score);
     }
@@ -904,7 +904,7 @@ function reportFailure(stage, consequence, error, { severity = 'error', loud = f
     );
 }
 
-/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
+/** Activation: the similarity route's winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
  *  `token` is the generation's identity: after every await a superseded generation bails rather than write scan
  *  state or emit activations into whoever's prompt is now current. A stop bumps the token, so it supersedes too. */
 async function selectAndActivate(chat, token, stop = null) {
@@ -925,10 +925,10 @@ async function selectAndActivate(chat, token, stop = null) {
 
     let winners = [];
     try {
-        winners = await retrieve(chat, stop);
+        winners = await similarityActivations(chat, stop);
     } catch (error) {
         // A Stop is the user's, not a failure: the return below ends the run.
-        if (error?.name !== 'AbortError') reportFailure(t`retrieval failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
+        if (error?.name !== 'AbortError') reportFailure(t`similarity activation failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
         runState.lastScores.clear();
     }
     // A generation's Stop also supersedes it; a slash command's Stop only aborts the signal.
@@ -940,7 +940,7 @@ async function selectAndActivate(chat, token, stop = null) {
     } catch (error) {
         // Total: waOwnsScan is set below regardless, so core does not match either.
         reportFailure(t`keyword activation failed`,
-            t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
+            t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only similarity-activated, constant and sticky entries.`,
             error);
     }
     if (superseded()) return;
@@ -950,7 +950,7 @@ async function selectAndActivate(chat, token, stop = null) {
 
     const activated = [...winners, ...union];
     if (activated.length) {
-        dbg(`WorldsApart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
+        dbg(`WorldsApart: activating ${winners.length} entries by similarity + ${union.length} by key`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
     if (superseded()) return;
@@ -1076,7 +1076,7 @@ function onEntriesLoaded(loaded) {
         return;
     }
 
-    // Stashed, not deleted, and secondaries too: stage 3 scores the authored keys and gates on the authored condition.
+    // Stashed, not deleted, and secondaries too: scoring scores the authored keys and gates on the authored condition.
     if (runState.waOwnsScan && !runState.generationIsDryRun) {
         for (const entry of entries) {
             if (!entry || entry.waKeys) continue;   // already stashed and blanked this load
@@ -1493,8 +1493,8 @@ async function onScanDone(args) {
     }
 }
 
-/** The owned half of a scan: the recursion feed on every loop, then — on the last one — scoring (stage 3), the
- *  relevance cut (4) and the budget (5). Throws are the caller's. */
+/** The owned half of a scan: the recursion feed on every loop, then — on the last one — scoring, the
+ *  relevance cut and the budget. Throws are the caller's. */
 async function rankOwnedScan(activated, args, skip) {
     // Recursion off, `RECURSION` is only core's forced delay-level pass (upstream-st.md #19). Before isLastLoop reads `next`.
     if (!world_info_recursive && args?.state?.next === scan_state.RECURSION) args.state.next = scan_state.NONE;
@@ -1504,7 +1504,7 @@ async function rankOwnedScan(activated, args, skip) {
         await feedScanLoop(args);
     }
 
-    // Only the feed above is a per-loop job. Stages 3-5 write what the last loop writes again — and core reads
+    // Only the feed above is a per-loop job. Scoring, selection and delivery write what the last loop writes again — and core reads
     // `order` back in its inclusion-group prio sort, so the rewrite must not stand while the scan is still running.
     if (!isLastLoop(args)) return;
 
@@ -1559,7 +1559,7 @@ async function rankOwnedScan(activated, args, skip) {
         runState.lastSources = sources;
         windowFor = built.windowFor;
         // Keyword scoring only: the buffer is text WA injected, so it must not enter the window properNouns is counted over.
-        // excludeRecursion honoured here because core's gate is not in this loop — stage 2 inherits it, stage 3 must not.
+        // excludeRecursion honoured here because core's gate is not in this loop — activation inherits it, scoring must not.
         // An entry that fed the buffer must not match its OWN content there: that is the entry naming itself, not the
         // conversation naming it, and core never self-matches because it activates an entry once.
         const recursionTexts = runState.waRecursionTexts ?? [];
@@ -1570,7 +1570,7 @@ async function rankOwnedScan(activated, args, skip) {
                 : windowFor(depth, entry);
         };
 
-        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (docs/matching-architecture.md, *Stage 3 — Scoring*).
+        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (docs/matching-architecture.md, *Scoring*).
         const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
         // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
         const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
@@ -1590,7 +1590,7 @@ async function rankOwnedScan(activated, args, skip) {
             const scanText = keywordWindowFor(depth, item.entry);
             const scoreKeys = scoreKeysOf(item.entry);
             const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
-            // An entry reached at recursion pass d did not have the conversation name it (docs/matching-architecture.md, *Stage 3 — Scoring*).
+            // An entry reached at recursion pass d did not have the conversation name it (docs/matching-architecture.md, *Scoring*).
             item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
             item.logWeight = scored.logWeight;
@@ -1613,7 +1613,7 @@ async function rankOwnedScan(activated, args, skip) {
         if (runState.verboseRun) {
             console.log('%cWorldsApart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
             console.log(Object.fromEntries([...windowFor.windows]));
-            console.log('%cWorldsApart · recursion buffer — the entry contents stage 3 appended to every window', 'font-weight: bold');
+            console.log('%cWorldsApart · recursion buffer — the entry contents scoring appended to every window', 'font-weight: bold');
             console.log(runState.waRecursionTexts);
         }
     }
@@ -1669,7 +1669,7 @@ async function rankOwnedScan(activated, args, skip) {
         const { survivors, tokens, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
             ...delivery.budgetRoles({ promoted, results }),
-            // The tag, not retrieval provenance.
+            // The tag, not how the row activated.
             isVector: item => Boolean(item.entry?.vectorized),
             maxTokens,
             maxTotal,
@@ -1761,8 +1761,8 @@ async function rankOwnedScan(activated, args, skip) {
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
-            pn: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
-            dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
+            properNouns: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
+            density: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
             // Gated on eligibility, not on the cosine: the text score is lexical, so it is present whenever the entry has content, plugin or not.
             text: x.textEligible && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
             // Gated on eligibility, not the value: 0 is both a miss and no scorable keys.
@@ -1800,7 +1800,7 @@ function commandStop(command) {
     return stop.signal;
 }
 
-/** Runs retrieval and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED.
+/** Runs activation and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED.
  *  @param {object} [command] the slash command's `_abortController`: its Stop ends the run before the scan
  *  @returns {Promise<string>} '' for the slash command; a stopped run returns before reporting anything */
 async function dryRun(verbose = false, command = null) {
@@ -1845,7 +1845,7 @@ async function dryRun(verbose = false, command = null) {
     runState.lastQueryChat = [];
     runState.lastLayoutOrder = [];
 
-    // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
+    // similarityActivations() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
         runState.quietScan = false;
         if (!stop?.aborted) await selectAndActivate(chat, token, stop);
@@ -2218,7 +2218,7 @@ const SETTINGS_HTML = `
 
                     <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
-                    <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt." data-i18n="[title]Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
+                    <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Vector entries in the prompt." data-i18n="[title]Vector entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 
                     <div class="wa-row"><label for="wa_max_dynamic"><span data-i18n="Dynamic entry cap">Dynamic entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Vector and keyword entries. 0 = unlimited." data-i18n="[title]Vector and keyword entries. 0 = unlimited."></span></label><input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
@@ -2342,7 +2342,7 @@ function bind(selector, key, kind) {
 
 
 
-// The Delivery panel: a bottom-left icon expanding into stage 5's delivered set, in prompt order, from
+// The Delivery panel: a bottom-left icon expanding into the delivered set, in prompt order, from
 // runState.lastPromptOrder.
 let deliveryTrigger = null, deliveryPanel = null;
 function ensureDeliveryPanel() {
@@ -2604,7 +2604,12 @@ async function initBody() {
     $('#wa_review_bundles').on('click', () => superEvalScene());
 
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
-    eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
+    eventSource.on(event_types.GENERATION_ENDED, () => {
+        runState.generationIsDryRun = false;
+        runState.waOwnsScan = false;
+        // runs.end, never endRun: the slot is given up and the arming stands, so a scan still to come ranks. Not a /wa-dry's run, which no generation owns.
+        if (!runState.dryRunInProgress && runs.unscanned(runState.armedToken)) runs.end(runState.armedToken);
+    });
     // A stopped generation is superseded: the interceptor's `abort` cannot be read, so the token carries the stop.
     // Aborts every interceptor's fetches too: ST shows Stop while interceptors run, and stopGeneration emits this unconditionally.
     eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; endRun(runs.current()); for (const stop of liveStops) stop.abort(); });
@@ -2667,7 +2672,7 @@ async function initBody() {
     addWaCommand({
         name: 'wa-dry',
         callback: named => dryRun(false, named?._abortController),
-        helpString: 'WorldsApart: run retrieval and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
+        helpString: 'WorldsApart: run activation and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
         returns: 'nothing',
     });
 
@@ -2683,7 +2688,7 @@ async function initBody() {
         callback: gradeScene,
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'sample name, used as the filename', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'scene-<date>' }),
-            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many activated entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in the sample', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
         helpString: 'WorldsApart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',

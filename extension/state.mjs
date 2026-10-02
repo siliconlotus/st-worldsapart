@@ -12,12 +12,12 @@ export const defaultSettings = {
     llmTemperature: '1', // '' sends none; ignored without a profile, since generateRaw takes no sampling parameters
     minChunkSize: 120, // paragraphs shorter than this are joined with the next one
     meanCentered: true, // passed to the plugin as a parameter; off buys uncentered scores, not the no-plugin path
-    relevanceCutoff: 0.10, // stage-4 cutoff on the weighted credit for dynamic rows of both tiers; one setting for every model, never the fit's own `cutoff`
-    maxVectorEntries: 20, // stage-5 cap, counted off the `vectorized` flag
+    relevanceCutoff: 0.10, // selection cutoff on the weighted credit for dynamic rows of both tiers; one setting for every model, never the fit's own `cutoff`
+    maxVectorEntries: 20, // delivery cap, counted off the `vectorized` flag
     entityFilter: true, // keep capitalised tokens and lorebook vocabulary in the query
     properNounBoost: 3, // weight multiplier for capitalised query tokens under entityFilter
     stopwordDocFreq: 0.25, // drop query terms found in more than this fraction of chunks; 0 disables
-    messageDepth: 10, // recent messages read, for both the retrieval query and the keyword scan window; per-entry scanDepth overrides
+    messageDepth: 10, // recent messages read, for both the similarity query and the keyword scan window; per-entry scanDepth overrides
     dropChatTags: '', // comma-separated tag names removed, tag and content, from every message WA reads; '' = off
     presentationOrder: 'order-asc', // prompt order, not layout order: any SORT_FNS key (sort.mjs) | 'best-first' | 'best-last'
     presentationTiered: false, // group prompt order into tiers (constant → sticky → …) before the base sort
@@ -84,9 +84,9 @@ export const runState = {
     scanToken: 0,                 // generations increment it at intercept; after every await a continuation compares and bails when superseded
     armedToken: null,             // the token selectAndActivate committed for; a SCAN_DONE ranks only while it is still the current one, and its last loop disarms
     quietScan: false,             // the current token's generation is a quiet one: it records no latches and leaves the delivery panel alone
-    lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}` — core's format, not the US separator
+    lastScores: new Map(),        // cosines from the last similarity query, keyed `${world}.${uid}` — core's format, not the US separator
     lastPromptOrder: [],          // the last scan's prompt order, post-cut
-    lastQuery: '',                // last retrieval query text
+    lastQuery: '',                // last similarity query text
     lastMacros: {},               // the macro map the last scan ran under, `{{token}}` -> value; a capture records it
     matchScope: null,             // the runtime's match scope (createScanScope): the scan's macros and wordBoundary, with the caches built under them
     lastQueryChat: [],            // the messages that query was joined from
@@ -115,7 +115,7 @@ export const runState = {
     pluginShared: false,          // an install for all users exists under this page's folder name, and ST serves its files
     sourceFP: null,               // fingerprint of the plugin files as this page serves them
     pluginFailures: new Set(),    // plugin routes that failed this load, or answered without a field the extension reads
-    noCosineWarned: false,        // has the cosine-free retrieval warning been printed this load
+    noCosineWarned: false,        // has the no-cosine warning been printed this load
     lastLayoutOrder: [],          // the last scan's LAYOUT order, pre-cut — what the caps take a prefix of; the capture's population
     lastInjects: [],              // the Author's Note and depth prompts the scan read, when allowWIScan is on
     lastSources: {},              // the card/persona fields an entry opted into, by source name

@@ -1,4 +1,4 @@
-// Stage-2 activation verdicts (matcher.mjs activationAdds): candidacy, depth resolution, scanDepth 0, segmentation, the recursion rematch window.
+// Activation verdicts (matcher.mjs activationAdds): candidacy, depth resolution, scanDepth 0, segmentation, the recursion rematch window.
 import { createScanScope } from '../extension/smartkeys.mjs';
 import { activationAdds, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
@@ -34,7 +34,7 @@ const addedUids = (entries, text, o = {}) =>
     eq(addedUids([{ uid: 7, key: ['cosmonaut'], constant: true, content: 'x' }], 'cosmonaut'), '',
         'constant entries are core\'s to activate — forcing again is noise');
     eq(addedUids([{ uid: 8, key: ['cosmonaut'], vectorized: true, content: 'x' }], 'cosmonaut'), '8',
-    'vectorized entries are ordinary keyword candidates — stage 1 admits them anyway, so the skip protected nothing');
+    'vectorized entries are ordinary keyword candidates — the similarity query admits them anyway, so the skip protected nothing');
     eq(addedUids([{ uid: 10, key: ['cosmonaut'], content: '@@dont_activate\nx' }], 'cosmonaut'), '',
         '@@dont_activate is core\'s exclusion; the union must not override it');
     eq(addedUids([{ uid: 11, key: ['cosmonaut'], delayUntilRecursion: 1, content: 'x' }], 'cosmonaut'), '11',
@@ -69,7 +69,7 @@ const addedUids = (entries, text, o = {}) =>
         { uid: 6, key: ['cosmonaut'], scanDepth: 7, content: 'x' },
     ], recorder, { scope: NEUTRAL, ...OPTS, depthSkew: 2 });
     eq(seen.join(','), '6,7', 'depthSkew (min-activations) widens the default window only — authored scanDepth never skews');
-    console.log('ok   activationAdds: depth resolves as stage 3 rules it, 0 included');
+    console.log('ok   activationAdds: depth resolves as scoring rules it, 0 included');
 }
 
 // scanDepth 0 through makeWindowFor: no chat window, but injects and opted-in sources still carry the match.

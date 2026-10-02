@@ -1,4 +1,4 @@
-// Stage-2 recursion in eval/scene.mjs: the fixpoint's admissions, the depth each entry is reached at, and the
+// Activation recursion in eval/scene.mjs: the fixpoint's admissions, the depth each entry is reached at, and the
 // gates that decide who feeds it and who it may not reach. Hand-written vectors; recursion off is the default.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

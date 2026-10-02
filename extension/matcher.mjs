@@ -1,5 +1,5 @@
 // matcher.mjs — countKey and everything a match verdict rests on: the fold, boundaries, regex keys, SmartKeys
-// dispatch, secondary keys, the scan window, stage-2 activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
+// dispatch, secondary keys, the scan window, activation. ST-free; core parity is asserted in core-matcher-check, worth in matcher-check.
 
 import { addMessageHits, buildAst, buildAutomaton, cachedCount, evaluate, evaluateAst, evaluateSmartKey, expandMacros, expandRegex, fold, keyVariants, normalizeOrthography, primeScan, QUOTE_FAMILIES, requireScope, synthesizeSecondary, validateSmartKey } from './smartkeys.mjs';
 

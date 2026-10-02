@@ -8,21 +8,30 @@ How a key is written, how it is matched, and what WA does at each stage of a gen
 - **Language-dependent correctness belongs in the reviewed layer.** The matcher is silent, so it is language-neutral; the suggester is reviewed before anything is accepted. Hyphens pass that test; accents (`du`/`dû`) do not.
 - **Quoting is the single escape.** It suppresses operator, weight, paren and proximity interpretation and marks a punctuation-only term as deliberate. Quoting one term never changes what it matches; quoting across a space turns a conjunction into a phrase.
 - **The validator reads structure, not intent.**
-- **An unaltered lorebook behaves under WA as under core**, except for the divergences listed below. Authored intent survives: `scanDepth` wins over every global, `scanDepth: 0` matches nothing from chat, `@@dont_activate` is never overridden, `@@activate` is never revoked, and a forced entry still takes core's probability roll.
-- **One relevance decision, at stage 4.** Stages 1 and 2 admit on rules; stage 4 arbitrates once over the whole set. Author declarations, core's gates and the admission ceiling are not WA's calls.
+- **An unaltered lorebook behaves under WA as under core, except for selection**: of the entries that activate, WA keeps the ones it deems relevant. Its keys match as core's do, but for the divergences listed below. Authored intent survives: `scanDepth` wins over every global, `scanDepth: 0` matches nothing from chat, `@@dont_activate` is never overridden, `@@activate` is never revoked, and a forced entry still takes core's probability roll.
+- **One relevance decision, at selection.** Activation admits on rules; selection arbitrates once over the whole set. Author declarations, core's gates and the admission ceiling are not WA's calls.
 - **`countKey` is the only matcher.** The audit, the Studio, the Lab and the evals call it.
 
 ## The pipeline
 
-`worldsapart.js` hooks three points of a generation; every other module is ST-free and takes its settings as parameters.
+`worldsapart.js` hooks three points of a generation; the modules under `extension/` are ST-free and take their settings as parameters.
 
-1. **`intercept`** (the generation interceptor) stores the chat as core's scan haystack (`runState.scanChat`) and calls `selectAndActivate`: strip `dropChatTags` elements, run stage 1 (`retrieve`) and stage 2 (`keywordActivations`) independently, emit one `WORLDINFO_FORCE_ACTIVATE` for the union, and set `waOwnsScan`. ST skips interceptors on its dry runs, so those scans are core's own and WA only records them.
+1. **`intercept`** (the generation interceptor) stores the chat as core's scan haystack (`runState.scanChat`) and calls `selectAndActivate`: strip `dropChatTags` elements, run the two activation routes independently, by similarity (`similarityActivations`) and by key (`keywordActivations`), emit one `WORLDINFO_FORCE_ACTIVATE` for the union, and set `waOwnsScan`. ST skips interceptors on its dry runs, so those scans are core's own and WA only records them.
 2. **`onEntriesLoaded`** (`WORLDINFO_ENTRIES_LOADED`) reads `@@promote` into `waPromote` and the leading decorator lines into `waDecorators`, runs the decorator desugar, and, on a scan WA owns, stands core down: the author's `ignoreBudget` is stashed on `waIgnoreBudget` and `ignoreBudget` set true, and every keyword-activating entry's keys and secondaries are stashed on `waKeys`/`waSecondary` and blanked. Constants and `@@activate` entries keep their keys: core short-circuits both before matching, and the inclusion-group filter's `getScore` reads `entry.key`.
-3. **`onScanDone`** (`WORLDINFO_SCAN_DONE`, once per scan loop) feeds the next pass (`feedScanLoop`). On the last loop (`isLastLoop`: a falsy `state.next`, or core's `world_info_max_recursion_steps` break, which leaves it set) it scores what core activated (stage 3), cuts on relevance (4), applies the caps and budget (5), rewrites `order` to the prompt order and deletes everything else from core's `activated` map. Both writes wait for the last loop: core re-activates a forced entry its map no longer holds and schedules another pass, and it reads `order` in its inclusion-group sort.
+3. **`onScanDone`** (`WORLDINFO_SCAN_DONE`, once per scan loop) feeds the next pass (`feedScanLoop`). On the last loop (`isLastLoop`: a falsy `state.next`, or core's `world_info_max_recursion_steps` break, which leaves it set) it scores what core activated (scoring), cuts on relevance (selection), applies the caps and budget (delivery), rewrites `order` to the prompt order and deletes everything else from core's `activated` map. Both writes wait for the last loop: core re-activates a forced entry its map no longer holds and schedules another pass, and it reads `order` in its inclusion-group sort.
 
 If WA is enabled it owns activation; there is no half-owned mode. A matcher failure is reported once per distinct message per session (`reportFailure`) and WA keeps ownership rather than falling back to core for a turn. A throw while ranking is reported every time it happens, and the scan ships only what needed no decision: constants, `@@activate` and armed stickies (`delivery.dropUndecided`).
 
-**One run at a time.** A run lasts from a generation's interceptor to the last loop of the scan it armed, ranked or not, or to that scan loading no entries, where core emits no scan-done. Every interceptor entry, `quiet` generations and `/wa-dry` included, waits for the run in progress to finish before taking the next `scanToken`, and a continuation whose token is no longer current bails at its next await. A run is superseded by a stop; at once when it has armed, its scan has not started, its generation held ST's send lock and the newcomer holds it (`runs.mjs`) — ST starts a locked generation only once the last released the lock, and an interceptor after WA's that aborts emits no event; and otherwise only with a toast, when it has not armed within `ARM_WAIT_MS` or its scan has not started, or not finished, `RUN_WAIT_MS` after the step before — the run may be blocked on the newcomer (an interceptor after WA's awaiting a generation). A free lock is not evidence that a generation is over: a quiet generation's end releases the lock a visible one still holds. A scan ranks only while its generation is armed (`armedToken`), and its last loop disarms it; a scan that does not rank runs core in full, budget included. A superseded generation that is still running cannot be told from the newcomer's, since core gives a scan no generation identity and holds force-activations in one map (upstream-st.md #20): its scan can rank under the newcomer's arming and take the newcomer's activations, and the newcomer's scan then runs core in full. A `quiet` generation is not a chat turn: it records no latches and leaves the delivery panel alone.
+**One run at a time.** A run is one generation's hold on WA's scan state (`runs.mjs`).
+
+- **Its span.** From the generation's interceptor to the last loop of the scan it armed, ranked or not, or to that scan loading no entries, where core emits no scan-done.
+- **Waiting.** Every interceptor entry, `quiet` generations and `/wa-dry` included, waits for the run in progress to finish before taking the next `scanToken`. A continuation whose token is no longer current bails at its next await.
+- **Ranking.** A scan ranks only while its generation is armed (`armedToken`), and its last loop disarms it. A scan that does not rank runs core in full, budget included.
+- **A generation that ends before its scan.** An armed run whose scan has not started gives up the slot at `GENERATION_ENDED` and stays armed, so its scan ranks if it still comes.
+- **Superseded at once**, by a stop; or when the run has armed, its scan has not started, its generation held ST's send lock and the newcomer holds it too. ST starts a locked generation only once the last released the lock. A free lock is not evidence that a generation is over: a quiet generation's end releases the lock a visible one still holds.
+- **Superseded with a toast**, when the run has not armed within `ARM_WAIT_MS`, or its scan has not started, or not finished, `RUN_WAIT_MS` after the step before. The run may be blocked on the newcomer: an interceptor after WA's awaiting a generation.
+- **A superseded generation that is still running** cannot be told from the newcomer's, since core gives a scan no generation identity and holds force-activations in one map (`upstream-st.md` #20). Its scan can rank under the newcomer's arming and take the newcomer's activations, and the newcomer's scan then runs core in full.
+- **A `quiet` generation is not a chat turn.** It records no latches and leaves the delivery panel alone.
 
 ## The decorator desugar
 
@@ -51,7 +60,15 @@ An unparseable or out-of-range argument is refused, never clamped. A decorator o
 
 **The activation gates** are `activationAdds` checks rather than core fields. `@@activate_only_after` and `@@activate_only_every` count assistant messages (not `is_user`, not `is_system`); `@@is_greeting` reads `chat[0].swipe_id`, 0 when the card has no alternates; `@@is_user_icon` compares the active persona name. A gate whose input is missing does not rule. The gate and the scan window are independent, so an entry can become eligible after its trigger has left the window.
 
-**The latches.** WA owns the record, in `chat_metadata.worldsApart.fired` (`WA_METADATA_KEY`), rather than desugaring to core's `sticky`/`cooldown`, which core deletes whenever the entry's own field is absent. Each `latchKey(entry)` (world and uid joined with US) maps to the first chat length the latch holds at, one past the length when the entry first fired. Every length is on core's scan clock (`scanLength`), the one its delay and timed effects read: hidden messages out and a swiped reply popped, so a swipe or regenerate of the firing turn reads the record as not yet fired. The record is written at scan-done for activated entries carrying either decorator, never on a dry run or a quiet generation, and read through `firedUpTo`, which drops anything past the current length, so a rewind un-latches. A fired `@@dont_activate_after_match` entry is skipped; a fired `@@keep_activate_after_match` entry is admitted with no keyword hit and is durable, laid out with constants and armed stickies rather than scored and cut. Both present latches ON. Both take an optional duration, holding while `chatLength <= firedAt + N`, measured from the first firing only; bare holds forever. A record follows its entry through the Studio's renames, renumbers, moves and deletes, in every chat on disk (`rekeyLatches`; `st/studio.mjs` `rekeyChatLatches`); edits in ST's own editor are not followed.
+**The latches.** WA owns the record rather than desugaring to core's `sticky`/`cooldown`, which core deletes whenever the entry's own field is absent.
+
+- **The record** is `chat_metadata.worldsApart.fired` (`WA_METADATA_KEY`): each `latchKey(entry)`, world and uid joined with US, maps to the first chat length the latch holds at, one past the length when the entry first fired.
+- **The clock** is core's scan clock (`scanLength`), the one its delay and timed effects read: hidden messages out and a swiped reply popped. A swipe or regenerate of the firing turn therefore reads the record as not yet fired.
+- **Written** at scan-done, for activated entries carrying either decorator; never on a dry run or a quiet generation.
+- **Read** through `firedUpTo`, which drops anything past the current length, so a rewind un-latches.
+- **Effect.** A fired `@@dont_activate_after_match` entry is skipped. A fired `@@keep_activate_after_match` entry is admitted with no keyword hit and is durable, laid out with constants and armed stickies rather than scored and cut. Both present latches ON.
+- **Duration.** Both take an optional `N`, holding while `chatLength <= firedAt + N`, measured from the first firing only; bare holds forever.
+- **Following the entry.** A record follows its entry through the Studio's renames, renumbers, moves and deletes, in every chat on disk (`rekeyLatches`; `st/studio.mjs` `rekeyChatLatches`). Edits in ST's own editor are not followed.
 
 **`@@activate` and `@@dont_activate`** are core's: `activationAdds` skips an entry carrying either.
 
@@ -147,7 +164,7 @@ Blank secondaries are dropped; none means no gate; `selective: false` switches t
 
 **Markup is masked for every literal matcher** (`maskMarkup`): a tag or HTML comment becomes spaces, one per character, so offsets still index the source. A regex sees the raw text and is the only route to a tag.
 
-**Whole words** apply at both edges, multi-word keys included. The boundary class is the `wordBoundary` setting: `permissive` is letters, digits and marks; `strict` (default) adds hyphen and apostrophes. A doubled hyphen is always a boundary; `_` never is. Scripts without word separators get no carve-out; `wholeWordAdvice` warns that the flag cannot match inside running text there.
+**Whole words** apply at both edges, multi-word keys included. The boundary class is the `wordBoundary` setting: `permissive` is letters, digits and marks; `strict` (default) adds hyphen and apostrophes. A doubled hyphen is always a boundary, and so is `_`. Scripts without word separators get no carve-out; `wholeWordAdvice` warns that the flag cannot match inside running text there.
 
 **The match window** (`matchWindow`, `scan | message | paragraph`) is where WA stops concatenating, for every rule: `scan` one segment of the joined messages, `message` one per message, `paragraph` split on a blank line and at a block element's edge (`BLOCK_TAGS`). Match sources and injects are each their own segment. A regex `^` and `$` are segment-relative. A unit's occurrences sum across segments and saturate once.
 
@@ -163,25 +180,33 @@ Blank secondaries are dropped; none means no gate; `selective: false` switches t
 
 ### Witness spans
 
-`keyExcerpts`, `keySpans` and `keyHits` report where a key landed, for the Lab and the Studio. They walk the AST's leaves rather than `evaluate`'s units, so a failed key still shows the branch that hit. A negated leaf is reported with `negated` set and no offsets. `mergeSpans` folds overlapping spans. Offsets index the NFC text.
+`keyExcerpts`, `keySpans` and `keyHits` report where a key landed, for the Lab and the Studio. They walk the AST's leaves rather than `evaluate`'s units, so a failed key still shows the branch that hit. A negated leaf is reported with `negated` set, and carries offsets only where it occurs. `mergeSpans` folds overlapping spans. Offsets index the NFC text.
 
-## Stage 1 — Retrieval
+## Activation
 
-`retrieve` builds the query from the newest `messageDepth` messages with content (`world_info_depth` when unset), macros substituted, joined as `name: text` blocks (`query.mjs`), with the embedding model's instruction prefix (`relevance.mjs` `PREFIXES`).
+Three routes reach core's `activated` map: WA's force-activate, `constant` and `@@activate`, and sticky persistence. WA's force-activate carries two routes of its own, run in parallel: by similarity, for `vectorized` entries, and by key. Core keeps every gate, the timers, recursion control and prompt assembly; WA replaces one question, *did a key match*.
 
-`syncWorld` chunks every enabled entry with content (`chunking.mjs`) into the collection `wa_<hash of book name>`, one row per (text, uid), inserting new chunks and deleting stale ones. A chat-bound book whose collection is empty first asks the plugin's `/adopt` to copy rows other collections under the same source and model hold for the same hashes, and embeds only the rest. A fetch that embeds (the query, the bulk insert, `/adopt`) times out at five minutes, as hang detection only, and any other at ten seconds. A generation's Stop, or the slash command's for `/wa-dry` and the captures, aborts every retrieval fetch in flight; the server still finishes a write it started.
+**The seam.** Core checks `getExternallyActivated` after `@@dont_activate` and before constant, sticky and key matching, so disable, triggers, character and tag filters, delay, cooldown, `delayUntilRecursion` and `excludeRecursion` run first and the probability roll runs after: a forced entry inherits them all. WA emits every entry whose keys match and lets core refuse, except that it pre-checks `delay` itself so its captures do not list an entry core would drop. With core's matcher blanked, an entry WA does not emit has no other route in.
 
-`queryCollections` asks the plugin's `/query-multi`: every chunk of every attached book scored by cosine against the query, both centred on the collection's centroid (the memory tier's chunks, or every chunk when a book has none), pooled to the best chunk per entry and cut at `admitCeiling`, 1000 entries. Without the plugin the request goes to ST's `/api/vector/query-multi`, which neither centres, pools nor scores, so K counts chunks and stage 3 has no cosine. Admission is the returned chunks' owners on both paths; only the cosine column differs. Only `vectorized` entries are retrieval winners; every scored entry keeps its cosine in `runState.lastScores`. A retrieval failure costs every entry its cosine; keyword matching and constants are unaffected. A row whose vector is not the query's dimension — embedded under another model at the same model name — is one sync cannot replace, since a hash carries only (text, uid), so `/query-multi` deletes it from the collection and the next sync re-embeds it; a query with no vector deletes nothing.
+### By similarity
+
+`similarityActivations` builds the query from the newest `messageDepth` messages with content (`world_info_depth` when unset), macros substituted, joined as `name: text` blocks (`query.mjs`), with the embedding model's instruction prefix (`relevance.mjs` `PREFIXES`).
+
+`syncWorld` chunks every enabled entry with content (`chunking.mjs`) into the collection `wa_<hash of book name>`, one row per (text, uid), inserting new chunks and deleting stale ones. A chat-bound book whose collection is empty first asks the plugin's `/adopt` to copy rows other collections under the same source and model hold for the same hashes, and embeds only the rest. A fetch that embeds (the query, the bulk insert, `/adopt`) times out at five minutes, as hang detection only, and any other at ten seconds. A generation's Stop, or the slash command's for `/wa-dry` and the captures, aborts every fetch of the query in flight; the server still finishes a write it started.
+
+`queryCollections` scores the query against the collections of every attached book.
+
+- **With the plugin** (`/query-multi`): every chunk is scored by cosine against the query, both centred on the collection's centroid (the memory tier's chunks, or every chunk when a book has none), pooled to the best chunk per entry and cut at `admitCeiling`, 1000 entries.
+- **Without it** the request goes to ST's `/api/vector/query-multi`, which neither centres, pools nor scores, so K counts chunks and scoring has no cosine.
+- **Admission** is the returned chunks' owners on both paths; only the cosine column differs. Only `vectorized` entries are activated on it; every scored entry keeps its cosine in `runState.lastScores`.
+- **A failed query** costs every entry its cosine; keyword matching and constants are unaffected.
+- **A row of another dimension.** A row whose vector is not the query's dimension was embedded under another model at the same model name, and sync cannot replace it, since a hash carries only (text, uid). `/query-multi` deletes it from the collection and the next sync re-embeds it. A query with no vector deletes nothing.
 
 A plugin route that errors, or answers without a field the extension reads, takes the no-plugin path for that call, and `pluginFallback` announces it once per load. Only fields a reader consumes are checked.
 
 The plugin (`plugin/server.js`, `scoring.mjs`, `vector.mjs`) caches an index's items and mean on the file's mtime and size; `scoreCollection` is mean-centred cosine, `poolEntries` keeps the best chunk per entry, `selectTopK` cuts.
 
-## Stage 2 — Activation
-
-Three routes reach core's `activated` map: WA's force-activate, `constant` and `@@activate`, and sticky persistence. Core keeps every gate, the timers, recursion control and prompt assembly; WA replaces one question, *did a key match*.
-
-**The seam.** Core checks `getExternallyActivated` after `@@dont_activate` and before constant, sticky and key matching, so disable, triggers, character and tag filters, delay, cooldown, `delayUntilRecursion` and `excludeRecursion` run first and the probability roll runs after: a forced entry inherits them all. WA emits every entry whose keys match and lets core refuse, except that it pre-checks `delay` itself so its captures do not list an entry core would drop. With core's matcher blanked, an entry WA does not emit has no other route in.
+### By key
 
 **`keywordActivations`** fetches the candidates with live keys, registers every usable key and secondary, and calls `activationAdds`: an enabled, non-constant entry without `@@dont_activate`/`@@activate`, past its `delay` and every activation gate it carries, activates if `keywordScore` reports any hit in its window, and a fired `@@keep_activate_after_match` entry with none. The window (`makeWindowFor`) is the chat minus `is_system` messages at depth, plus every `scan: true` extension prompt that is ambient or placed inside the depth, plus the sources the entry opted into, each its own segment.
 
@@ -189,13 +214,13 @@ Three routes reach core's `activated` map: WA's force-activate, `constant` and `
 
 **Recursion and min-activations** (`feedScanLoop`, each `WORLDINFO_SCAN_DONE`). Activated entries are never rescanned. With `world_info_recursive` on, each pass's newly successful entries minus `preventRecursion` ones append their content to the recursion buffer; a min-activations pass widens WA's depth by one message instead, as core's `advanceScan` does. Unmatched candidates are rematched over the chat plus the buffer, and an add is stamped with its pass (`waTriggerDepth`). Core schedules every pass.
 
-## Stage 3 — Scoring (`onScanDone`)
+## Scoring (`onScanDone`)
 
-Every activated entry becomes a row, `score` its stage-1 cosine if it had one. With `dropUnavailable`, a memory entry whose STMB range postdates the current message is deleted first.
+Every activated entry becomes a row, `score` its cosine from the similarity query if it had one. With `dropUnavailable`, a memory entry whose STMB range postdates the current message is deleted first.
 
 **Text.** `contentTextScores`: BM25 (`lexical.mjs`) of the query over every enabled entry's content, chunked as `syncWorld` chunks and max-pooled per entry. The entity filter picks the query terms: a token survives if it is capitalised mid-sentence or in the gazetteer of every authored key, secondary and title, capitalised ones weighted `properNounBoost`, and terms in more than `stopwordDocFreq` of chunks are dropped. The per-book index is rebuilt when `indexFingerprint` moves, a sum of per-entry hashes over world, uid and content.
 
-**Keys.** Each row's keys, live or stashed, are scored by `keywordScore` over its window plus the recursion buffer, minus the entry's own content, and not at all for an `excludeRecursion` entry. The score is divided by `1 + waTriggerDepth`; the curve is an assertion. No shipped fit reads the column.
+**Keys.** Each row's keys, live or stashed, are scored by `keywordScore` over its window plus the recursion buffer minus the entry's own content; an `excludeRecursion` entry is scored over its window alone. The score is divided by `1 + waTriggerDepth`; the curve is an assertion. No shipped fit reads the column.
 
 **The relevance column** (`scoreRelevanceColumn`). `properNouns` is the sum, over names the entry shares with the window, of `log((N+1)/(df+1))`, df counting the book's entries with content, disabled included. `density` is names per hundred tokens of the entry. `E[credit]` comes from a fitted logistic model per tier (memory or reference, by `isMemory`), `extension/relevance-model-<tier>.json`, keyed by embedding model, over the fit's own `features`. Each feature is standardised within the turn over the fit's recorded population, because no feature has a fixed scale; `E[credit]` is therefore conditional on the turn's pool (F24). `E[credit] = 0.5 P(>=2) + 0.5 P(>=3)`, `P(>=3)` clamped to `P(>=2)`. A model with no fit of its own scores through `UNFITTED_FALLBACK`'s; a pass with no cosine through the file's `noCosine` fit. A tier with no model is not scored, and an unscored row is kept.
 
@@ -203,13 +228,13 @@ Every activated entry becomes a row, `score` its stage-1 cosine if it had one. W
 
 **Layout** (`layout.mjs` `layoutOrder`). Rows are classified durable first: armed sticky, or a fired `@@keep_activate_after_match`; then constant (`isConstant`: the flag or `@@activate`); then promoted (`waPromote`); then dynamic. The scored blocks sort by weighted credit, unscored rows last, then authored order; `sequential` book priority makes the book tier the primary key, `interleaved` scales the score by the book's weight and shifts authored order by its offset. Durable blocks sort by authored order. This is the layout order (`runState.lastLayoutOrder`).
 
-## Stage 4 — Selection
+## Selection
 
 `selection.mjs` `relevanceCut`, over the dynamic block only: a row whose weighted credit is below `relevanceCutoff` is deleted from core's map. The cutoff is one setting for every model and both tiers, never the fit's own `cutoff`, because `E[credit]` is calibrated across embedders (E4). A row with no finite score, or whose tier has no fit, is kept.
 
 **`@@promote`** exempts an entry from the cut, not from capacity: the author declaring activation sufficient. It is matched exactly where core's decorator test is `startsWith`, and the stored book keeps the line.
 
-## Stage 5 — Delivery
+## Delivery
 
 `delivery.mjs`. `walkOrder` is constants, armed stickies, promoted, then dynamic, so every cap is a prefix cut of the layout order. `applyBudget` walks it once:
 

@@ -50,7 +50,7 @@ const FINGERPRINT = pluginFingerprint(...PLUGIN_FILES.map(readSource));
 export const info = {
     id: 'worlds-apart',
     name: 'WorldsApart',
-    description: 'Mean-centered vector search for World Info retrieval.',
+    description: 'Mean-centered vector search for World Info activation.',
 };
 
 /** Corpus statistics per index path, an LRU; `loaded` is the load in flight or done, so concurrent queries share one parse.

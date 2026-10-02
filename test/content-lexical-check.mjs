@@ -1,4 +1,4 @@
-// Self-check for content-lexical.mjs, the stage-3 text signal: which entries become documents, how chunks pool to an entry, when the cached index is stale.
+// Self-check for content-lexical.mjs, the scoring text signal: which entries become documents, how chunks pool to an entry, when the cached index is stale.
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from '../extension/content-lexical.mjs';
 
 let fails = 0;

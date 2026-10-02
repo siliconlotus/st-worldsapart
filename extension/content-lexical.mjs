@@ -1,5 +1,5 @@
-// content-lexical.mjs — stage 3's text signal: BM25 over EVERY entry's content, chunked as syncWorld chunks.
-// Scoring only, never admission; stage 1 never consults it.
+// content-lexical.mjs — scoring's text signal: BM25 over EVERY entry's content, chunked as syncWorld chunks.
+// Scoring only, never admission; the similarity query never consults it.
 import { buildLexical, bm25Scores, DEFAULT_K1, DEFAULT_B } from './lexical.mjs';
 import { chunkEntry } from './chunking.mjs';
 

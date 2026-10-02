@@ -1,4 +1,4 @@
-// selection.mjs — stage 4: does this entry belong. Pure; every setting is injected.
+// selection.mjs — does this entry belong. Pure; every setting is injected.
 import { weightedCredit } from './layout.mjs';
 
 /**

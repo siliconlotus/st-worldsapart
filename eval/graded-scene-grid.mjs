@@ -65,7 +65,7 @@ if (S.name) console.log(`scene: ${sceneLabel(S)}${S.notes ? ` — ${S.notes}` : 
 const VECTORS = arg('--vectors') ?? 'data/default-user/vectors/ollama';
 // all from the scene's own params: denseAllEntries cannot be scored against a vectorized-only build.
 const INDEX = indexPath(S, { vectors: VECTORS, model: EM.label, index: arg('--index'), all: P.denseAllEntries });
-const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
+const TOPK = Number(arg('--topk')) || undefined;   // unset = the similarity query's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
 
 // Nothing here reads a live book; the sample carries copies of every attached book.
 const scene = loadScene(S, { indexFile: INDEX, indexOpts: { vectors: VECTORS, model: EM.label }, params: P });

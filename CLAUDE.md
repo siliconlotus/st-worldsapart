@@ -87,26 +87,26 @@ task list and outlives a deliberate stop; append-and-resume already makes a kill
 prompt change is the only thing that can move the result. Hosted reasoning models honour neither seed nor
 temperature, so they can confirm a finding transfers but cannot be where it is found.
 
-## Five stages, and the three orderings
+## Four stages, and the three orderings
 
-The stages are `docs/matching-architecture.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
-**2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
-**3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
-per-tier model; `E[credit]` with its odds scaled by the author's term weights, `weightedCredit`, is the layout order), **4. Selection** (`relevanceCut`, the dynamic
-block only, both tiers at one cutoff for every model), **5. Delivery** (`applyBudget`, every cap a
+The stages are `docs/matching-architecture.md`'s: **Activation** (`selectAndActivate`: two routes in parallel, by similarity
+(`similarityActivations`, cosine only, no admission test) and by key, then one force-activate; core's `activated` map is the result),
+**Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
+per-tier model; `E[credit]` with its odds scaled by the author's term weights, `weightedCredit`, is the layout order), **Selection** (`relevanceCut`, the dynamic
+block only, both tiers at one cutoff for every model), **Delivery** (`applyBudget`, every cap a
 prefix of the layout order). Say which stage a claim is about.
 
-**WA is a selection system, not a ranking system.** What ships is the set that survives stage 4, chosen
-by a threshold on each row alone; rank decides what overflows at stage 5, never what belongs. So the
+**WA is a selection system, not a ranking system.** What ships is the set that survives selection, chosen
+by a threshold on each row alone; rank decides what overflows at delivery, never what belongs. So the
 validity score is F2 over the delivered set, set-based and asymmetric — recall at grade >= 3, precision
 crediting a 2 at half (`metrics.mjs` `gradeCredit`) — with no window imposed on it. nDCG and any score
 read at a window the system is not asked to choose (`@R`) are diagnostics on the ordering, never
 evidence that the system works.
 
-**Three orderings, and only one is a ranking.** The retrieval ranking decides what is activated; the
+**Three orderings, and only one is a ranking.** The similarity ranking decides what is activated; the
 layout order is what the caps and budget take a prefix of (`runState.lastLayoutOrder`); the prompt
 order is the user's sort over the survivors (`runState.lastPromptOrder`). A change to the layout score
-can never surface an entry retrieval did not return, so no scoring change is a recall lever, only a
+can never surface an entry the similarity query did not return, so no scoring change is a recall lever, only a
 precision one.
 
 **Three populations, and they cross-cut.** `memory` is STMB-marked and `reference` is everything else —
@@ -116,7 +116,7 @@ moments: the runtime reads the armed effect and hoists it past the cut, while th
 capture row's `block`, which a dry run never sets to sticky, so a sticky entry is durable at runtime
 once armed and is graded like any other activation.
 
-`eval/lib/scene.mjs` models stages 1 and 3; the keyword loop in `makeCandidateSet` is stage 2 and may only
+`eval/lib/scene.mjs` models the similarity query and scoring; the keyword loop in `makeCandidateSet` is activation by key and may only
 admit what core could have activated — not disabled entries, not a `delayUntilRecursion` one on the
 initial pass, not an `excludeRecursion` one on a later one. It runs to a fixpoint when the scene records
 `recursive`; a scene that does not record it is read as recursion off.

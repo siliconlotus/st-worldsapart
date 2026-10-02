@@ -20,7 +20,7 @@ if (!samples.length) {
 }
 // relevanceCutoff is a user setting, so the run is told it rather than given a stand-in.
 const CUTOFF = Number(arg(argv, '--cutoff'));
-if (arg(argv, '--cutoff') === null || !Number.isFinite(CUTOFF)) { console.error('--cutoff <relevanceCutoff> is required: the stage-4 cutoff WA is compared at'); process.exit(2); }
+if (arg(argv, '--cutoff') === null || !Number.isFinite(CUTOFF)) { console.error('--cutoff <relevanceCutoff> is required: the selection cutoff WA is compared at'); process.exit(2); }
 const TIER = arg(argv, '--tier') ?? 'memory';
 if (!['memory', 'reference', 'all'].includes(TIER)) { console.error(`--tier must be memory|reference|all, got ${TIER}`); process.exit(2); }
 const BUDGETS = String(arg(argv, '--budget') ?? '5000,10000,15000,25000,40000').split(',').map(Number).filter(Number.isFinite);
@@ -78,7 +78,7 @@ for (const file of samples) {
         ? new Set(build(P.K1, P.B, null, [], S.query, haystackFor(S, P, { depth: CORE_DEPTH }))
             .filter(r => r.keywordHits?.length).map(r => Number(r.uid)))
         : null;
-    // makeLayoutOrder is what stage 4 orders by, so this reads WA's own layout rather than a second copy of it.
+    // makeLayoutOrder is what the layout is ordered by, so this reads WA's own layout rather than a second copy of it.
     const ranked = makeLayoutOrder({ scene, haystack: haystackFor(S, P) })(rows);
     const gradeOf = makeGradeOf(S.entries, scene);
     const enriched = ranked
@@ -100,7 +100,7 @@ const coreNominate = (rows) => {
     for (const r of [...rows].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)).slice(0, TOP_K)) picked.add(r);
     return [...picked].sort(ORDERS[CORE_ORDER]);
 };
-// Stage 4 itself, over rows already in layout order: a promoted or unscored row is kept, as at runtime, and constants stay in the walk.
+// Selection itself, over rows already in layout order: a promoted or unscored row is kept, as at runtime, and constants stay in the walk.
 const waNominate = rows => relevanceCut(rows, { cutoffOf: r => (hasPromoteDecorator(r.entry) ? NaN : CUTOFF) }).kept;
 
 console.log(`${scenes.length} scene(s), ${TIER} tier, ${tk.tokenizer} tokens; core: top-${TOP_K}, scan depth ${CORE_DEPTH}, walked by ${CORE_UIDS ? "a real install's answer" : CORE_ORDER}; WA cut at ${CUTOFF}`);
