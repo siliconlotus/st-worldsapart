@@ -1,4 +1,4 @@
-// Guards stage 3's product, the layout order (extension/layout.mjs), on literal rows with no ST and no corpus.
+// Guards scoring's product, the layout order (extension/layout.mjs), on literal rows with no ST and no corpus.
 import { layoutOrder, layoutScore, weightedCredit } from '../extension/layout.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
 import { eqDeep as eq } from '../eval/lib/metrics.mjs';

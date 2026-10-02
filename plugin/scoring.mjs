@@ -1,4 +1,4 @@
-// scoring.mjs — stage 1: mean-centered cosine over a collection's chunks, pooled to entries, bounded.
+// scoring.mjs — the similarity query: mean-centered cosine over a collection's chunks, pooled to entries, bounded.
 // Cosine only, with no admission test: above admitCeiling the overflow is cosine-only.
 import { centeredCosineScores } from './vector.mjs';
 

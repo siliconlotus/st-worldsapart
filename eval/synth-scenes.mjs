@@ -174,7 +174,8 @@ let picks;
 if (arg(argv, '--msgs') === 'same') {
     if (!src) { console.error('--msgs same needs --from'); process.exit(2); }
     // The donor's own fields, never its filename; sceneEnd is where the scene ends, generatedFrom.msg what wrote it.
-    const same = src.sceneEnd ?? src.generatedFrom?.msg;
+    // `records` is the jsonl with its header at 0, so a message index is one below its record.
+    const same = Number.isFinite(Number(src.sceneEnd)) ? Number(src.sceneEnd) + 1 : src.generatedFrom?.msg;
     if (!Number.isFinite(Number(same))) { console.error(`${basename(FROM)} records no scene end to reuse`); process.exit(2); }
     picks = [Number(same)];
 } else if (arg(argv, '--msgs')) {
@@ -240,8 +241,8 @@ for (const idx of picks) {
     });
     const queryText = query.buildQuery(visible, { depth: DEPTH });   // not `query`: that shadows the module namespace this line reads
     const queryChat = query.queryMessages(visible, { depth: DEPTH });
-    const sceneStart = srcIndex[queryChat[0].i];
-    const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i];
+    const sceneStart = srcIndex[queryChat[0].i] - 1;
+    const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i] - 1;
     // The donor's knobs, minus `depth` — that is the scene's span, and this derivation sets its own.
     const { depth: _d, ...base } = { ...(src?.params ?? {}) };
     // The messages, not a window: what /wa-grade freezes (runState.lastScanChat).

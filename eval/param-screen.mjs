@@ -99,7 +99,7 @@ if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
     console.error('a fit= arm needs --cutoff: without it each fit cuts at its own provenance cutoff and the contrast is confounded');
     process.exit(2);
 }
-/** The globals that ride on the baseline and on every arm, so both are scored under one stage-4 condition. */
+/** The globals that ride on the baseline and on every arm, so both are scored under one selection condition. */
 const GLOBAL = { ...(BUDGET ? { budgetTokens: BUDGET } : {}), ...(CUTOFF !== null ? { memoryCutoff: CUTOFF } : {}) };
 // fAtCut is F-beta(2) over the set the relevance cut admits; the others are diagnostics on the ordering at a fixed window.
 const METRIC = arg(argv, '--metric') ?? 'fAtCut';
@@ -201,7 +201,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     const results = [];
     for (const armName of picked) {
         const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, __archived: archived, ...armParams } = ARMS[armName];
-        // GLOBAL rides on every arm as well as the baseline, or the delta is the stage-4 difference.
+        // GLOBAL rides on every arm as well as the baseline, or the delta is the selection difference.
         const scoring = { ...armParams, ...GLOBAL };
         const cells = [];
         for (const sc of scenes) {

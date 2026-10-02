@@ -1,4 +1,4 @@
-// versus-score.mjs — delivered-set F2 (stage 4's bars: recall at >= 3, gradeCredit precision, no window) over the arms of a graded v3 capture, read off `!cut` rather than re-derived, since an arm ST core selected cannot be; tokens sit beside F and are never folded in.
+// versus-score.mjs — delivered-set F2 (selection's bars: recall at >= 3, gradeCredit precision, no window) over the arms of a graded v3 capture, read off `!cut` rather than re-derived, since an arm ST core selected cannot be; tokens sit beside F and are never folded in.
 // Usage (any cwd):
 //   node eval/versus-score.mjs <graded-bundle.json> [more.json ...]
 import { readFileSync } from 'node:fs';
@@ -12,7 +12,7 @@ if (!files.length) {
 
 const US = "\u001f";
 
-/** The last verdict: a re-grade appends beside the one it disagrees with (eval/bundle-schema.md, Verdict elements). */
+/** The last verdict: a re-grade appends beside the one it disagrees with (eval/bundle-schema.md, Verdicts). */
 const gradeOf = row => {
     const gs = row?.grades ?? [];
     return gs.length ? Number(gs[gs.length - 1].grade) : null;

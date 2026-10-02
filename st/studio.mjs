@@ -14,7 +14,7 @@ import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, flagProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { chatUser, createScanScope, macroMap, validateSmartKey } from '../extension/smartkeys.mjs';
+import { chatUser, createScanScope, macroMap, usableMessages, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
@@ -2210,7 +2210,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return rows;
     };
 
-    /** No-plugin path: pulls a chat's messages over HTTP, as {name, mes}. `byId` instead returns every message with the
+    /** No-plugin path: pulls a chat's messages over HTTP, as usableMessages. `byId` instead returns every message with the
      *  metadata header dropped, so an index is the MESSAGE ID it is live — what a "last message" cut must slice. */
     const fetchChatMessages = async ({ char, avatar, file }, { byId = false } = {}) => {
         const r = await fetch('/api/chats/get', {
@@ -2220,8 +2220,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!r.ok) return [];
         const j = await r.json();
         const list = (Array.isArray(j) ? j : []).filter(m => m && typeof m.mes === 'string');   // the header carries no `mes`
-        // Hidden messages are not scanned live (C3), so they are not counted here; names ride along for includeNames.
-        return byId ? list : list.filter(m => !m.is_system && m.mes).map(m => ({ name: m.name, mes: String(m.mes) }));
+        return byId ? list : usableMessages(list);
     };
 
     /** One pass of `keys` over `picked`: counts by both routes, merged. Plugin route for whatever is on disk — it runs this
@@ -2288,7 +2287,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         for (const c of picked) {
             if (served.has(c)) continue;
             const got = strip(c.open
-                ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: m.is_user }))
+                ? usableMessages(ctx.chat)
                 : await fetchChatMessages(c));
             if (!got.length) continue;
             const user = chatUser(got);

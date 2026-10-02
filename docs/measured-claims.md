@@ -9,7 +9,7 @@ not published; the docs cite those by ID too, and the ID is all a reader gets.
 moves between the two files without changing its number, so `grep <ID>` always finds one entry.
 
 **Citations name a symbol, not a line.** A claim points at the exported function or constant its evidence
-lives in, or at a heading — `extension/keyword-audit.mjs buildKeyPruneScan`, `docs/matching-architecture.md Stage 3 — Scoring
+lives in, or at a heading — `extension/keyword-audit.mjs buildKeyPruneScan`, `docs/matching-architecture.md Scoring
 (onScanDone)` — so it survives an edit and `grep` finds it at any version. Several are separated by `,`
 in code and by `§` in prose; a claim that cites a file and no place in it names the file alone.
 `test/claims-check.mjs` asserts every cited path and symbol still exists; a citation marked
@@ -28,30 +28,30 @@ unless the threshold was derived from a measurement, spec facts stated without o
 existing form means.** Those are settled on consistency, least surprise and correctness, and the register
 does not carry "rare in one corpus" as a reason.
 
-## R — Stage 1: retrieval, embedding space, query
+## R — The similarity query: embedding space, query
 
-- **R1** — Removing the stage-1 admission gate was a no-op: `bm25 > 0` admitted 99.9% of every book's
+- **R1** — Removing the similarity query's admission gate was a no-op: `bm25 > 0` admitted 99.9% of every book's
  indexed entries; removing `scoreThreshold` moved admission by 6 entries in 10,103 and recovered no
- relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching-architecture.md Stage 1 — Retrieval`; `CLAUDE.md Pure vs ST-coupled`.
+ relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching-architecture.md By similarity`; `CLAUDE.md Pure vs ST-coupled`.
 
 - **R2** — A strict cosine gate would lose 110 of 672 graded-relevant entries: chunks below the corpus
- mean carrying the query's exact terms (70 scenes). — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Stage 1 — Retrieval`.
+ mean carrying the query's exact terms (70 scenes). — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md By similarity`.
 
 - **R3** — The old admitCeiling (100 entries / 300 chunks) bound on routine scenes — it sat below two
  of the seven books in the graded corpus: dropped 23 of 672 grade≥3 rows on 20 scenes; 200 recovered all but 2 and
  saturated; the gates admitted 100% of indexed entries on every scene measured.
- — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md Stage 1 — Retrieval`.
+ — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md By similarity`.
 
 - **R4** — Largest measured book: 208 vectorized entries, against the 1000-entry ceiling.
- — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching-architecture.md Stage 1 — Retrieval`; `CLAUDE.md countKey is the only matcher`.
+ — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching-architecture.md By similarity`; `CLAUDE.md countKey is the only matcher`.
 
 - **R5** — Chunks-per-entry ratio 9.1–10.3 (why no-plugin K counts 10,000 chunks).
- — `plugin/scoring.mjs selectTopK`; `docs/matching-architecture.md Stage 1 — Retrieval`.
+ — `plugin/scoring.mjs selectTopK`; `docs/matching-architecture.md By similarity`.
 
 - **R6** — Per-entry chunk maxima don't stabilise until K≈150–300 (three graded corpora) — why pooling
  is server-side. — `plugin/scoring.mjs scoreCollection`.
 
-- **R7** — Stage-3 keywordScore cost: 13µs/entry at the corpus's widest window (22.8KB) and densest keys
+- **R7** — Scoring's keywordScore cost: 13µs/entry at the corpus's widest window (22.8KB) and densest keys
  (19.6/entry), linear to 2000; 1000 entries ≈ 13ms/turn. — `plugin/scoring.mjs selectTopK`.
 
 - **R9** — Mean-centering rationale: corpus mean vector norm 0.71 on a real lorebook; raw similarities
@@ -105,7 +105,7 @@ does not carry "rare in one corpus" as a reason.
  — `eval/embedding-models.md What to use § Known gotchas`.
 
 - **E4** — Delivered count is a corpus property, not a model property: at cutoff 0.10 all seven models
- deliver 13.3–14.2 entries; spread stays under 1 entry across 0.10–0.30. — `eval/embedding-models.md Context length: check it against your scan window`; `extension/state.mjs runState`; `docs/matching-architecture.md Stage 4 — Selection`.
+ deliver 13.3–14.2 entries; spread stays under 1 entry across 0.10–0.30. — `eval/embedding-models.md Context length: check it against your scan window`; `extension/state.mjs runState`; `docs/matching-architecture.md Selection`.
 
 - **E5** — Cutoff sweep (shipped model): 0.05→26.8 delivered / 27.1% P / 83.9% R; 0.10→13.3/38.1/69.5;
  0.15→9.2/43.6/59.7; 0.20→6.5/45.5/52.1; 0.30→4.1/47.9/42.0. ~1.8k tokens per delivered entry (≈24k
@@ -146,7 +146,7 @@ does not carry "rare in one corpus" as a reason.
  both embedders is the control. Caveats: own-fit diagonal is in-sample; 32 of 74 scenes rank unjudged
  rows in the window (lower bounds); interior fits measured only at 0.10. Every margin inside the
  corpus's noise floor. — `eval/eval-data/fit-transfer-2026-08-30/README.md` (gitignored);
- `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`; `extension/relevance.mjs fitKey` (mxbai beta +0.337, low-middle of seven).
+ `docs/matching-architecture.md Scoring (onScanDone)`; `extension/relevance.mjs fitKey` (mxbai beta +0.337, low-middle of seven).
 
 - **E14** — Fits do not transfer across embedders: memory-tier cosine +0.3113 under bge-m3 vs +0.7460
  under Qwen3-8B (text and properNouns compensating); the signal ORDER inverts across models — bge-m3:
@@ -154,7 +154,7 @@ does not carry "rare in one corpus" as a reason.
  text +0.567 / keys +0.137 (6051 rows, 102 scenes). — `worldsapart.js init`;
  `test/relevance-model-check.mjs`; `CLAUDE.md Plugin changes need a restart`.
 
-## F — Stages 3–4: the relevance model
+## F — Scoring and selection: the relevance model
 
 - **F1** — The number of record: AP 0.346 at AUC 0.799 held out by book (in-sample 0.820, so an unseen
  book costs ~2.5% relative AUC). Shipped five-column model (cosine, text, keys, properNouns,
@@ -167,7 +167,7 @@ does not carry "rare in one corpus" as a reason.
  inverts at F4, the asymmetric bar keeps depth winning at every beta. — `docs/matching-architecture.md`.
 
 - **F4** — Offline budget replay is exact against the runtime's verdicts on 315 rows across 7 arms;
- the token budget binds on every graded scene measured. — `docs/matching-architecture.md Stage 5 — Delivery`.
+ the token budget binds on every graded scene measured. — `docs/matching-architecture.md Delivery`.
 
 - **F6** — The idf weighting is what makes it work: idf beats count 45 up / 14 down (p 0.0001);
  Jaccard is worse than count (27 up / 33 down); restricting to the gazetteer loses 15 up / 44 down
@@ -352,7 +352,7 @@ does not carry "rare in one corpus" as a reason.
  scenes: off +0.0024 (17/12/76, p 0.46), 0.15 −0.0048 (28/14/63, p 0.044, Holm 0.13), 0.4 +0.0009
  (14/10/81); no arm consistent per lineage. So neither list is load-bearing at the cut, and the
  suggester/audit (`ZIPF_EN`, `english common`) are the only places English is assumed.
- — `docs/matching-architecture.md Stage 3 — Scoring (onScanDone)`.
+ — `docs/matching-architecture.md Scoring (onScanDone)`.
 
 ## K — Keys and matching
 
@@ -487,7 +487,7 @@ does not carry "rare in one corpus" as a reason.
 - **G1** — Bundle-corpus census (migrated, 2026-08): 598 human verdicts, 16,962 judge verdicts, 12,519
  rows across 107 bundles; the reader's resolution rule reproduces all 11,946 stored v2 `llmGrade`
  scalars; 611 bare grades in `/wa-grade` documents are human while 37 in synth documents were llm
- verdicts in the wrong field; every one of the 107 frozen haystacks re-derives from its source chat. — `CLAUDE.md Pure vs ST-coupled`; `eval/bundle-schema.md A rater is whoever passed a verdict`;
+ verdicts in the wrong field; every one of the 107 frozen haystacks re-derives from its source chat. — `CLAUDE.md Pure vs ST-coupled`; `eval/bundle-schema.md Identity`;
  `extension/grading.mjs searchedBook`; `docs/matching-architecture.md`.
 
 - **G2** — Human vs contract at matched rank (n=258 rows graded by both, joined on shipped-arm rank):
@@ -522,7 +522,7 @@ does not carry "rare in one corpus" as a reason.
  corrected rubric moved ~30% of the relevant set out — the same magnitude as the contract's own
  non-reproduction — which is why the median of 3+ verdicts wins over latest-wins, and why that rule
  reproducing all 11,946 stored scalars made the resolution move lossless.
- — `eval/bundle-schema.md A rater is whoever passed a verdict`; `extension/grading.mjs mergeGrades, searchedBook`.
+ — `eval/bundle-schema.md Identity`; `extension/grading.mjs mergeGrades, searchedBook`.
 
 - **G8** — Schema decisions, each on a measured sweep: 44 book filenames already contain spaces,
  commas, apostrophes, parens, `#`, `@` (no printable separator); 0 of 106 multi-arm documents vary
@@ -533,7 +533,7 @@ does not carry "rare in one corpus" as a reason.
  10 resolve; 11 of 11 Ollama models carry `:`; spelled-out rater identity was 645KB across 3 models /
  4 rubrics; `why` is 18% of a 2MB document vs 0.6% for all verdicts; 21,077 entries carry
  `entry.world`, 0 disagree with their book; the ST version fields exist because a staging tree ran
- 167 commits past the 1.17.0 its package.json's 1.18.0 implied. — `eval/bundle-schema.md A scene's id is composed, not opaque § scores is a capture record, not a schema § A row's block § Every stored path is relative to the ST install § WA's version is declared, ST's is resolved § Verdict elements`; `extension/grading.mjs captureParams, buildSample, passKey, bundleSamples`.
+ 167 commits past the 1.17.0 its package.json's 1.18.0 implied. — `eval/bundle-schema.md Identity § Candidates § Paths and versions § Verdicts`; `extension/grading.mjs captureParams, buildSample, passKey, bundleSamples`.
 
 - **G12** — Token accounting: `recorded − cl100k(content)` = 6 on every one of 259 captured rows (min
  6, median 6, max 6); corpus chars-per-token 4.91 (median over 1297 rows, p5 4.46 / p95 5.33 — a

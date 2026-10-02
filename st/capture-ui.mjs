@@ -14,7 +14,7 @@ import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets
 import { entryKey } from '../extension/content-lexical.mjs';
 import { gradeOrder } from '../extension/sort.mjs';
 import { isConstant, layoutScore } from '../extension/layout.mjs';
-import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, isGrade, keyByUid, mergeGrades, openBundle, reviewRows, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
+import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, isGrade, keyByUid, mergeGrades, openBundle, reviewRows, rowKey, sampleFile, sceneDiff, sceneSpan, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
 
 /** The pipeline entry points the capture flows drive, injected once at registration.
  * @typedef {{chatBook: Function, coreSelection: Function, dryRun: Function, effectiveTokenBudget: Function, paramSnapshot: Function, scopedPriority: Function, vectorRequestBody: Function}} CaptureHost */
@@ -48,15 +48,8 @@ const stParams = () => ({
     maxRecursionSteps: world_info_max_recursion_steps,
 });
 
-/** The message span this capture covers, as chat file record indices (+1 for the jsonl header); read off the query window, since `last - depth` differs when the span holds an empty or hidden message. */
-function sceneRange() {
-    const win = runState.lastQueryChat ?? [];
-    if (!win.length) {
-        const last = Math.max(0, (getContext().chat?.length ?? 1) - 1) + 1;
-        return { start: last, end: last };
-    }
-    return { start: win[0].i + 1, end: win[win.length - 1].i + 1 };
-}
+/** The message span this capture covers, as ST message indices; read off the query window, since `last - depth` differs when the span holds an empty or hidden message. */
+const sceneRange = () => sceneSpan(getContext().chat, runState.lastQueryChat);
 
 /** WA's declared version, out of its own manifest; empty when unreadable, cached for the page. */
 let waVersionCache = null;
@@ -466,11 +459,11 @@ export async function gradeScene(named) {
     const scaffold = rows.length - gradeable.length;
 
     const wrap = document.createElement('div');
-    const counts = [t`${gradeable.length} retrieved entries`];
+    const counts = [t`${gradeable.length} activated entries`];
     if (scaffold) counts.push(t`${scaffold} constant or sticky row(s) listed, not graded`);
     wrap.innerHTML = `<h3 style="margin:0 0 0.25em;">${esc(t`Grade this scene`)}</h3>`
         + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${esc(gradeAnchorLine())} ${esc(counts.join('; '))}. ${esc(t`Blank means ungraded, not 0.`)}</small>`
-        + `<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">${esc(t`Query text — what retrieval actually matched on`)} `
+        + `<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">${esc(t`Query text — what the similarity query actually matched on`)} `
         + `${esc(t`(${runState.lastQuery.length} chars, depth ${settings().messageDepth})`)}</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
         + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
@@ -641,14 +634,14 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
             byQ.set(cap.query, hit);
         }
         return [...byQ.entries()].map(([text, arms]) => {
-            const label = byQ.size === 1 ? t`Query text — what retrieval actually matched on` : t`Query text (${arms.join(', ')})`;
+            const label = byQ.size === 1 ? t`Query text — what the similarity query actually matched on` : t`Query text (${arms.join(', ')})`;
             const si = sceneRef(text, sc.name ?? sc.file ?? t`Scene text`);
             return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${esc(label)} `
                 + `${esc(t`(${text.length} chars, depth ${caps[0]?.depth ?? '?'})`)} `
                 + `<i class="fa-solid fa-up-right-and-down-left-from-center wa-scene-pop" data-i="${si}" title="${esc(t`Open the whole scene text`)}" style="opacity:0.55;margin-left:0.35em;cursor:pointer;"></i></summary>`
                 + `<pre style="white-space:pre-wrap;max-height:32em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
         }).join('')
-            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${esc(t`${byQ.size} arms retrieved against different text. Grade relevance to the scene, not to any one query.`)}</small>` : '');
+            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${esc(t`${byQ.size} arms ran the similarity query against different text. Grade relevance to the scene, not to any one query.`)}</small>` : '');
     };
     const queryBlocks = multi ? '' : queryBlocksFor(secs[0]);
 
@@ -818,7 +811,7 @@ export async function superGradeScene(named) {
     const captures = [];
     for (const [n, arm] of picked.entries()) {
         toastr.info(t`Arm ${n + 1}/${picked.length}: ${arm}`, 'WorldsApart', { timeOut: 2500 });
-        // Sequential, not Promise.all: the arms share one live settings object and one retrieval pipeline.
+        // Sequential, not Promise.all: the arms share one live settings object and one pipeline.
         const cap = await captureArm(POOL_ARMS[arm], wanted, named?._abortController);
         if (stopped(named)) return '';
         if (!cap.rows.length) {
@@ -826,7 +819,7 @@ export async function superGradeScene(named) {
             continue;
         }
         if (!cap.query) {
-            console.warn(`WorldsApart: arm "${arm}" retrieved nothing (no query to freeze) — skipped`);
+            console.warn(`WorldsApart: arm "${arm}" built no query to freeze — skipped`);
             continue;
         }
         // Converted here so everything downstream reads a candidate; /wa-debug's row keeps its flat signals.

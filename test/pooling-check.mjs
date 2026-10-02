@@ -15,7 +15,7 @@ const pooled = poolEntries([
 assert.strictEqual(pooled.length, 2, 'one record per entry');
 const e7 = pooled.find(r => r.metadata.index === 7);
 assert.strictEqual(e7.score, 0.90, 'score is the max over chunks');
-assert.strictEqual(e7.bm25, undefined, 'no lexical score survives stage 1');
+assert.strictEqual(e7.bm25, undefined, 'no lexical score survives the similarity query');
 assert.strictEqual(e7.metadata.hash, 2, 'the surviving record is the best-scoring chunk');
 assert.strictEqual(e7.metadata.text, 't2', 'text follows the surviving chunk, so owners/display still resolve');
 
@@ -55,7 +55,7 @@ const autoLoaded = { items: autoItems, mean: Array(dim).fill(0) };
 const q = Array.from({ length: dim }, (_, d) => (dim - d));   // distinct positive cosine per item
 const all = scoreCollection('c1', autoLoaded, q, { centered: false });
 assert.strictEqual(all.length, autoItems.length, 'every scored chunk is returned — there is no admission test left');
-assert.ok(all.every(r => r.bm25 === undefined), 'no chunk carries a lexical score out of stage 1');
+assert.ok(all.every(r => r.bm25 === undefined), 'no chunk carries a lexical score out of the similarity query');
 
 assert.strictEqual(scoreCollection('c1', autoLoaded, q, { centered: false }).length, autoLoaded.items.length,
     'scoreCollection returns every chunk it scored');

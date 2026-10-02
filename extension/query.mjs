@@ -1,6 +1,6 @@
-// query.mjs — the retrieval query: which messages it is built from, and how they join. ST-free; `substituteParams` is injected.
+// query.mjs — the similarity query: which messages it is built from, and how they join. ST-free; `substituteParams` is injected.
 
-/** The retrieval query from the tail of the chat; `substituteParams` is ST's macro substitution, identity offline. */
+/** The similarity query from the tail of the chat; `substituteParams` is ST's macro substitution, identity offline. */
 export function buildQuery(chat, { depth, substituteParams = s => s }) {
     return joinQueryMessages(queryMessages(chat, { depth, substituteParams }));
 }

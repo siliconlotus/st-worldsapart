@@ -46,8 +46,8 @@ const base = rowsOf(ORDINARY, {});
 const dense = rowsOf(ALL, { denseAllEntries: true });
 
 // --- the baseline does not move --------------------------------------------------------------------
-eq(dense.scene.loaded[0].items.length, 2, 'stage 1 keeps only the vectorized chunks of an --all index');
-eq(dense.scene.loaded[0].extra.length, 2, 'the rest are held aside for stage 3');
+eq(dense.scene.loaded[0].items.length, 2, 'the similarity query keeps only the vectorized chunks of an --all index');
+eq(dense.scene.loaded[0].extra.length, 2, 'the rest are held aside for scoring');
 eq([...dense.scene.loaded[0].mean].join(','), [...base.scene.loaded[0].mean].join(','),
     'the corpus mean is the vectorized corpus\'s, unchanged by the extra chunks');
 eq(dense.byUid.get(1).score, base.byUid.get(1).score, 'a vectorized entry\'s cosine is untouched');

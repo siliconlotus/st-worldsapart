@@ -70,4 +70,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     runs.end(a + 1); runs.armed(a); runs.scanning(a);
     eq(runs.current(), null, '...and a stale token touches nothing');
 }
+{
+    const { runs } = slot();
+    const a = await runs.take(true);
+    eq(runs.unscanned(a), false, 'a run that has not armed is not waiting on its scan');
+    runs.armed(a);
+    eq(runs.unscanned(a), true, 'an armed run whose scan has not started is unscanned: what a generation ending leaves behind');
+    eq(runs.unscanned(a + 1), false, '...and a stale token is not');
+    runs.scanning(a);
+    eq(runs.unscanned(a), false, '...nor the run once its scan starts');
+}
 console.log(process.exitCode ? 'FAIL' : 'ok   runs: abort, wait and takeover');

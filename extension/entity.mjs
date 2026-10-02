@@ -1,5 +1,5 @@
 // entity.mjs — the entity filter: the lorebook's own vocabulary, and the weighted BM25 query terms built from
-// it. Read at stage 3 only (content-lexical): it can reweight what an activated entry scores, never admit one.
+// it. Read at scoring only (content-lexical): it can reweight what an activated entry scores, never admit one.
 
 import { tokenize } from './lexical.mjs';
 import { normalizeOrthography } from './automaton.mjs';

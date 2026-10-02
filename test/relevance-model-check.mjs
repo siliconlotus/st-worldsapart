@@ -1,4 +1,4 @@
-// relevance-model-check — the stage-4 relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
+// relevance-model-check — the selection relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
 import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates, modelKey } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
 import { eq } from '../eval/lib/metrics.mjs';

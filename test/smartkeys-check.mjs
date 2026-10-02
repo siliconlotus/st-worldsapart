@@ -1,7 +1,7 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
 import { countChatHits, countKey, keywordScore, repeatCurveOf, isRegexKey, splitKeys } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, macroTokens, macroMap } from '../extension/smartkeys.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, macroTokens, macroMap, chatUser, usableMessages } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
@@ -703,6 +703,9 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     eq(idx.hitsBy.get('{{user}}').size, idx.messagesWith.get('{{user}}'), 'the index agrees with the count');
     eq(macroTokens(['? {{user}} and {{char}}', '{{user}}', 'plain']).join(','), '{{user}},{{char}}', 'the tokens a key list carries, once each');
     eq(JSON.stringify(macroMap(['? {{user}} x'], tok => tok.toUpperCase())), '{"{{user}}":"{{USER}}"}', 'the map is the tokens through the substitution the caller supplies');
+    const rows = usableMessages([{ chat_metadata: {} }, { name: 'You', mes: 'hi', is_user: true }, { name: 'Bot', mes: 'yo' }, { name: 'Bot', mes: '' }, { name: 'Ghost', mes: 'boo', is_user: true, is_system: true }]);
+    eq(JSON.stringify(rows), '[{"name":"You","mes":"hi","is_user":true},{"name":"Bot","mes":"yo","is_user":false}]', "a chat's usable messages: hidden and empty ones out, is_user kept");
+    eq(chatUser(rows), 'You', "...so chatUser reads the chat's own {{user}} off them");
     eq(countKey('? {{user}} sword', 'Nick Parsons sword', false, false, NEUTRAL) > 0, false, 'without a scope a token is literal text');
     // A scope is a context: whatever else is matched meanwhile, and under what map, a scope's answers do not move.
     const book = { entries: { 0: { uid: 0, key: ['? {{user}}'], content: 'Kyle stood watch.' } } };

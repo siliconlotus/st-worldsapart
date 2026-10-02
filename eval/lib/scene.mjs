@@ -227,7 +227,7 @@ export const sceneParams = (S, { assumeStrict = false, ...overrides } = {}) => {
     // setting, so a caller that wants the window must supply the number; a cutoff arm sets one for both tiers.
     memoryCutoff: null,
     // false models the no-plugin path (worldsapart.js scoreEntries): ST's endpoint returns the same chunks with the score
-    // discarded, so the SAME entries are admitted at stage 2 and stage 3 gets no cosine column. Admission is untouched;
+    // discarded, so the SAME entries are admitted at activation and scoring gets no cosine column. Admission is untouched;
     // the noCosine fit then selects itself, as the runtime's does.
     cosineAvailable: true,
     // Which fit scores the column, by name; null is production. An arm setting this must also fix memoryCutoff.
@@ -242,11 +242,11 @@ export const sceneParams = (S, { assumeStrict = false, ...overrides } = {}) => {
     // Occurrences -> score (matcher.mjs repeatCurveOf). 'bm25', not the shipped 'presence-log': captures predating the setting must reproduce.
     repeatCurve: 'bm25', repeatR: 1,
     meanCentered: true,
-    // A stage-3 cosine for entries the collection has no row for; needs a reindex.mjs --all index. Production, so on.
+    // A scoring cosine for entries the collection has no row for; needs a reindex.mjs --all index. Production, so on.
     denseAllEntries: true,
     // Which entries define the corpus mean (plugin/vector.mjs): 'vectorized', 'memory' (production) or 'memoryArchived' (adds disabled memory entries; needs a --archived index).
     centroidPopulation: 'memory',
-    // What a REFERENCE entry's stage-3 cosine is centred on: 'memory' (production: both sides on the centroid above),
+    // What a REFERENCE entry's scoring cosine is centred on: 'memory' (production: both sides on the centroid above),
     // 'reference' (both sides on the reference-tier mean), 'cross' (query on the centroid, items on the reference mean), 'raw' (uncentred).
     referenceCentroid: 'memory',
     // How many leading components of the centred corpus are projected out, on top of the mean; 0 is production.
@@ -254,7 +254,7 @@ export const sceneParams = (S, { assumeStrict = false, ...overrides } = {}) => {
     // Whitening: how many of the book's own directions to rescale (whitenR, 0 is production) and by how much (whitenAlpha).
     whitenR: 0,
     whitenAlpha: 1,
-    // The token ceiling stage 5 walks the layout under; 0 leaves the budget unmodelled. Passed in, never read off the bundle.
+    // The token ceiling delivery walks the layout under; 0 leaves the budget unmodelled. Passed in, never read off the bundle.
     budgetTokens: 0,
     // How many shared components come off first (global-basis.mjs, per book, leave-one-lineage-out); 0 is production.
     sharedComponents: 0,
@@ -267,7 +267,7 @@ export const sceneParams = (S, { assumeStrict = false, ...overrides } = {}) => {
     sharedScatter: 'pooled',
     // Exact key strings to treat as removed from the book (see scoringKeys). Null = none.
     dropKeys: null,
-    // Per-book quota for stage 5 (applyBudget capOf), as {book: cap}; null = no cap. No bundle records the live setting.
+    // Per-book quota for delivery (applyBudget capOf), as {book: cap}; null = no cap. No bundle records the live setting.
     bookCaps: null,
     // ST core's two recursion settings, by their own names. Off is what every capture predating this was made under,
     // so the default must stay false or their keys scores move. maxRecursionSteps 0 is core's "no cap", not "no passes".
@@ -311,7 +311,7 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
         // No collection is a configuration, not a failure (F50); the index is pristine, so the uid filter is what enforces availability.
         const rawAll = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, 'utf8')).items : [];
         const raw = rawAll.filter(it => uids.has(Number(it.metadata?.index)));
-        // --all index: vectorized chunks stay stage 1's items, the rest are stage-3 extras, centroid-only (archived) chunks reach neither.
+        // --all index: vectorized chunks stay the similarity query's items, the rest are scoring extras, centroid-only (archived) chunks reach neither.
         const archived = raw.filter(it => it.metadata?.centroidOnly);
         const live = raw.filter(it => !it.metadata?.centroidOnly);
         const vectorUids = new Set(own.filter(e => e.vectorized).map(e => Number(e.uid)));
@@ -430,8 +430,8 @@ export function loadScene(S, { indexFile, indexOpts = {}, params: P }) {
     // The gate inputs ride the scene so every makeCandidateSet caller gets them from its `{...scene}` spread.
     // Read off the sample's scene entry when it has one (schemaVersion 3.1), else off the sample itself.
     const sc = (S.scenes ?? [])[0] ?? S;
-    // The capture's scan-clock chatLength; a bundle without one falls back to sceneEnd, which counts hidden messages too.
-    const frozen = Number(sc.chatLength ?? sc.sceneEnd ?? S.generatedFrom?.msg);
+    // The capture's scan-clock chatLength; a bundle without one falls back to the messages up to sceneEnd, hidden ones counted too.
+    const frozen = Number(sc.chatLength ?? (Number.isFinite(Number(sc.sceneEnd)) ? Number(sc.sceneEnd) + 1 : S.generatedFrom?.msg));
     const gates = { assistantCount: sc.assistantCount, greetingIndex: sc.greetingIndex, personaName: sc.personaName,
         firedLatches: sc.firedLatches, chatLength: Number.isFinite(frozen) ? frozen : undefined };
     return { primary, books, entries, byKey, items, loaded, gaz, gazSource, outOfScope, POOL, OWN, embedModel: embedModelOf(S), modelLabel, chunkCfg: chunkConfig(S), gates };
@@ -507,7 +507,7 @@ export const makeKeywordResult = P => (e, text, k1) =>
 export const makeKeywordScore = P => { const result = makeKeywordResult(P); return (e, text, k1) => result(e, text, k1).score; };
 
 /**
- * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores. `topK` is stage 1's own bound and counts ENTRIES.
+ * Builds the candidate set — every entry that would be in the ranking, with its per-signal scores. `topK` is the similarity query's own bound and counts ENTRIES.
  * @returns {(k1: number, b: number, tw: object|null, qvec: number[], qtext: string, haystackFor: (entry: object) => string[]) => object[]}
  */
 /** The capture's gate inputs (eval/bundle-schema.md, 3.1); a field the bundle does not carry leaves its gate OFF. */
@@ -526,14 +526,14 @@ const coreActivatesUnconditionally = (e, gateOpts) => !e.disable
 
 export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, topK = admitCeiling(true), gates = {} }) {
     const keywordResult = makeKeywordResult(P);
-    // The stage-3 text index, one per book as bookIndexes keys it: pooling the books would pool their IDF.
+    // The scoring text index, one per book as bookIndexes keys it: pooling the books would pool their IDF.
     const { chunkMode, chunkSize, minChunkSize } = defaultSettings;
     const cfg = chunkCfg ?? { chunkMode, chunkSize, minChunkSize };   // the shipped values, never a second copy of them
     const byBook = new Map();
     for (const e of entries) { const b = e.world; if (!byBook.has(b)) byBook.set(b, []); byBook.get(b).push(e); }
     const contentIndexes = [...byBook].map(([, own]) => buildContentIndex(own, cfg));
     const hasContent = e => Boolean(String(e?.content ?? '').trim());
-    // Dense-all: the stage-3 cosine for entries the collection has no row for, pooled by MAX against the book's own mean; admits nothing.
+    // Dense-all: the scoring cosine for entries the collection has no row for, pooled by MAX against the book's own mean; admits nothing.
     const denseExtra = (qvec) => {
         const out = new Map();
         if (!qvec?.length) return out;
@@ -549,7 +549,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
     };
     return (k1, b, tw, qvec, qtext, haystackFor) => {
         const dense = denseExtra(qvec);
-        // --- STAGE 1: retrieval — one top-K across every book, each against its own centroid, as /query-multi does; contentText admits nothing.
+        // --- THE SIMILARITY QUERY — one top-K across every book, each against its own centroid, as /query-multi does; contentText admits nothing.
         const contentText = new Map();
         for (const ix of contentIndexes) for (const [k, v] of scoreContent(ix, qtext, { k1, b, termWeights: tw, stopwordDf: P.stopwordDf })) contentText.set(k, v);
         const scored = loaded.flatMap(L => scoreCollection(L.book, L, pcQuery(L, qvec), { centered: P.meanCentered }));
@@ -557,9 +557,9 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
         const per = new Map();
         for (const [book, g] of Object.entries(grouped)) for (const m of g.metadata ?? []) { const key = entryKey({ world: book, uid: m.index }); per.set(key, { score: Math.max(per.get(key)?.score ?? -Infinity, m.score) }); }
         const rows = [];
-        // --- STAGE 2, retrieval route. Disabled entries drop here, not from `entries`: the gazetteer and BM25 corpus must still see them (F49).
+        // --- ACTIVATION, by similarity. Disabled entries drop here, not from `entries`: the gazetteer and BM25 corpus must still see them (F49).
         for (const [key, s] of per) { const e = byKey.get(key); if (e && !e.disable) rows.push({ uid: Number(e.uid), book: e.world, entry: e, title: wiTitle(e), score: P.cosineAvailable === false ? undefined : s.score, textScore: contentText.get(entryKey(e)) ?? 0, keywordScore: 0, vectorEligible: !!e.vectorized, textEligible: hasContent(e), keysEligible: scoringKeys(e, P).length > 0 }); }
-        // --- STAGE 2: activation, keyword route, run to a fixpoint. May admit only what core could activate, so never a
+        // --- ACTIVATION, by key, run to a fixpoint. May admit only what core could activate, so never a
         // disabled entry (F49), and on the initial pass never a delayUntilRecursion one. Its LEVEL is not modelled:
         // core walks distinct levels (world-info.js currentRecursionDelayLevel), this admits at the first pass.
         // With recursion off it runs no pass at all: core forces one per level past the first, and WA ends it (upstream-st.md #19).
@@ -570,17 +570,17 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             console.error(`  ${missing.join(', ')}: gate(s) this bundle carries no input for, so rows they would have gated OUT are admitted here`);
         }
         const admitted = new Set(rows.map(r => entryKey(r.entry)));
-        // The retrieval winners feed recursion too: WA force-activates them, so core counts them in new.successful.
+        // The similarity winners feed recursion too: WA force-activates them, so core counts them in new.successful.
         const feeds = e => P.recursive && !e.preventRecursion && Boolean(String(e.content ?? '').trim());
         const buffer = rows.map(r => r.entry).filter(feeds).map(e => String(e.content).trim());
-        // Core activates every gate-passing constant and `@@activate` entry, retrieved or not (delayUntilRecursion ones on pass 1, read from pass 2); seeded, the keyword route must not push one again.
+        // Core activates every gate-passing constant and `@@activate` entry, activated by similarity or not (delayUntilRecursion ones on pass 1, read from pass 2); seeded, the keyword route must not push one again.
         const unconditional = e => coreActivatesUnconditionally(e, gateOpts) && !admitted.has(entryKey(e)) && feeds(e);
         const seeded = new Set();
         const seed = e => { seeded.add(entryKey(e)); buffer.push(String(e.content).trim()); };
         for (const e of entries) if (unconditional(e) && !e.delayUntilRecursion) seed(e);
         const buffered = matcher.withExtraTexts((_d, e) => haystackFor(e), buffer, P.matchWindow);
         const depthOf = new Map();
-        // Termination is the buffer standing still, not a pass admitting nothing: the retrieval winners seed the buffer
+        // Termination is the buffer standing still, not a pass admitting nothing: the similarity winners seed the buffer
         // and the depth-0 pass matches chat only, so a pass that admits nothing can still leave text for the next one.
         // Core forces a recursion pass on a standing buffer only to open a delay level past the first, so pass 1 runs on one
         // only when two levels exist; disabled entries count, as core reads them before its disable check.
@@ -599,7 +599,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
                 if (admitted.has(key) || e.disable) continue;
                 // This loop may admit only what could have activated. `@@activate` outranks `@@dont_activate` (CCv3: the
                 // latter "SHOULD be ignored" when the former is present), and core's ladder tests them in that order.
-                // A constant is NOT skipped here — it reaches the pool through stage 1 and scoreScene's `rankable` strips it.
+                // A constant is NOT skipped here — it reaches the pool through the similarity query and scoreScene's `rankable` strips it.
                 if (matcher.hasDecorator(e, '@@dont_activate') && !matcher.hasDecorator(e, '@@activate')) continue;
                 const verdict = matcher.gateVerdict(e, gateOpts);
                 if (verdict === 'skip') continue;
@@ -617,7 +617,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             for (const e of found) if (feeds(e) && !seeded.has(entryKey(e))) buffer.push(String(e.content).trim());
             if (depth === 1) for (const e of entries) if (unconditional(e) && e.delayUntilRecursion) seed(e);
         }
-        // --- STAGE 3, reference cosine under another centring; the column only, stage 1 keeps the production centroid.
+        // --- SCORING, reference cosine under another centring; the column only, the similarity query keeps the production centroid.
         if (P.referenceCentroid !== 'memory') {
             const ref = new Map();
             for (const L of loaded) {
@@ -632,7 +632,7 @@ export function makeCandidateSet({ loaded, byKey, entries, params: P, chunkCfg, 
             }
             if (P.cosineAvailable !== false) for (const r of rows) if (!isMemory(r.entry) && ref.has(entryKey(r.entry))) r.score = ref.get(entryKey(r.entry));
         }
-        // --- STAGE 3, keys. Once, over the COMPLETE buffer, as onScanDone runs after core's last loop. An entry that fed
+        // --- SCORING, keys. Once, over the COMPLETE buffer, as onScanDone runs after core's last loop. An entry that fed
         // the buffer does not match its own content there: that is the entry naming itself, not the conversation naming it.
         for (const r of rows) {
             const own = String(r.entry.content ?? '').trim();

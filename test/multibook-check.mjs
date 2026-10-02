@@ -77,7 +77,7 @@ eq(rows.every(r => r.book === r.entry.world), true, 'a row\'s book is its entry\
 const top2 = makeCandidateSet({ ...scene, params: P, topK: 2 })(P.K1, P.B, null, QV, 'text B1', () => ['']);
 eq(top2.length, 2, 'topK counts entries across every collection, not per collection');
 
-// --- stage 4's per-book quota ------------------------------------------------------------------------
+// --- selection's per-book quota ------------------------------------------------------------------------
 // relevanceFit is named because check-embed has no fit and modelsFor refuses to borrow; which fit is arbitrary.
 const delivered = async (overrides) => {
     // memoryCutoff 0: the relevance cut admits every scored row, so only the cap and the budget decide.
@@ -88,7 +88,7 @@ eq(await delivered({}), 4, 'no cap: the budget alone delivers every row');
 eq(await delivered({ bookCaps: { B: 1 } }), 3, 'a cap of 1 on B drops one of B\'s two rows and neither of A\'s');
 eq(await delivered({ bookCaps: { A: 1, B: 1 } }), 2, '...and capping both leaves one of each');
 
-// --- stage 5 charges the book's constants first, as the runtime walks them, and grades none ---------------------------
+// --- delivery charges the book's constants first, as the runtime walks them, and grades none ---------------------------
 // Every entry here is "text XN", 1 token at the chars-per-token fallback; the constant is 10.
 const constant = extra => ({ uid: 9, world: 'A', comment: 'A-9', content: 'c'.repeat(49), key: [], constant: true, ...extra });
 const withConstant = async (extra) => {

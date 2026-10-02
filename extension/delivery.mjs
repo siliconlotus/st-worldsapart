@@ -1,4 +1,4 @@
-// delivery.mjs — stage 5: what fits, and in what order the budget walks. Pure; every setting is injected.
+// delivery.mjs — what fits, and in what order the budget walks. Pure; every setting is injected.
 import { isConstant } from './layout.mjs';
 
 /** The budget's walk order: constants, armed stickies, promoted, then the dynamic block — durable first is what makes every cap in applyBudget a prefix cut. */

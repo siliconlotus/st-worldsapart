@@ -1,4 +1,4 @@
-// Self-check for the referenceCentroid arms: the reference tier's stage-3 cosine under each centring, memory rows and stage 1 untouched. Hand-written vectors.
+// Self-check for the referenceCentroid arms: the reference tier's scoring cosine under each centring, memory rows and the similarity query untouched. Hand-written vectors.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

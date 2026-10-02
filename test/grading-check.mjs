@@ -1,6 +1,6 @@
 // Self-check for grading.mjs, the /wa-grade sample assembler: what a sample CONTAINS — book fidelity, the settings
 // mapping, the durable tier, the multi-arm bundle and its round trip.
-import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, sceneDiff, searchedBook, setGrades, splitGraded, unionArms } from '../extension/grading.mjs';
+import { buildSample, bundleSamples, captureParams, hashBooks, keyByUid, stRelative, isDurable, mergeGrades, openBundle, passKey, rowKey, sampleFile, sceneDiff, searchedBook, setGrades, sceneSpan, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
 import { eq, gradeValue } from '../eval/lib/metrics.mjs';
 import * as query from '../extension/query.mjs';
 
@@ -22,7 +22,7 @@ eq(p.K1, 1.2, 'bm25K1 -> K1');
 eq('K' in p || 'LEXW' in p || 'KEYW' in p || 'weightByOrder' in p, false,
     'a capture records no fusion parameters, because there is no fusion');
 eq(p.stopwordDf, 0.25, 'stopwordDocFreq -> stopwordDf');
-eq('threshold' in p, false, 'no admission threshold is captured — stage 1 has no gate to reproduce');
+eq('threshold' in p, false, 'no admission threshold is captured — the similarity query has no gate to reproduce');
 eq('vectorCutoff' in p, false, 'no cliff mode is captured — the relevance cut reads the relevanceCutoff setting, which the settings dump already carries');
 eq(p.includeNames, true, 'ST world-info globals are carried, not guessed');
 eq('retrievalMode' in captureParams(s, {}), false, 'the capture records no retrieval mode');
@@ -264,13 +264,14 @@ const INJECTS = [
     { key: 'NOTE', text: 'a note', ambient: false, depth: 2 },
     { key: '1_memory', text: 'a running summary', ambient: true, depth: 0 },
 ];
-const mk = (arm, over) => ({ arm, sample: buildSample({
+const mk = (arm, over, more = {}) => ({ arm, sample: buildSample({
     name: 'sc', notes: 'n', query: `q-${arm}`, queryChat: [{ name: 'A', mes: 'm' }], scanChat: [{ name: 'A', mes: 'w' }], depth: 5,
     chat: 'chats/c.jsonl', book: 'worlds/Main.json', index: `i-${arm}.json`, primaryBook: 'Main', embedModel: 'bge-m3',
     params: { K: 20, ...over }, snapshot: { a: 1 }, candidates: [{ uid: 1, title: 'T', book: 'Main' }],
     injects: INJECTS,
     books: { Main: full }, priority: [], grades: [{ title: 'T', grade: 4, book: 'Main', uid: 1 }],
     cutoff: { gradingOverride: { maxVectorEntries: 1 } }, gradedCandidates: 1, pluginFP: 'ab', sourceFP: 'ab', now: '2026-07-29',
+    ...more,
 }) });
 const bundle = await bundleSamples(
     [mk('shipped', {}), mk('no-filter', { entityFilter: false }), mk('depth', { messageDepth: 8 })],
@@ -278,7 +279,27 @@ const bundle = await bundleSamples(
 );
 const scene0 = bundle.scenes[0];
 
-eq(bundle.schemaVersion, 3, 'the document stamps its schema version');
+eq(bundle.schemaVersion, 3.1, 'the document stamps its schema version');
+
+// --- gate inputs: what a capture recorded of the chat's shape, on the scene and nowhere else ---
+{
+    const GATES = { assistantCount: 412, greetingIndex: 0, personaName: 'V', macros: { '{{user}}': 'V' }, chatLength: 1031, firedLatches: { 'Main\u001f1': 998 } };
+    const gated = await bundleSamples([mk('shipped', {}, GATES), mk('depth', { messageDepth: 8 }, GATES)], { start: 90, end: 100 });
+    const gs = gated.scenes[0];
+    eq(JSON.stringify(Object.fromEntries(Object.keys(GATES).map(k => [k, gs[k]]))), JSON.stringify(GATES), "a capture's gate inputs and macro map are recorded on the scene");
+    eq(gated.arms.every(a => Object.keys(GATES).every(k => !(k in a.scenes[gs.id]))), true, '...and repeated on no cell: they are the moment\'s, not a configuration\'s');
+    eq(openBundle(gated).macros['{{user}}'], 'V', '...and a reader finds them on the flat view');
+    eq(Object.keys(GATES).some(k => k in scene0), false, 'a capture that recorded none writes none: absent, never empty');
+}
+{
+    // Ten messages, #3 hidden; the query window is the last four visible ones, indexed as the scan sees them (hidden out).
+    const raw = Array.from({ length: 10 }, (_, i) => ({ mes: `m${i}`, is_system: i === 3 }));
+    const win = query.queryMessages(raw.filter(m => !m.is_system), { depth: 4 });
+    eq(JSON.stringify(sceneSpan(raw, win)), '{"start":6,"end":9}', "a scene's span is in ST's own message indices, hidden messages counted");
+    eq(JSON.stringify(sceneSpan(raw, [])), '{"start":9,"end":9}', '...and with no window it is the last message');
+}
+eq(JSON.stringify(toCandidate({ uid: 1, book: 'B', cosine: 0.1, text: 2, keys: 1, properNouns: 1.5, density: 2, tokens: 5 }, 0).scores),
+    '{"cosine":0.1,"text":2,"keys":1,"properNouns":1.5,"density":2}', "every signal sits under scores by the fit's own feature name");
 eq(bundle.scenes.length, 1, 'one scene is a one-element list, not a special shape');
 eq(scene0.id, 'c-msg-100', 'the scene id is composed from the chat and the moment it ends at');
 eq(scene0.sceneChat, 'chats/c.jsonl', 'and names the chat it was taken from');

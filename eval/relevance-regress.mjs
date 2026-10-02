@@ -1,4 +1,4 @@
-// What each stage-3 signal is worth as a predictor of per-entry relevance, and how a parameter moves that.
+// What each scoring signal is worth as a predictor of per-entry relevance, and how a parameter moves that.
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
 //        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|bare|span|book|named] [--density-extract entity|book]
@@ -55,7 +55,7 @@ if (!['scene', 'book', 'pooled'].includes(STD_BY)) { console.error(`--standardis
 // Experiment: the relevant line for the scoring bars; at 2 the cut score is P(>=2), with no half band.
 const RELEVANT_AT = Number(arg(argv, '--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
-// What stage 4 delivers at `cut`: the fold's E[credit] with the row's term weights, as the runtime cut reads it.
+// What selection delivers at `cut`: the fold's E[credit] with the row's term weights, as the runtime cut reads it.
 const deliveredAt = (r, cut) => weightedCredit({ eCredit: r.e, logWeight: r.logWeight }) >= cut;
 const AT = arg(argv, '--at') === null ? null : Number(arg(argv, '--at'));
 const DEGREE = Number(arg(argv, '--degree') ?? 1);

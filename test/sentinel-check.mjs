@@ -165,11 +165,11 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(activationAdds([data.entries['10']], windowFor, { ...narrow, scope: NEUTRAL }).length, 0,
         'sticky entry with its key out of the window is not re-emitted — core\'s timed effect is what carries it');
 
-    // Stage 3 over the recursion buffer: the target's key is in no message, only in uid 12's content.
+    // Scoring over the recursion buffer: the target's key is in no message, only in uid 12's content.
     const keys13 = (win) => keywordScore(data.entries['13'], win(20, data.entries['13']), undefined, { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).score;
     eq(keys13(windowFor), 0, 'recursion target scores keys 0 against chat alone — the budget drops it first');
     const buffered = withExtraTexts(windowFor, [data.entries['12'].content], 'paragraph');
-    eq(keys13(buffered) > 0, true, 'the recursion buffer carries the key, so stage 3 can score it');
+    eq(keys13(buffered) > 0, true, 'the recursion buffer carries the key, so scoring can score it');
 
     // Depth resolution: each pass adds only what the previous pass admitted, so uid 16 is out of reach at pass 1.
     const keysOf = (uid, win) => keywordScore(data.entries[uid], win(20, data.entries[uid]), undefined, { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).score;
@@ -179,10 +179,10 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     eq(keysOf('16', pass1), 0, 'and 0 at pass 1 — uid 13 has not been admitted yet, so its content is not in the buffer');
     eq(keysOf('16', pass2) > 0, true, 'it becomes scorable only at pass 2, which is what makes its depth 2');
 
-    // excludeRecursion: the premise the hand-applied stage-3 exclusion rests on. The exclusion itself is in
+    // excludeRecursion: the premise the hand-applied scoring exclusion rests on. The exclusion itself is in
     // worldsapart.js and unreachable from node — it is the install-sentinel eyeball.
     eq(keysOf('17', windowFor), 0, 'non-recursable entry has no chat evidence');
-    eq(keysOf('17', pass1) > 0, true, 'the buffer DOES carry its key — so stage 3 must exclude it by hand, or credit it');
+    eq(keysOf('17', pass1) > 0, true, 'the buffer DOES carry its key — so scoring must exclude it by hand, or credit it');
 
     // preventRecursion: uid 16's content is the only place uid 18's key appears, and it never enters the buffer.
     eq(/sedgewhistle/i.test(data.entries['16'].content), true, 'uid 18\'s key lives in uid 16\'s content');

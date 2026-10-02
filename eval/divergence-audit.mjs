@@ -49,7 +49,7 @@ for (const file of files) {
         console.log('  (book embeds no entry text — malformed bundle; unfired analysis skipped)');
         continue;
     }
-    // scene.mjs makeCandidateSet's stage-2 guard: keys blanked under suppressVectorKeys could never fire, so that is no window miss. paramSnapshot is a scalar dump under settings.
+    // scene.mjs makeCandidateSet's activation guard: keys blanked under suppressVectorKeys could never fire, so that is no window miss. paramSnapshot is a scalar dump under settings.
     const suppress = j.params?.suppressVectorKeys ?? j.paramSnapshot?.settings?.suppressVectorKeys;
     // The bundle's own wordBoundary and macros; a bundle predating the field matches under strict only when told to.
     const boundary = j.params?.wordBoundary ?? (assumeStrict ? 'strict' : undefined);

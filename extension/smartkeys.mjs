@@ -13,6 +13,8 @@ const HAS_MACRO = /\{\{[^{}]+\}\}/;
 export const macroTokens = texts => [...new Set([].concat(...(texts ?? []).map(t => String(t ?? '').match(MACRO_RE) ?? [])))];
 /** The tokens of `texts` through `substitute`: the map a scope takes, and the one a capture records. */
 export const macroMap = (texts, substitute) => Object.fromEntries(macroTokens(texts).map(tok => [tok, String(substitute(tok) ?? '')]));
+/** A chat's usable messages (C3) as `{ name, mes, is_user }`, hidden and empty ones out. `is_user` must ride along: chatUser reads it. */
+export const usableMessages = chat => (chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes), is_user: Boolean(m.is_user) }));
 /** The {{user}} a chat names: the name on its last user message; undefined when it has none. */
 export const chatUser = messages => [...(messages ?? [])].reverse().find(m => m?.is_user && m?.name)?.name;
 // A token with a word pick: `{{user}}[2]` is the second word of the value, counting from one, negative from the end.
