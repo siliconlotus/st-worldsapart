@@ -21,20 +21,23 @@ const KEY_BOOK_SHARED_FLAG = 0.75;
 /** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours (K14). */
 export const KEY_DUPE_MIN = 0.35;
 
-export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
-
-/** A multi-word key containing an English function word, unless it is a constructed proper noun (looksProper, which
- *  allows the titular `the`): `the Spire` is a name where `the door` is not. A single word is never a fragment. */
+/** A multi-word key containing one of the language's function words (the table's, from its pack's `fragmentDetector`), unless it is a
+ *  constructed proper noun (looksProper, which allows the titular `the`): `the Spire` is a name where `the door` is not. A single word
+ *  is never a fragment, and under a pack with no detector nothing is. */
 export function looksLikeFragment(key) {
+    const functionWords = table().functionWords;
+    if (!functionWords.size) return false;
     const raw = String(key ?? '').trim();
     if (looksProper(raw)) return false;
     const words = raw.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? [];
-    return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
+    return words.length > 1 && words.some(w => functionWords.has(w));
 }
 
 /** A capitalised frame with a name-particle interior; a single capitalised word qualifies, and a titular leading `the`
  *  does not break the frame (`the Spire` is a name). `\p{Lu}`, not `[A-Z]`. */
 function looksProper(key) {
+    // A capitalised frame is a name only where the language's pack says capitals mark names.
+    if (table().nameDetector !== 'capitalised') return false;
     const raw = String(key ?? '').trim();
     const tokens = raw.replace(/^the\s+/i, '').split(/\s+/).filter(Boolean);
     if (!tokens.length) return false;

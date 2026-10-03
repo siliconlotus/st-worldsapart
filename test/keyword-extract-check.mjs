@@ -245,7 +245,9 @@ assert.deepStrictEqual(scoped({ includeInactive: false }), [0, 1, 2], 'disabled 
 console.log('keyword-extract-check: ok');
 
 // --- looksLikeFragment: the clause-fragment flag -------------------------------------------------
-import { looksLikeFragment, FUNCTION_WORDS } from '../extension/keyword-audit.mjs';
+import { looksLikeFragment } from '../extension/keyword-audit.mjs';
+import { table as langTable } from '../extension/lang.mjs';
+const FUNCTION_WORDS = langTable().functionWords;
 
 for (const k of ['naked for morale', 'try stuff and see', 'web not spoke wheel', 'the soft stuff',
     'claiming the first wave', 'the morning is mine', 'apology to his son', 'stop parenting me',
@@ -489,4 +491,28 @@ import { flagProbe, STUDIO_PRUNE_OPTS } from '../extension/keyword-audit.mjs';
     const chatScan = { messagesWith: new Map([['red moon', 5], ['? ="red moon"', 1]]), messages: 10, unit: 'message' };
     const [p] = buildKeyPruneScan({ entries: { 0: spaced } }, STUDIO_PRUNE_OPTS, new Set(), { chatScan, scope: createScanScope() }).classifyEntry(spaced);
     assert.strictEqual(p?.suggest, '? ="red moon"', 'a spaced key is suggested quoted, so the flag covers the phrase rather than its first word');
+}
+
+// --- nameEvidence follows the language's nameDetector: capitals are evidence of a name only where the pack says so
+{
+    const { nameEvidence } = await import('../extension/keyword-suggest.mjs');
+    const { usePack, BUNDLED } = await import('../extension/lang.mjs');
+    const text = 'Dann sah der Hund das Haus. Später lief der Hund zum Haus der NASA, und Maren folgte.';
+    const under = pack => { usePack(pack); const ev = nameEvidence(); ev.wordSeq(text); return ['hund', 'haus', 'maren', 'nasa'].filter(ev.isName).join(','); };
+    assert.strictEqual(under(BUNDLED), 'hund,haus,maren,nasa', 'under a pack that says capitals mark names, a word capitalised mid-sentence is one');
+    assert.strictEqual(under({ lang: 'de', packed: '', common: '', features: { freq: {}, common: {} } }), 'nasa',
+        'under a pack with no nameDetector no capital makes a name, so a language that capitalises every noun does not pass them all; an acronym still is one');
+    usePack(BUNDLED);
+}
+
+// --- the fragment flag is the pack's: its function words, and its say on whether a capitalised frame is a name
+{
+    const { usePack, BUNDLED } = await import('../extension/lang.mjs');
+    const under = pack => { usePack(pack); return ['the door', 'the Spire', 'Isle of Wight', 'casa a la playa'].filter(looksLikeFragment).join(' | '); };
+    assert.strictEqual(under(BUNDLED), 'the door | casa a la playa', 'under the English pack a function word makes a fragment, a capitalised frame aside');
+    assert.strictEqual(under({ lang: 'es', packed: '', common: '', features: { nameDetector: { capitalised: true } } }), '',
+        'a pack with no fragmentDetector raises no fragment flag, so English function words are not read into another language');
+    assert.strictEqual(under({ lang: 'xx', packed: '', common: '', features: { fragmentDetector: { functionWords: 'the of a' } } }), 'the door | the Spire | Isle of Wight | casa a la playa',
+        '...and where capitals do not mark names, a capitalised frame is no exemption');
+    usePack(BUNDLED);
 }

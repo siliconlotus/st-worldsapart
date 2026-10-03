@@ -1,6 +1,7 @@
 // relevance-model-check — the selection relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
 import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates, modelKey } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
+import { buildTermWeights } from '../extension/entity.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 import fs from 'node:fs';
 
@@ -22,6 +23,10 @@ eq(buildNameDf([{ uid: 1, world: 'W', content: 'Elle a dit Bonjour à Maren.' }]
 
 eq(properNames('At Maren’s Gap').has([...properNames("At Maren's Gap")][0]), true,
     'a curly and a straight apostrophe produce the same name');
+
+// The query-term boost follows the same statement: a language whose capitals do not mark names boosts none.
+eq(JSON.stringify(buildTermWeights('Then Maren reached the gate.', new Set(['gate']), 3)), '{"maren":3,"gate":1}', 'a capitalised query term takes the boost');
+eq(JSON.stringify(buildTermWeights('Then Maren reached the gate.', new Set(['gate']), 3, false)), '{"gate":1}', '...and where capitals do not mark names it is not a term at all, the gazetteer aside');
 
 // ---- buildNameDf -------------------------------------------------------------------------------
 

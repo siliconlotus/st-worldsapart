@@ -77,6 +77,10 @@ fields = {k: ' '.join(sorted(v)) for k, v in (pos or {'VA95': [], 'VA85': [], 'A
 NAME_SHARE = 0.95
 common = [w for w in wordfreq.top_n_list(a.lang, 2000, wordlist=size)
           if w.isalpha() and len(w) >= 2 and (not a.ngrams or capped.get(w, 0) / max(1, count.get(w, 0)) < NAME_SHARE)]
+# The words that mark a multi-word key as a slice of a sentence, for the languages that have a list; the audit's fragment flag reads it.
+FUNCTION_WORDS = {'en': 'a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'}
+# Where capital letters mark names. A language not here gets no `nameDetector` feature: absence is no name detection, never a default.
+CAPITALISED_NAMES = {'en', 'fr', 'es', 'pt', 'ru', 'pl'}
 LABELS = {'en': 'English', 'fr': 'Français', 'es': 'Español', 'pt': 'Português', 'ru': 'Русский', 'pl': 'Polski', 'de': 'Deutsch'}
 pack = {
     'lang': a.lang, 'label': LABELS.get(a.lang, a.lang),
@@ -84,8 +88,14 @@ pack = {
     'license': 'CC BY 3.0 (Google Books Ngram) / CC BY-SA 4.0 (wordfreq)' if a.ngrams else 'CC BY-SA 4.0 (wordfreq)',
     'packed': packed, 'va95': fields['VA95'], 'va85': fields['VA85'], 'adj85': fields['ADJ85'],
     'common': ' '.join(common),
+    # What the pack provides, by feature; a value says how. `nameDetector` may later carry a `model` (a URI, e.g. hf://owner/name@revision) and its `labels`.
+    'features': {'freq': {}, 'common': {}, **({'pos': {}} if any(fields.values()) else {}),
+                 **({'nameDetector': {'capitalised': True}} if a.lang in CAPITALISED_NAMES else {}),
+                 **({'fragmentDetector': {'functionWords': FUNCTION_WORDS[a.lang]}} if a.lang in FUNCTION_WORDS else {})},
 }
-pack['hash'] = hashlib.sha256('|'.join(pack[k] for k in ('packed', 'va95', 'va85', 'adj85', 'common')).encode('utf-8')).hexdigest()
+# Features are in the hash: a stored pack is refetched only when the hash moves.
+pack['hash'] = hashlib.sha256('|'.join([*(pack[k] for k in ('packed', 'va95', 'va85', 'adj85', 'common')),
+                                        json.dumps(pack['features'], sort_keys=True, separators=(',', ':'))]).encode('utf-8')).hexdigest()
 body = json.dumps(pack, ensure_ascii=False, separators=(',', ':'))
 if out.endswith('.js'):
     header = ('// Data: Google Books Ngram eng-fiction 20200217, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/); vocabulary, common list\n'

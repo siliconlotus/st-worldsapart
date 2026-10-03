@@ -3,7 +3,6 @@
 import { table } from './lang.mjs';
 import { buildAutomaton, fold as matchFold, scanAutomaton } from './smartkeys.mjs';
 import { maskMarkup } from './matcher.mjs';
-import { FUNCTION_WORDS } from './keyword-audit.mjs';
 
 // Curly apostrophes to straight for a table lookup only (K14); the term keeps what it was written with.
 const tblKey = w => w.includes('’') ? w.replace(/’/g, "'") : w;
@@ -74,7 +73,8 @@ export function classifyLlmCand(cand, { canon, exampleCanon, exampleWords, entry
 }
 
 /** Corpus name evidence: `wordSeq(text)` observes a text and returns the suggester's token sequence; `isName(w)` reads it — mid-sentence
- *  capitals at >= NAME_CAP_RATIO, acronyms exempt, "I" excluded, a never-lowercase word absent from the table accepted. The one properness test. */
+ *  capitals at >= NAME_CAP_RATIO, acronyms exempt, "I" excluded, a never-lowercase word absent from the table accepted; acronyms alone where the table's
+ *  `nameDetector` is not 'capitalised'. The one properness test. */
 export function nameEvidence() {
     const fold = w => { w = w.replace(/^['’-]+|['’-]+$/g, ''); return /['’]s$/i.test(w) ? w.slice(0, -2) : w; };
     // A token seen only in all-caps is an acronym; capitals count only mid-sentence.
@@ -100,6 +100,8 @@ export function nameEvidence() {
     const NAME_CAP_RATIO = 0.95;
     const isName = w => {
         if (isAcr(w)) return true;
+        // Capitals are evidence of a name only where the language's pack says so; elsewhere every noun would pass.
+        if (table().nameDetector !== 'capitalised') return false;
         if (w === 'i' || /^i['’]/.test(w)) return false;
         const up = capMidCount.get(w) ?? 0, lo = lowerCount.get(w) ?? 0;
         if (up > 0 && up / (up + lo) >= NAME_CAP_RATIO) return true;
@@ -116,7 +118,8 @@ export function nameEvidence() {
 export function buildKeySuggest(data, opts) {
     const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [], englishGate = true } = opts;
     const T = table();   // read once per build: a switch takes effect on the next build
-    const STOP = FUNCTION_WORDS;
+    // The pack's function words where its fragmentDetector supplies them; without, isFunc's own df test is the only one.
+    const STOP = T.functionWords;
     const { fold, wordSeq, isName, isAcr } = nameEvidence();
     const canon = k => (String(k).match(/[\p{L}][\p{L}'’-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
 

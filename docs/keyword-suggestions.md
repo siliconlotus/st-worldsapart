@@ -38,8 +38,8 @@ gathers name evidence, and `isName` is the one properness test: a word capitalis
 >= 0.95 of its occurrences (S3), an acronym (<= 6 letters, only ever seen in caps), or a never-lowercase
 word absent from the table; `I` is excluded.
 
-**Candidates** are grams of one to `maxN` content words. A function word blocks a gram: the fixed list,
-or a token in more than 30% of entries at fewer than six occurrences per entry that is not a name. A
+**Candidates** are grams of one to `maxN` content words. A function word blocks a gram: the language's list
+(its pack's `fragmentDetector`, where it has one), or a token in more than 30% of entries at fewer than six occurrences per entry that is not a name. A
 linker may sit inside a gram; a name particle (`de`, `van`, `al` …) may also lead, an English linker
 (`of`, `the`) may not, and nothing trails. Linkers neither spend `maxN` nor earn the length bonus.
 
@@ -109,13 +109,24 @@ text does not use), `junk` (over 60 characters; a single word on the pack's comm
 
 Every language is one pack shape, and `lang.mjs` holds whichever is current: `zipf` (word -> Zipf
 frequency, stored to 0.1 and packed by decile), `posVAStrict` and `posVA` (verb-or-adverb sets at 95%
-and 85% dominant tag), `posAdj` (adjectives at 85%), `common` (the audit's common-word list) and a
-`hash`. English is bundled (`wa-pack-en.js`); any other language is fetched once from the data index
+and 85% dominant tag), `posAdj` (adjectives at 85%), `common` (the audit's common-word list), `nameDetector`
+(how names are found, below) and a `hash`. English is bundled (`wa-pack-en.js`); any other language is fetched once from the data index
 and kept in the user's files, refetched when the index's hash moves, and a failed fetch stands down to a
 table where every word reads rare and every filter is a no-op. Only the latest switch takes effect. The
 suggester and the audit read whichever table is current when they run, so a switch reaches the suggester's
-next build and the audit's next verdict. Scoring reads `common` as well, for the name filter
+next build and the audit's next verdict. Scoring reads `common` and `nameDetector` as well
 (`docs/matching-architecture.md`, *Scoring*), from its next scan.
+
+A pack's `features` is a map from what it provides to how: `freq`, `common` and `pos` are the data above; `fragmentDetector` says how a key is told to be a slice of a sentence, and
+carries the language's `functionWords` where a list does it (the audit's `fragment` flag and the suggester's stop list read
+it; a pack without one raises no fragment flag); `nameDetector` says how
+names are found in the language. `"nameDetector": { "capitalised": true }` states that capital letters mark names, and WA
+applies its capital rule, in scoring and in the suggester's properness test alike. A `nameDetector` may instead, or also, carry a `model`, a URI naming the provider and a pinned revision
+(`hf://owner/name@revision`), with the `labels` of its that are names; no WA runs one yet. WA uses what it can: a model
+it cannot run is ignored, and the capital rule applies only where the pack says `capitalised: true`. A pack with no
+`nameDetector`, and a language with no pack, has no name detection, and the suggester then takes only an acronym for a
+name; nothing is assumed from silence. A feature WA does not know
+is ignored, so a pack may carry more than an older WA uses. `features` is part of the hash.
 
 `build-zipf.py` writes the packs. English comes from Google Books eng-fiction 1-grams, 1980 on, with
 wordfreq gating the vocabulary and supplying the POS sets from the dominant tag at 1,000 or more tagged
@@ -155,7 +166,7 @@ Explorer's key chips, where curation happens; only one flag means "delete this k
 | `book shared` | listed as a key by more than 3/4 of `bookShared` (0.75) of the entries of a book of at least `KEY_MIN_SHARED_ENTRIES` (10) | severe at >= `bookShared`, else moderate | the share |
 | `regex orthography` | a pattern that cannot reach a quote or dash form the chat, or failing that the book, uses more than the form it matches | minor | the form, and the class to write |
 | `common word` | no chat scanned; a single literal word on the pack's common list, or a SmartKey with a path made entirely of them | moderate | the word or path |
-| `fragment` | a multi-word literal holding a function word, unless it is a capitalised frame with a name-particle interior, or the book holds its title-cased form case-sensitively | severe | `phrase fragment` |
+| `fragment` | a multi-word literal holding one of the language's function words (none without a `fragmentDetector`), unless, where capitals mark names, it is a capitalised frame with a name-particle interior, or the book holds its title-cased form case-sensitively | severe | `phrase fragment` |
 | `short` | a literal under `KEY_MIN_LENGTH` (4) on a non-whole-word entry, with hits | minor at every hit clean, severe at <= 1/3, else moderate | `clean/total exact`, and `consider ? =k` at <= 1/3 |
 | `unattested` | df 0 and no chat rate; a proper-looking literal is exempt under `ignoreProper` | none | `unattested` for a literal, `never matches` for a `?` or regex key, naming what was checked |
 | `variant only` | a hyphenated literal the chat, or failing that the book, holds only un-hyphenated | minor | which |

@@ -57,6 +57,16 @@ const ORDER_BASE = 99000;
  *  ST's own dry runs fire on every chat load, so they stay silent unless the setting is on. */
 const dbg = (...args) => { if (settings().debugLog || runState.dryRunInProgress) console.log(...args); };
 
+/** The selected language's table. A pack that could not be had is said aloud: scoring then finds no names, and nothing else shows it. */
+async function loadLanguage() {
+    const tb = await setLanguage(settings().language, { fetchPack, store: packStore });
+    if (!tb.loaded) {
+        console.error(`WorldsApart: the ${tb.lang} language pack could not be loaded`);
+        toastr.error(t`The language pack for "${tb.lang}" could not be loaded. Until it is, WorldsApart finds no names in that language and treats every word as rare. Check the connection, then choose the language again.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+    }
+    return tb;
+}
+
 // Vector backend — Vector Storage's provider config and ST's own endpoints.
 
 /** Request body for /api/vector/*, from Vector Storage's provider settings.
@@ -465,7 +475,7 @@ async function syncWorld(world, entries, stop = null) {
     return { collectionId, owners };
 }
 
-const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
+const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost, table().nameDetector === 'capitalised');
 
 /** @type {Map<string, {fingerprint: string, index: object, nameDf: object|null, common: Set<string>|null}>} Per-book content-lexical and name indexes, rebuilt when the book's fingerprint moves; the name index also when the language table does. */
 const contentIndexes = new Map();
@@ -599,9 +609,12 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
 
     const depth = Number(settings().messageDepth || world_info_depth);
     const common = table().common;
-    const windowNames = properNames(windowFor(depth, {}).join('\n'), common);
+    // The language's pack says whether capitals mark names; where they do not, both name columns are zero for every row.
+    const named = table().nameDetector === 'capitalised';
+    const windowNames = named ? properNames(windowFor(depth, {}).join('\n'), common) : null;
 
     for (const item of items) {
+        if (!named) { item.properNouns = 0; item.density = 0; continue; }
         const book = bookIndexes(item.entry.world, byWorld.get(item.entry.world) ?? [], { names: true }).nameDf;
         const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content, common);
         item.properNouns = book ? properShared(names, windowNames, book) : 0;
@@ -2486,7 +2499,7 @@ async function initBody() {
     // Not awaited: an unstored pack is a network fetch with no timeout, and ST awaits each extension's activate hook in
     // turn — blocking here holds up every later extension while the interceptor is already live and the scan hooks are
     // not yet registered. The pack applies when it lands; until then `table()` is the English one.
-    setLanguage(settings().language, { fetchPack, store: packStore }).catch(() => {});
+    loadLanguage().catch(() => {});
 
     $('#extensions_settings').append(SETTINGS_HTML);
 
@@ -2542,9 +2555,9 @@ async function initBody() {
     bind('#wa_language', 'language', 'string');
     const languageState = () => {
         const tb = table();
-        $('#wa_language_state').text(tb.loaded ? t`${tb.label} — ${tb.zipf.size} words` : t`${tb.lang}: pack not loaded — every word reads rare until it is`);
+        $('#wa_language_state').text(tb.loaded ? t`${tb.label} — ${tb.zipf.size} words` : t`${tb.lang}: pack not loaded — no names are found and every word reads rare until it is`);
     };
-    $('#wa_language').on('change', async () => { await setLanguage(settings().language, { fetchPack, store: packStore }); languageState(); });
+    $('#wa_language').on('change', async () => { await loadLanguage(); languageState(); });
     // The index is read only here, when the panel fills its list; a stored pack the index has moved is refreshed then.
     (async () => {
         const index = await refreshIndex({ fetchIndex, fetchPack, store: packStore });
