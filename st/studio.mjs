@@ -4,7 +4,7 @@ import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters, su
 import { getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
-import { escapeHtml, getCharaFilename } from '../../../../utils.js';
+import { escapeHtml, getCharaFilename, getSanitizedFilename } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
@@ -1497,7 +1497,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const copyBookByName = async (srcName, carryIgnored = false, asName = null) => {
         const src = (srcName === selected) ? data : await loadWorldInfo(srcName);
         if (!src) return null;
-        const name = asName || freeCopyName(srcName);
+        // The server saves under the sanitised name whatever it is sent, so that is the name to return.
+        const name = asName ? await getSanitizedFilename(asName) : freeCopyName(srcName);
+        if (!name) { toastr.warning(t`That name has no characters a file name can keep.`, 'WorldsApart'); return null; }
         await saveWorldInfo(name, structuredClone(src), true);
         if (carryIgnored) {
             const from = settings().keywordIgnore?.[srcName];
@@ -1809,8 +1811,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const renameBook = async (srcName = selected, prefill = null) => {
         const oldName = srcName;
         const raw = await Popup.show.input(t`Rename lorebook`, t`New name:`, prefill ?? oldName);
-        const newName = (raw ?? '').trim();
-        if (!newName || newName === oldName) return;
+        const typed = (raw ?? '').trim();
+        if (!typed || typed === oldName) return;
+        // The server saves under the sanitised name whatever it is sent, and every binding must name the file that exists.
+        const newName = await getSanitizedFilename(typed);
+        if (!newName) { toastr.warning(t`That name has no characters a file name can keep.`, 'WorldsApart'); return; }
+        if (newName === oldName) return;
         if (world_names.some(n => n.toLowerCase() === newName.toLowerCase())) { toastr.warning(t`A lorebook with that name already exists.`, 'WorldsApart'); return; }
         const bookData = (oldName === selected) ? data : await loadWorldInfo(oldName);
         if (!bookData) { toastr.warning(t`Could not load “${oldName}”.`, 'WorldsApart'); return; }
@@ -1819,6 +1825,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const wasPersona = power_user.persona_description_lorebook === oldName;
         const wasChat = ctx.chatMetadata?.[METADATA_KEY] === oldName;
         await saveWorldInfo(newName, bookData, true);
+        // saveWorldInfo resolves on a failed write too: the old book goes only once the server lists the new one.
+        await updateWorldInfoList();
+        if (!world_names.includes(newName)) { toastr.error(t`Could not save “${newName}”. “${oldName}” is unchanged.`, 'WorldsApart'); return; }
         await deleteWorldInfo(oldName);   // clears old's global-select / persona / active-char bindings
         try {
             if (wasSelected && !selected_world_info.includes(newName)) selected_world_info.push(newName);
