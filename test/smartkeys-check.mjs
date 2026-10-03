@@ -684,8 +684,8 @@ console.log('ok   proximity: (…)~N clusters a group within N words, vetoes ove
     M = createScanScope({ macros: { '{{path}}': '/dev/null/' } });
     eq(matches('{{path}}', 'at /dev/null/ now'), true, 'a plain key whose value looks like a pattern is still a literal');
     eq(matches('{{path}}', 'dev'), false);
-    M = createScanScope({ macros: { '{{user}}': 'Kyle Sommers' } });
-    eq(matches('? {{user}}', 'Kyle Sommers'), true, 'another scope matches under its own map');
+    M = createScanScope({ macros: { '{{user}}': 'Kyle Marlowe' } });
+    eq(matches('? {{user}}', 'Kyle Marlowe'), true, 'another scope matches under its own map');
     eq(matches('? {{user}}', 'Nick Parsons'), false, '...and not the other\'s');
     M = createScanScope({ macros: { '{{user}}': 'Nick Parsons' } });
     const gated = { key: ['sword'], keysecondary: ['{{user}}'], selectiveLogic: 0 }, cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 
-eq(slugOf('Foxbridge.json'), 'foxbridge', 'the extension goes and the case folds');
+eq(slugOf('Harrowgate.json'), 'harrowgate', 'the extension goes and the case folds');
 eq(slugOf('My_Book__v2.json'), 'my_book__v2', 'punctuation and digits are kept: the filename is already unique');
 eq(slugOf('no-extension'), 'no-extension', 'a name with no .json is its own slug');
 
