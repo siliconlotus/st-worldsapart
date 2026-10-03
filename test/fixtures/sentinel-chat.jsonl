@@ -3,7 +3,7 @@
 {"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Morning already. The glimmerwort is still in the cold frame."}
 {"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "Whatever. Every morning it is the same conversation."}
 {"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Thornwick came by at first light.\n\nBrambleshaw sent word an hour later, separately."}
-{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "Morning again. Did Thornwick say anything useful?"}
+{"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "Morning again. Did Thornwick or Ottoline say anything useful?"}
 {"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "However you look at it, no. Never does."}
 {"name": "You", "is_user": true, "is_system": false, "send_date": "2026-08-03", "mes": "My mother would have had something to say about that."}
 {"name": "Sentinel", "is_user": false, "is_system": false, "send_date": "2026-08-03", "mes": "Morning light suits the workshop. Whatever else is wrong."}

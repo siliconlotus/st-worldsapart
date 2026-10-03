@@ -409,6 +409,44 @@
             "delayUntilRecursion": 2,
             "comment": "SECOND DELAY LEVEL, disabled — never activates. It is here only to give the book a second delayUntilRecursion level: core reads the levels before its disable check, and with two it forces a RECURSION pass even with world_info_recursive off. That pass is uid 14's check.",
             "content": "The zzlevelgate opens on the second level."
+        },
+        "28": {
+            "uid": 28,
+            "key": [],
+            "keysecondary": [],
+            "comment": "VECTOR, ONE NAME SHARED — no key, so only the similarity route activates it. Its cast is Thornwick, Hesper and Jorund; the chat names Thornwick, so properNouns is above zero.",
+            "content": "The seedlings under glass are tended by Thornwick, who waters them before the sun is high. Each dusk Hesper checks the soil for damp, and Jorund mends the cracked panes.",
+            "constant": false,
+            "vectorized": true,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0
+        },
+        "29": {
+            "uid": 29,
+            "key": [],
+            "keysecondary": [],
+            "comment": "VECTOR, NO NAME SHARED — no key, off the topic of the chat, and none of Corliss, Brannoch and Tamsin is in the chat: properNouns is zero.",
+            "content": "The harbour pilots answer to Corliss, who sets the toll per mast. The tide tables for the estuary are kept by Brannoch and Tamsin.",
+            "constant": false,
+            "vectorized": true,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0
+        },
+        "30": {
+            "uid": 30,
+            "key": [
+                "Ottoline"
+            ],
+            "keysecondary": [],
+            "comment": "VECTOR AND KEY — both routes reach it. Its cast is Ottoline, Idony and Leofric; the chat names Ottoline.",
+            "content": "The seed ledger is kept by Ottoline, with Idony and Leofric as witnesses. Nothing is sown until all three have signed the page.",
+            "constant": false,
+            "vectorized": true,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0
         }
     }
 }

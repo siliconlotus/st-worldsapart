@@ -5,6 +5,7 @@ import { buildKeyPruneScan, flagProbes, substringProbes, orthoAlternates } from 
 import { createScanScope, ORTHO_FAMILIES } from '../extension/smartkeys.mjs';
 import { keywordScore, scanSegments, countKey, countChatHits, activationAdds, makeWindowFor, withExtraTexts } from '../extension/matcher.mjs';
 import { buildKeyPruneScan as _pruneScan } from '../extension/keyword-audit.mjs';
+import { buildNameDf, properNames, properShared } from '../extension/relevance.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 /** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
@@ -97,6 +98,20 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v['? thornwick brambleshaw'], undefined, 'at scan the query is attested by its own entry text');
     eq(verdicts(chatRate(), 'paragraph')['? thornwick brambleshaw'], undefined,
         'and at paragraph, where its own text cannot attest it, the chat does — the scan evaluates `?` keys too');
+}
+
+// --- the vectorized entries (uids 28-30): a cast of three each, sharing at most one name with the chat
+{
+    eq(verdicts(undefined).Ottoline, undefined, 'the one keyed vector entry holds its key in its own text');
+    eq(verdicts(chatRate()).Ottoline, undefined, '...and the chat uses it in 1 of 11 messages, under the share');
+    const book = buildNameDf(entries);
+    const windowNames = properNames(msgs.join('\n'));
+    const shared = uid => [...book.names.get(`${data.name}.${uid}`) ?? properNames(data.entries[uid].content)].filter(n => windowNames.has(n)).join(',');
+    eq(shared(28), 'thornwick', 'the keyless entry on the chat\'s topic shares one name of its three');
+    eq(shared(29), '', 'the keyless entry off the topic shares none');
+    eq(shared(30), 'ottoline', 'the keyed one shares one');
+    const pn = uid => properShared(properNames(data.entries[uid].content), windowNames, book);
+    eq(pn(28) > 0 && pn(30) > 0 && pn(29) === 0, true, 'so properNouns separates the two keyless entries, as it would in a book with a cast');
 }
 
 // --- the match window reaches the audit -------------------------------------------------------
