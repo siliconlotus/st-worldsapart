@@ -107,7 +107,7 @@ export const runState = {
     dryRunInProgress: false,      // true during either slash-command run
     generationIsDryRun: false,    // true while ST's own dry-run generation is in flight
     pluginAvailable: null,        // did the server plugin answer /ping
-    pluginRoot: null,             // absolute ST root from /ping
+    pluginRoot: null,             // absolute ST root from /ping, which tells only an admin
     pluginFP: null,               // fingerprint of the plugin files the server loaded, as /ping reports it
     pluginLoader: null,           // the deployed loader's version; null for a plugin copied before the loader
     pluginInstall: null,          // the install the server loads, as source.json names it

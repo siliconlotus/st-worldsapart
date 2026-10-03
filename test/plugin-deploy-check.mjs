@@ -74,6 +74,9 @@ try {
             routes.get('/ping')({ body: {} }, { send: x => { sent = x; } });
             eq(sent.install, path.join('public', 'scripts', 'extensions', 'third-party', name), '...and /ping names the install it loaded, not the stale record');
             eq(sent.shared, false, 'a ping with no folder name reports no shared install');
+            eq('root' in sent || 'dataRoot' in sent, false, 'a caller who is not an admin is not told where the server keeps its files');
+            routes.get('/ping')({ body: {}, user: { profile: { admin: true } } }, { send: x => { sent = x; } });
+            eq(path.isAbsolute(sent.root) && path.isAbsolute(sent.dataRoot), true, '...and an admin is, for the deploy command');
             routes.get('/ping')({ body: { dir: name } }, { send: x => { sent = x; } });
             eq(sent.shared, true, 'and one naming a folder installed for all users reports it, so a per-user copy of it can say it hides it');
             routes.get('/ping')({ body: { dir: '../../../etc' } }, { send: x => { sent = x; } });

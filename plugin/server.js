@@ -515,9 +515,10 @@ export async function init(router) {
         // Whether an install for all users sits under the caller's folder name, whose files ST serves over a per-user copy of that name.
         const dir = sanitize(String(request.body?.dir ?? ''));
         const shared = Boolean(dir) && fs.existsSync(path.join(ST_ROOT, 'public', 'scripts', 'extensions', 'third-party', dir, 'manifest.json'));
-        response.send({ ok: true, id: info.id, root: ST_ROOT, fingerprint: FINGERPRINT, loader: LOADER, install: INSTALL, shared,
-            // Where the deploy command for a per-user install lives: dataRoot may be relocated outside the ST root.
-            dataRoot: path.resolve(ST_ROOT, String(getConfigValue('dataRoot', './data'))) });
+        response.send({ ok: true, id: info.id, fingerprint: FINGERPRINT, loader: LOADER, install: INSTALL, shared,
+            // The server's absolute paths, to an admin only: they are read for the deploy command, which only an admin is shown.
+            // dataRoot is where a per-user install's command lives, and may be relocated outside the ST root.
+            ...(request.user?.profile?.admin ? { root: ST_ROOT, dataRoot: path.resolve(ST_ROOT, String(getConfigValue('dataRoot', './data'))) } : {}) });
     });
 
     console.log('[WorldsApart] server plugin ready at /api/plugins/worlds-apart');
