@@ -32,18 +32,13 @@ does not carry "rare in one corpus" as a reason.
 
 - **R1** — Removing the similarity query's admission gate was a no-op: `bm25 > 0` admitted 99.9% of every book's
  indexed entries; removing `scoreThreshold` moved admission by 6 entries in 10,103 and recovered no
- relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching-architecture.md By similarity`; `CLAUDE.md Pure vs ST-coupled`.
+ relevant entry (70 graded scenes). — `plugin/scoring.mjs scoreCollection`; `docs/matching-architecture.md By similarity`; `CLAUDE.md Four stages, and the three orderings`.
 
 - **R2** — A strict cosine gate would lose 110 of 672 graded-relevant entries: chunks below the corpus
  mean carrying the query's exact terms (70 scenes). — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md By similarity`.
 
-- **R3** — The old admitCeiling (100 entries / 300 chunks) bound on routine scenes — it sat below two
- of the seven books in the graded corpus: dropped 23 of 672 grade≥3 rows on 20 scenes; 200 recovered all but 2 and
- saturated; the gates admitted 100% of indexed entries on every scene measured.
- — `plugin/scoring.mjs poolEntries`; `docs/matching-architecture.md By similarity`.
-
 - **R4** — Largest measured book: 208 vectorized entries, against the 1000-entry ceiling.
- — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching-architecture.md By similarity`; `CLAUDE.md countKey is the only matcher`.
+ — `plugin/scoring.mjs poolEntries, selectTopK`; `worldsapart.js`; `docs/matching-architecture.md By similarity`.
 
 - **R5** — Chunks-per-entry ratio 9.1–10.3 (why no-plugin K counts 10,000 chunks).
  — `plugin/scoring.mjs selectTopK`; `docs/matching-architecture.md By similarity`.
@@ -67,9 +62,6 @@ does not carry "rare in one corpus" as a reason.
  vectorized rows carry a keyword hit; at scan depth 2 keys fire for 11 of 28 grade-4 entries vs 21 of
  28 at depth 10 (89 scenes). — `eval/core-compare.mjs`.
 
-- **R18** — Per-book centring leaves book identity intact: 1-NN same-book purity 99.4%→98.2%.
- — `eval/lib/scene.mjs makeCandidateSet`; `eval/param-screen.mjs`.
-
 - **R19** — Entity filter effect: unfiltered BM25 ran ~2x the filtered value on one real scene (101.06
  vs 46.11); re-measured over three graded scenes, mean nDCG@5 0.896 filtered vs 0.808 — real but far
  smaller than the original note claimed. — `worldsapart.js init`; `extension/state.mjs defaultSettings`.
@@ -78,8 +70,7 @@ does not carry "rare in one corpus" as a reason.
  including `gaz=none` (nDCG@10 −0.0082, 28/42, p=0.120; F@R −0.0054, 19/15/37, p=0.608); at 70 scenes
  every arm returns a byte-identical candidate set (10,103 vector rows, 353 keyword rows, 670 of 672
  retrievable relevant), differing only in query terms (none 2911 / keys 4042 / shipped 6130 / bodies
- 36,789 — bodies ≈ 5–10x the vocabulary; the keys-live arm read 9839). The `denseColumn` reweighting arms moved +0.0056 and
- +0.0005 nDCG@10 over the same 70 scenes — a question the vector weight asks directly.
+ 36,789 — bodies ≈ 5–10x the vocabulary; the keys-live arm read 9839).
  — `extension/entity.mjs buildTermWeights, buildGazetteer`; `eval/param-screen.mjs`.
 
 - **R21** — Entity-tuning trap run results (recorded so the metric choice survives): relevant-per-scene
@@ -102,37 +93,34 @@ does not carry "rare in one corpus" as a reason.
 ## E — Embedding models
 
 - **E1** — No-plugin fit (text, properNouns, density — no embedding touched): held-out AUC 0.7979.
- — `eval/embedding-models.md What to use § Known gotchas`.
+ — `eval/embedding-models.md The plugin decides whether the model matters`.
 
 - **E4** — Delivered count is a corpus property, not a model property: at cutoff 0.10 all seven models
- deliver 13.3–14.2 entries; spread stays under 1 entry across 0.10–0.30. — `eval/embedding-models.md Context length: check it against your scan window`; `extension/state.mjs runState`; `docs/matching-architecture.md Selection`.
+ deliver 13.3–14.2 entries; spread stays under 1 entry across 0.10–0.30. — `eval/embedding-models.md Two knobs, and they are independent`; `extension/state.mjs runState`; `docs/matching-architecture.md Selection`.
 
 - **E5** — Cutoff sweep (shipped model): 0.05→26.8 delivered / 27.1% P / 83.9% R; 0.10→13.3/38.1/69.5;
  0.15→9.2/43.6/59.7; 0.20→6.5/45.5/52.1; 0.30→4.1/47.9/42.0. ~1.8k tokens per delivered entry (≈24k
  per scene at 0.10). Precision never exceeds 50.8% at any cutoff for any model.
- — `eval/embedding-models.md Speed § Hosted`; `extension/state.mjs runState`.
-
-- **E6** — At F2's own optimum jina delivers 30.2 entries vs Qwen3-8B's 15.0 and still scores lower — a
- looser dial, not a better model. — `eval/embedding-models.md Known gotchas`.
+ — `eval/embedding-models.md Two knobs, and they are independent`; `extension/state.mjs runState`.
 
 - **E7** — Query instructions (same collections, only the query vector moves): Qwen3-8B's instruction
  is worth +0.0131 held-out AUC and +0.0235 F2, on 4 of 5 books; EmbeddingGemma's documented prefix
- pair is flat (0.7976 vs 0.7982) and gets neither. — `eval/embedding-models.md Two knobs, and they are independent`;
+ pair is flat (0.7976 vs 0.7982) and gets neither. — `eval/embedding-models.md What to use`;
  `extension/relevance.mjs queryPrefix, buildNameDf`; `eval/lib/reindex.mjs ensureIndex`; `test/model-resolve-check.mjs`.
 
 - **E8** — mxbai truncates at its 512-token context: two queries sharing a 2600-char prefix returned
  the identical vector (cosine 1.00000) vs bge-m3's 0.848 on the same pair; ~70% of a typical scan
  window (measured 6595 chars ≈ 1650 tokens) never reaches it; embeddinggemma did NOT truncate at its
- advertised 2048 in the same probe. — `eval/embedding-models.md Quantization: 4-bit DWQ costs nothing measurable § Speed`.
+ advertised 2048 in the same probe. — `eval/embedding-models.md Context length: check it against your scan window`.
 
 - **E9** — Quantization costs nothing measurable: 4-bit DWQ vs 8-bit mxfp8 on Qwen3-8B — −0.002 F2 mean
  (4 books up, 1 down); cosine solo AUC 0.833 vs 0.832; fitted AUC 0.8312 vs 0.8290; all inside SEs.
- — `eval/embedding-models.md Speed`.
+ — `eval/embedding-models.md Quantization: 4-bit DWQ costs nothing measurable`.
 
 - **E10** — Speed (M-series Mac, per 800-char chunk): MLX 8B 110ms; ollama 4b 277ms; llama.cpp 8B
  910ms (≈80 min for a mid-size library); transformers.js jina 553ms on one CPU thread, super-linear
  in length: 553ms @800 chars, 1.18s @1750, 5.49s @6595 — what a real query costs on ST's default.
- — `eval/embedding-models.md Before you switch § Known gotchas § Speed`; `worldsapart.js init`.
+ — `eval/embedding-models.md What to use § Speed`; `worldsapart.js init`.
 
 - **E11** — Hosted cost at $0.05/1M: ~$0.03 to index a five-book library; ~8¢ per thousand messages.
  — `eval/embedding-models.md Hosted`.
@@ -152,7 +140,7 @@ does not carry "rare in one corpus" as a reason.
  under Qwen3-8B (text and properNouns compensating); the signal ORDER inverts across models — bge-m3:
  text +0.794 / cosine +0.465 / keys −0.006 (8924 rows, 69 scenes); Qwen3-8B-4bit: cosine +0.762 /
  text +0.567 / keys +0.137 (6051 rows, 102 scenes). — `worldsapart.js init`;
- `test/relevance-model-check.mjs`; `CLAUDE.md Plugin changes need a restart`.
+ `test/relevance-model-check.mjs`.
 
 ## F — Scoring and selection: the relevance model
 
@@ -172,10 +160,6 @@ does not carry "rare in one corpus" as a reason.
 - **F6** — The idf weighting is what makes it work: idf beats count 45 up / 14 down (p 0.0001);
  Jaccard is worse than count (27 up / 33 down); restricting to the gazetteer loses 15 up / 44 down
  (p 0.0002). — `docs/matching-architecture.md`; `extension/relevance.mjs properDensity`; `eval/relevance-regress.mjs`.
-
-- **F7** — The `entity` extractor beats the private ASCII regex it replaced: F2 0.5443→0.5476 paired
- over 88 scenes (47/17/24, p 0.0002); validation-fold AP 0.873→0.883. — `docs/matching-architecture.md`;
- `eval/relevance-regress.mjs`.
 
 - **F8** — Multi-token spans add nothing: −0.0019 F2 (18/28/48, p 0.184), 2 of 5 books, AUC identical
  to the third decimal, signal weaker solo (AUC 0.755→0.739, beta 0.325→0.247). 105 bundles / 102
@@ -224,12 +208,6 @@ does not carry "rare in one corpus" as a reason.
  there.
  — `docs/matching-architecture.md`; `extension/relevance.mjs properDensity`; `worldsapart.js init`.
 
-- **F25** — Per-book standardisation reverses the pathology and loses the score: share-vs-scene-max
- correlation −0.158→+0.486, size-dependence 0.928→0.652, share spread 7.1→11.9 points, mean delivered
- 17.8→9.4 (94 scenes); F2 0.5102→0.4671 with AUC 0.8076 vs 0.8198; `--beta 1.5` halves the gap
- (0.4594 vs 0.4396) — mostly the smaller delivered set, but no beta closes it.
- — `docs/matching-architecture.md`.
-
 - **F28** — Straddling entries are the haystack paraphrased: 66 of 446 memory positives straddle their
  scene, within-scene z 2.795 vs clean positives' 0.800, ranking first in 53% of their scenes vs 7%.
  `dropUnavailable` removes 43% of graded rows and 20% of grade≥3 rows over the 96 syn scenes; on one
@@ -240,7 +218,7 @@ does not carry "rare in one corpus" as a reason.
 - **F29** — The scale is ordinal in the signals and the flat spot is memory's: cosine across the four
  boundaries +0.682 / +0.625 / **+0.468** / +0.901 (the operational ≥3 cut is the flattest); grades 2
  and 3 sit together and cosine inverts across them (+0.748 vs +0.694); reference is monotone
- (+0.123 / +0.588 / +1.397). — `docs/matching-architecture.md`; `extension/relevance.mjs postDates`.
+ (+0.123 / +0.588 / +1.397). — `eval/lib/metrics.mjs gradeCredit`; `docs/matching-architecture.md`; `extension/relevance.mjs postDates`.
 
 - **F30** — Calibration: P(≥3) indistinguishable from calibrated (ECE 0.0077 vs 0.0067 null, p 0.252);
  P(≥2) 0.0112 vs 0.0080 (p 0.080) — no longer the leaked corpus's p 0.002; most of that bias was the
@@ -251,12 +229,7 @@ does not carry "rare in one corpus" as a reason.
  — `docs/matching-architecture.md`; `extension/relevance.mjs scoreRelevance`; `eval/relevance-regress.mjs`.
 
 - **F32** — Grade-2 rows are a steady ~20% of what E[credit] surfaces at every depth (22.0% of top-5,
- 19.4% of top-20) — they pay into precision, not recall. — `docs/matching-architecture.md`.
-
-- **F34** — Two cutoffs, one per tier: memory peaks at 0.08 (F2 0.5139, 17.5 vs 4.0 relevant),
- reference at 0.19 (F2 0.806, 6.5 vs 2.5); both curves flat (memory within 0.012 of best across
- 0.10–0.20, reference within 0.03 across 0.05–0.25) — a cutoff is a range, a third decimal is false
- precision. — `docs/matching-architecture.md`.
+ 19.4% of top-20) — they pay into precision, not recall. — `eval/lib/metrics.mjs gradeCredit`; `docs/matching-architecture.md`.
 
 - **F35** — Reference cosine wants `denseAllEntries`: fitted only on entries that happen to carry one
  it is an absence indicator (−0.281, SE 0.119, solo AUC 0.442 — below chance, inverting on the
@@ -267,11 +240,7 @@ does not carry "rare in one corpus" as a reason.
  quantity does not exist.
  — `docs/matching-architecture.md`; `worldsapart.js init`.
 
-- **F37** — Reference tolerates a weak fit: AUC 0.733→0.698 held out (vs memory's 0.820→0.799), on 342
- vs 6051 rows. — `docs/matching-architecture.md`.
-
-- **F38** — The tier base-rate argument was measured wrong: pooled the tiers look 3.7x apart [5x at
- `:1522` — D6], but base rate correlates −0.63 with grading depth, and at matched rank the tiers are
+- **F38** — The tier base-rate argument was measured wrong: pooled the tiers look 3.7x apart, but base rate correlates −0.63 with grading depth, and at matched rank the tiers are
  indistinguishable at the head (38.4% vs 37.7% at K=10, gap growing with K). Depth-filtering selects
  the rater: `judged >= 50` drops 39% of human grades while keeping 8536 of 8546 judge rows.
  — `docs/matching-architecture.md`.
@@ -280,10 +249,6 @@ does not carry "rare in one corpus" as a reason.
  as a clean win (69% less material for 29% less relevance) kept 93% of relevant reference rows but
  only 56% of relevant memory rows — why `tierRecall` is a standing readout.
  — `eval/lib/scene.mjs`; `test/paired-check.mjs`; `eval/lib/logistic.mjs`.
-
-- **F40** — Keyword tilt dose-response is closed: 13 doses 0.75–3 over 70 scenes, unimodal on both
- metrics, joint plateau [1.25, 1.3]; the standing arms are tripwires (tilt=1 ~−0.02 F@R, tilt=1.5
- ~−0.02 nDCG). — `eval/param-screen.mjs`.
 
 - **F42** — The metric window is load-bearing: moving from top-10 to the admitted set roughly halved
  the tie columns across five arms on 103 scenes (82→52, 84→47) and reversed the sign of the largest
@@ -307,26 +272,14 @@ does not carry "rare in one corpus" as a reason.
 - **F52** — Runtime/harness parity: on one browser capture (16 scored rows), `properNouns` reproduces
  from `extension/relevance.mjs` to the capture's own rounding. — `docs/matching-architecture.md`.
 
-- **F53** — Per-book and per-scene standardisation lie on ONE cost curve, so the F25 loss was a cutoff
- artefact rather than a model difference. Both fits refit on the same 100 scenes (`--lobo --cutoff`,
- memory tier), then swept over `memoryCutoff` 0.04–0.30 and scored on the DELIVERED SET through
- `eval/cost-curve.mjs`. Read at matched token spend the two are inseparable and the sign alternates:
- ~29.5k/30.3k tokens F2 0.5250 vs 0.5221; ~23.9k 0.5240 vs 0.5279; ~20.9k 0.5192 vs 0.5203; ~18.7k
- 0.5010 vs 0.5035; ~16.5k 0.4631 vs 0.4687; ~15.0k 0.4443 vs 0.4408 — every gap under 0.006 against a
- 0.09 swing along either curve. Each fit's own best differs (scene 0.5355 at cutoff 0.10 delivering
- 13.3; book 0.5096 at 0.12 delivering 11.4) on `relevance-regress`'s held-out ROWS, which is not the
- delivered set: the gap does not survive scoring the set the system actually chooses. NOT PAIRED — a
- macro-mean per cell, no sign test; the claim is that no gap is visible, not that one is excluded.
- — `docs/matching-architecture.md`.
-
 - **F55** — Pooled standardisation sits above per-scene on the WHOLE-SYSTEM cost curve, at matched
  token spend, at every point read. Both tiers, delivered set, `eval/cost-curve.mjs`, 105 bundles, both
  artefacts refit on the same corpus. Cutoff 0.04-0.30, scene -> pooled F2: 0.5055->0.5071,
  0.5242->0.5315, 0.5335->0.5412, 0.5366->0.5377, 0.5388->0.5425, 0.5310->0.5378, 0.5185->0.5261,
  0.4958->0.5111, 0.4701->0.4829, 0.4552->0.4749 — ten of ten positive, +0.0011 to +0.0197, sign never
- alternating, tokens matched within 2% at every row against a ~0.08 swing along either curve. Contrast
- F53, where per-book alternated sign under the same instrument. NOT PAIRED — a macro-mean per cell, as
- F53 was; the claim is that no crossing is visible, not that the gap is established. At the SERVED
+ alternating, tokens matched within 2% at every row against a ~0.08 swing along either curve. NOT PAIRED —
+ a macro-mean per cell, no sign test; the claim is that no crossing is visible, not that the gap is
+ established. At the SERVED
  cutoff (0.10, the `relevanceCutoff` default) the delta is +0.0011, so the shipped configuration is not
  measurably improved. — `docs/matching-architecture.md`.
 
@@ -351,7 +304,8 @@ does not carry "rare in one corpus" as a reason.
  list; `param-screen --arms stopwordDf=0,stopwordDf=0.15,stopwordDf=0.4`, shipped fit, fAtCut, 105
  scenes: off +0.0024 (17/12/76, p 0.46), 0.15 −0.0048 (28/14/63, p 0.044, Holm 0.13), 0.4 +0.0009
  (14/10/81); no arm consistent per lineage. So neither list is load-bearing at the cut, and the
- suggester/audit (`ZIPF_EN`, `english common`) are the only places English is assumed.
+ suggester/audit (the language pack's frequency table and common-word list) are the only places
+ English is assumed.
  — `docs/matching-architecture.md Scoring (onScanDone)`.
 
 ## K — Keys and matching
@@ -367,9 +321,6 @@ does not carry "rare in one corpus" as a reason.
 - **K3** — Entry flags reach plain keys only (the `?`/`/re/` branches return before flag args are
  read) — measured against `countKey`; the 16,000-comparison fuzz it replaced never caught it because
  it only ran flags-off. — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`; `test/core-matcher-check.mjs`.
-
-- **K4** — The fold×strict em-dash interaction broke four of the seven dash spacings prose uses.
- — `docs/matching-architecture.md Matching — countKey (matcher.mjs)`.
 
 - **K5** — Window segmentation is safe and cheap: 8 segments vs one join measured 1.01x (200 patterns,
  18KB, n=2000); literal keys are slice-invariant — 8 books, 8970 distinct keys (6353 multi-word),
@@ -462,9 +413,6 @@ does not carry "rare in one corpus" as a reason.
  compounds, shouted markdown headers, elisions, roman numerals and LitRPG stat blocks are minority
  shapes. Nearly every suggester bug came from one of these. — `test/genre-cases.mjs`.
 
-- **S21** — [zero-result census] `matchPersonaDescription` and siblings: nothing on disk sets one.
- — `docs/keyword-suggestions.md`.
-
 - **S24** — Fiction register vs wordfreq for the Zipf table, gold pairs + hand-written public books. Shift:
  genre and narrative vocabulary rises 0.3–0.7 (sword 4.4→4.8, cloak 3.6→4.3, mage 3.1→3.7, shoulder
  4.5→5.2, thrall/necromancer absent→3.0+), web/tech/business falls (spreadsheet, inbox, firewall pass
@@ -484,28 +432,22 @@ does not carry "rare in one corpus" as a reason.
 
 ## G — Grading, judges, bundles
 
-- **G1** — Bundle-corpus census (migrated, 2026-08): 598 human verdicts, 16,962 judge verdicts, 12,519
- rows across 107 bundles; the reader's resolution rule reproduces all 11,946 stored v2 `llmGrade`
- scalars; 611 bare grades in `/wa-grade` documents are human while 37 in synth documents were llm
- verdicts in the wrong field; every one of the 107 frozen haystacks re-derives from its source chat. — `CLAUDE.md Pure vs ST-coupled`; `eval/bundle-schema.md Identity`;
- `extension/grading.mjs searchedBook`; `docs/matching-architecture.md`.
-
 - **G2** — Human vs contract at matched rank (n=258 rows graded by both, joined on shipped-arm rank):
  contract mean 0.68x the human's at rank 0–19 and 1.03x at 20–44; every contract 4 fell on a human 4
  (n=5); 19 of its 62 3s sit on human 0–2; QWK 0.690; Kendall tau-b 0.54 per scene. The human grades
  predate the current rubric — agreement statistics against a superseded construct. Unmatched-rank
  comparison of the same passes read 0.26 vs 0.83 and was almost all row draw.
- — `CLAUDE.md Pure vs ST-coupled`.
+ — `CLAUDE.local.md Graded scenes: pool first, then pair` (gitignored).
 
 - **G3** — Contract self-agreement (re-grade at original job size: 179 rows / 12 jobs / 4 books):
  87.7% exact, 98.3% within one; 79% at the head of the pool vs 90–93% deeper; 4 of the 13 rows
  originally ≥3 came back below. The labels are the ceiling: ~a third of boundary positives change
- side between passes of the same judge. — `CLAUDE.md Pure vs ST-coupled`; `docs/matching-architecture.md`;
+ side between passes of the same judge. — `CLAUDE.local.md Graded scenes: pool first, then pair` (gitignored); `docs/matching-architecture.md`;
  `eval/judge-agree.mjs`; `extension/grading.mjs searchedBook`.
 
 - **G4** — Job size does not move grades: the same 64 rows at 4 vs 16 rows/job scored +0.11, 10 up / 5
  down, sign test p~0.3 — though two of the 64 were real 0-to-3 catches, so prefer small batches
- anyway. — `CLAUDE.md Pure vs ST-coupled`.
+ anyway. — `eval/synthetic-data/grade-pending.mjs`.
 
 - **G5** — Anchored wording is the lever: restating the question — same rater, same entries — moved
  weighted kappa against the human rater 0.242→0.455 (a one-scene version: "nearly doubled").
@@ -522,7 +464,7 @@ does not carry "rare in one corpus" as a reason.
  corrected rubric moved ~30% of the relevant set out — the same magnitude as the contract's own
  non-reproduction — which is why the median of 3+ verdicts wins over latest-wins, and why that rule
  reproducing all 11,946 stored scalars made the resolution move lossless.
- — `eval/bundle-schema.md Identity`; `extension/grading.mjs mergeGrades, searchedBook`.
+ — `eval/bundle-schema.md Verdicts`; `extension/grading.mjs mergeGrades, searchedBook`.
 
 - **G8** — Schema decisions, each on a measured sweep: 44 book filenames already contain spaces,
  commas, apostrophes, parens, `#`, `@` (no printable separator); 0 of 106 multi-arm documents vary
