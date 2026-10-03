@@ -4,10 +4,11 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import readline from 'node:readline';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scoreCollection, poolEntries, selectTopK, admitCeiling } from './scoring.mjs';
-import { BOUNDARY_MODES, MATCH_WINDOWS, WA_METADATA_KEY, countChatHits, dropTags } from '../extension/matcher.mjs';
+import { BOUNDARY_MODES, MATCH_WINDOWS, WA_METADATA_KEY, countChatHits, dropTags, isRegexKey } from '../extension/matcher.mjs';
 import { chatUser, createScanScope } from '../extension/smartkeys.mjs';
 import { norm, corpusMean, rowDim } from './vector.mjs';
 import { pluginFingerprint, PLUGIN_FILES } from './fingerprint.mjs';
@@ -58,6 +59,20 @@ export const info = {
 const MEAN_CACHE_MAX = 16;
 const ADOPT_SIBLINGS_MAX = 32;
 const CHAT_READS_MAX = 16;
+/** The longest one chat file's matching may hold the server, in ms; `WA_SCAN_FILE_MS` raises it on a slow host. */
+// ponytail: the scan still runs on the main thread, so a key that backtracks stalls every user for this long; a worker thread is the upgrade.
+const SCAN_FILE_MS = Number(process.env.WA_SCAN_FILE_MS) || 10_000;
+/** `fn()` under SCAN_FILE_MS: a `/regex/` key is the caller's, and V8 stops a backtracking one only from outside. Throws ERR_SCRIPT_EXECUTION_TIMEOUT. */
+const bounded = (fn, ms = SCAN_FILE_MS) => vm.runInNewContext('fn()', { fn }, { timeout: ms });
+const timedOut = error => error?.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT';
+/** The first key carrying a regex that alone outruns a tenth of the limit over `texts`, else null: the scan that timed out cannot say which key it was in. */
+function slowKey(keys, texts, opts) {
+    for (const key of keys) {
+        if (!isRegexKey(key) && !(key.startsWith('?') && key.includes('/'))) continue;
+        try { bounded(() => countChatHits([key], texts, opts), SCAN_FILE_MS / 10); } catch (error) { if (timedOut(error)) return key; }
+    }
+    return null;
+}
 const meanCache = new Map();
 /** The query dimension last seen per model directory, by scopeKey; /adopt copies only rows of it. */
 const queryDims = new Map();
@@ -260,7 +275,7 @@ export async function init(router) {
 
     /** Counts of MESSAGES containing each key across chat histories, read line by line server-side so no chat crosses the
      *  wire (P1). Every key kind: countChatHits is the shipped matcher, deployed beside this file.
-     *  Body `{ keys: string[], chats: [{ dir, file }], wordBoundary }` (dir is the character directory), reply `{ counts, typed, messages, unit, scanned, missing, partial }`. */
+     *  Body `{ keys: string[], chats: [{ dir, file }], wordBoundary }` (dir is the character directory), reply `{ counts, typed, messages, unit, scanned, missing, partial }`, or 422 `{ slow: true, key? }` when one file's matching outran SCAN_FILE_MS. */
     async function scanChats(request, response) {
         try {
             const keys = Array.isArray(request.body?.keys) ? request.body.keys.map(String).filter(Boolean) : [];
@@ -311,7 +326,17 @@ export async function init(router) {
                 const user = chatUser(texts);
                 const macros = { ...(request.body?.macros ?? {}), ...(entry?.macros ?? {}), ...(user ? { '{{user}}': user } : {}) };
                 // One file at a time, then merged: a hit is per message, so where the scan is split cannot change the total.
-                const got = countChatHits(keys, texts, { ...unitOpts, scope: createScanScope({ macros, boundary: wordBoundary }) });
+                const scanOpts = { ...unitOpts, scope: createScanScope({ macros, boundary: wordBoundary }) };
+                let got;
+                try {
+                    got = bounded(() => countChatHits(keys, texts, scanOpts));
+                } catch (error) {
+                    if (!timedOut(error)) throw error;
+                    const key = slowKey(keys, texts, scanOpts);
+                    console.warn(`[WorldsApart] /scan-chats stopped: one chat took more than ${SCAN_FILE_MS} ms to match${key ? `, on the key ${key}` : ''}`);
+                    // `slow`, so the client stops instead of running the same keys in the browser; `key` when one key alone is the cause.
+                    return response.status(422).send({ error: 'a key took too long to match', slow: true, ...(key ? { key } : {}) });
+                }
                 for (const [k, n] of got.messagesWith) totals.set(k, (totals.get(k) ?? 0) + n);
                 for (const [k, n] of got.typedWith) typedTotals.set(k, (typedTotals.get(k) ?? 0) + n);
                 messages += got.messages;

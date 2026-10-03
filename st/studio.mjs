@@ -2257,6 +2257,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     method: 'POST', headers: getRequestHeaders(),
                     body: JSON.stringify({ keys, macros, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file, macros: c.char ? { '{{char}}': c.char } : {} })) }),
                 });
+                // Before the fallback: the browser would run the same keys and hang the tab instead.
+                const refused = r.status === 422 ? await r.clone().json().catch(() => null) : null;
+                if (refused?.slow) {
+                    toastr.error(refused.key
+                        ? t`The key ${refused.key} took too long to match, so the chat scan was stopped. Rewrite it so that it cannot backtrack.`
+                        : t`A key took too long to match, so the chat scan was stopped. A regex key that backtracks is the usual cause.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+                    return { totals, typedTotals, seen: 0, via, unit };
+                }
                 if (!r.ok) throw new Error(String(r.status));
                 j = await r.json();
                 // Every field the audit reads: the message count and both count tables. `unit` is optional.

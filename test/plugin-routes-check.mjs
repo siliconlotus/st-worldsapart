@@ -44,6 +44,8 @@ const embedder = http.createServer((req, res) => {
 await new Promise(r => embedder.listen(0, '127.0.0.1', r));
 const extrasUrl = `http://127.0.0.1:${embedder.address().port}`;
 
+// Read once, when the server module loads.
+process.env.WA_SCAN_FILE_MS = '300';
 const box = deploySandbox({ st });
 try {
     eq(box.run.status, 0, `the deploy ran (${box.run.stderr.trim() || 'no stderr'})`);
@@ -93,6 +95,17 @@ try {
 
     const scan = await call('/scan-chats', { keys: ['a'], chats: [{ dir: 'd', file: 'f' }], wordBoundary: 'strict' });
     eq(scan.code, 400, 'scan-chats refuses a request with no matchWindow');
+
+    fs.mkdirSync(path.join(vectors, 'd'));
+    fs.writeFileSync(path.join(vectors, 'd', 'f.jsonl'), [{ chat_metadata: {} }, { name: 'A', mes: `${'a'.repeat(40)}b` }, { name: 'A', mes: 'a plain line' }].map(m => JSON.stringify(m)).join('\n'));
+    const scanOf = keys => call('/scan-chats', { keys, chats: [{ dir: 'd', file: 'f' }], wordBoundary: 'strict', matchWindow: 'message' });
+    const plain = await scanOf(['plain', '/pl[a4]in/']);
+    eq(`${plain.code} ${plain.body?.counts?.plain} ${plain.body?.counts?.['/pl[a4]in/']}`, '200 1 1', 'a scan inside the time limit counts as before, regex keys included');
+    const started = Date.now();
+    const slow = await scanOf(['plain', '/pl[a4]in/', '/(a+)+$/', '? thing /x+/']);
+    eq(`${slow.code} ${slow.body?.slow} ${slow.body?.key}`, '422 true /(a+)+$/', 'a regex key that backtracks is stopped, and the reply names it among the others');
+    eq(Date.now() - started < 3000, true, '...at the limit, not when the regex would have finished');
+    eq((await scanOf(['plain'])).body?.counts?.plain, 1, 'and the next scan runs normally');
 } finally {
     embedder.close();
     box.cleanup();
