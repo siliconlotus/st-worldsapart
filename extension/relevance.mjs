@@ -4,8 +4,8 @@ import { normalizeOrthography } from './automaton.mjs';
 import { entryKey } from './content-lexical.mjs';
 import { tokenize } from './lexical.mjs';
 import { PACK as EN } from './wa-pack-en.js';
-// The bundled English list, whatever language is picked: this feeds a fitted column (F58), not the audit.
-const COMMON_WORDS = new Set(EN.common.split(' '));
+// The default for `common`, and the list the shipped fits were made under (F58); the runtime passes the selected language's.
+const EN_COMMON = new Set(EN.common.split(' '));
 
 export const isMemory = e => Boolean(e) && ('stmemorybooks' in e || 'STMB_start' in e);
 
@@ -36,9 +36,10 @@ export function properNounsOf(text) {
     return out;
 }
 
-export function properNames(text) {
+/** properNounsOf less the words in `common`, a language's common-word list: a capitalised ordinary word is not a name. */
+export function properNames(text, common = EN_COMMON) {
     const out = properNounsOf(normalizeOrthography(String(text ?? '')));
-    for (const w of [...out]) if (COMMON_WORDS.has(w)) out.delete(w);
+    for (const w of [...out]) if (common.has(w)) out.delete(w);
     return out;
 }
 
@@ -62,14 +63,14 @@ export const queryPrefix = (model) => {
 };
 
 /** Document frequency of every name in a book, entry as document: `ndoc` counts entries, never chunks (content-lexical's `docCount`); disabled entries count (F27); an entry with no content is not a document. `names` is keyed `world.uid`. */
-export function buildNameDf(entries) {
+export function buildNameDf(entries, common = EN_COMMON) {
     const df = new Map();
     const names = new Map();
     let ndoc = 0;
     for (const entry of entries ?? []) {
         if (typeof entry?.content !== 'string' || !entry.content.trim()) continue;
         ndoc++;
-        const found = properNames(entry.content);
+        const found = properNames(entry.content, common);
         names.set(entryKey(entry), found);
         for (const w of found) df.set(w, (df.get(w) ?? 0) + 1);
     }

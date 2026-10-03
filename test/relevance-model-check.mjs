@@ -13,6 +13,12 @@ eq(properNames('We met at Home today.').has('home'), false,
     'a common English word is not counted as a name even mid-sentence');
 eq(properNames('We met in London today.').has('london'), true,
     'a proper noun is never stoplisted');
+const FR = new Set(['bonjour', 'maison']);
+eq([...properNames('Elle a dit Bonjour à Maren. On rentre à Home.', FR)].sort().join(','), 'home,maren',
+    'another language\'s list decides what is ordinary: its common words go, and English ones are names there');
+eq(properNames('Elle a dit Bonjour à Maren.').has('bonjour'), true, '...where the default, the bundled English list, keeps it');
+eq(buildNameDf([{ uid: 1, world: 'W', content: 'Elle a dit Bonjour à Maren.' }], FR).df.has('bonjour'), false,
+    'the name index is built under the list it is given');
 
 eq(properNames('At Maren’s Gap').has([...properNames("At Maren's Gap")][0]), true,
     'a curly and a straight apostrophe produce the same name');

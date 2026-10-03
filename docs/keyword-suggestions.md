@@ -114,7 +114,8 @@ and 85% dominant tag), `posAdj` (adjectives at 85%), `common` (the audit's commo
 and kept in the user's files, refetched when the index's hash moves, and a failed fetch stands down to a
 table where every word reads rare and every filter is a no-op. Only the latest switch takes effect. The
 suggester and the audit read whichever table is current when they run, so a switch reaches the suggester's
-next build and the audit's next verdict.
+next build and the audit's next verdict. Scoring reads `common` as well, for the name filter
+(`docs/matching-architecture.md`, *Scoring*), from its next scan.
 
 `build-zipf.py` writes the packs. English comes from Google Books eng-fiction 1-grams, 1980 on, with
 wordfreq gating the vocabulary and supplying the POS sets from the dominant tag at 1,000 or more tagged

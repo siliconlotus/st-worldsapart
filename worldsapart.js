@@ -467,7 +467,7 @@ async function syncWorld(world, entries, stop = null) {
 
 const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
 
-/** @type {Map<string, {fingerprint: string, index: object, nameDf: object|null}>} Per-book content-lexical and name indexes, rebuilt when the book's fingerprint moves. */
+/** @type {Map<string, {fingerprint: string, index: object, nameDf: object|null, common: Set<string>|null}>} Per-book content-lexical and name indexes, rebuilt when the book's fingerprint moves; the name index also when the language table does. */
 const contentIndexes = new Map();
 
 /** Both per-book indexes over one book's entries behind one fingerprint; the name index only when `names` is set.
@@ -475,10 +475,13 @@ const contentIndexes = new Map();
 function bookIndexes(world, entries, { names = false } = {}) {
     const fingerprint = indexFingerprint(entries, settings());
     const hit = contentIndexes.get(world);
-    if (hit?.fingerprint === fingerprint && (!names || hit.nameDf)) return hit;
+    // The Set itself: lang.mjs makes a new one per table, so identity is the language in force.
+    const common = table().common;
+    const namesCurrent = hit?.nameDf && hit.common === common;
+    if (hit?.fingerprint === fingerprint && (!names || namesCurrent)) return hit;
     const index = hit?.fingerprint === fingerprint ? hit.index : buildContentIndex(entries, settings());
-    const nameDf = names ? buildNameDf(entries) : hit?.fingerprint === fingerprint ? hit.nameDf : null;
-    const fresh = { fingerprint, index, nameDf };
+    const nameDf = names ? buildNameDf(entries, common) : hit?.fingerprint === fingerprint && namesCurrent ? hit.nameDf : null;
+    const fresh = { fingerprint, index, nameDf, common: nameDf ? common : null };
     contentIndexes.set(world, fresh);
     if (hit?.fingerprint !== fingerprint) {
         console.log(`WorldsApart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
@@ -595,11 +598,12 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
     const byWorld = await entriesByWorld(entries);
 
     const depth = Number(settings().messageDepth || world_info_depth);
-    const windowNames = properNames(windowFor(depth, {}).join('\n'));
+    const common = table().common;
+    const windowNames = properNames(windowFor(depth, {}).join('\n'), common);
 
     for (const item of items) {
         const book = bookIndexes(item.entry.world, byWorld.get(item.entry.world) ?? [], { names: true }).nameDf;
-        const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content);
+        const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content, common);
         item.properNouns = book ? properShared(names, windowNames, book) : 0;
         item.density = properDensity(item.entry.content);
     }
