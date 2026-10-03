@@ -6,7 +6,7 @@
 #   curl -O http://storage.googleapis.com/books/ngrams/books/20200217/eng-fiction/totalcounts-1
 #   python3 build-zipf.py --ngrams 1-00000-of-00001.gz --totals totalcounts-1
 # Any other language, from wordfreq alone (no POS sets):  python3 build-zipf.py --lang de --out wa-pack-de.json --index packs.json
-# Every output carries the licence line the README's 'Data sources and licences' section explains; keep the two in step.
+# Every output carries the licence line the README's 'Credits and licenses' section explains; keep the two in step.
 import argparse, gzip, hashlib, importlib.metadata, json, math, os, re, sys
 import wordfreq
 
@@ -89,7 +89,7 @@ pack['hash'] = hashlib.sha256('|'.join(pack[k] for k in ('packed', 'va95', 'va85
 body = json.dumps(pack, ensure_ascii=False, separators=(',', ':'))
 if out.endswith('.js'):
     header = ('// Data: Google Books Ngram eng-fiction 20200217, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/); vocabulary, common list\n'
-              '// and every other language from wordfreq (Robyn Speer), CC BY-SA 4.0 — see README, Data sources and licences.\n'
+              '// and every other language from wordfreq (Robyn Speer), CC BY-SA 4.0 — see README, Credits and licenses.\n'
               '// The bundled English pack: the same object every fetched wa-pack-<lang>.json carries (lang.mjs usePack). Rebuild: build-zipf.py.\n'
               '// packed: `decizipf:words` bands, z >= 3.0 only, so absence means rare; va95/va85/adj85: dominant-POS sets; common: top 2000.\n')
     open(out, 'w', encoding='utf-8').write(header + f'export const PACK = {body};\n')

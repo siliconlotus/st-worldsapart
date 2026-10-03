@@ -87,16 +87,18 @@ WA has UI internationalization in English and French, and offers text corpus sta
 
 Branch from `staging`, PR against `staging`, run `test/`. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 
-### Data sources and licenses
+### Credits and licenses
 
-The code is MIT. Two generated data files carry their own terms, stated in their headers:
+WorldsApart ships with an English language pack, `extension/wa-pack-en.js`, which is indebted to several open language resources, some of which carry their own licenses.
 
-- `extension/wa-pack-en.js` — the bundled English pack: word frequencies and part-of-speech sets from the
-  [Google Books Ngram](https://books.google.com/ngrams/) eng-fiction corpus, version 20200217, licensed under
-  [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), and a common-word list derived from
-  [wordfreq](https://github.com/rspeer/wordfreq) by Robyn Speer, whose data is
-  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), so the file is too. wordfreq's own sources include
-  Google Books Ngrams, Wikipedia, OPUS OpenSubtitles 2018, ParaCrawl, the Leeds Internet Corpus, and the SUBTLEX word
-  lists by Marc Brysbaert et al., which are freely available data and are credited here as wordfreq requires.
+- **[wordfreq](https://github.com/rspeer/wordfreq)** by Robyn Speer: the pack's vocabulary and common-word list. wordfreq's data is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and so the pack is too.
+- **[SUBTLEX-US](https://www.ugent.be/pp/experimentele-psychologie/en/research/documents/subtlexus)** by Brysbaert & New and **[SUBTLEX-UK](https://shiny.psychology.nottingham.ac.uk/lpzwjv/SUBTLEX-UK/)** by van Heuven, Mandera, Keuleers & Brysbaert: freely available subtitle word frequencies for English, which reach us through wordfreq.
+- **[Google Books Ngram](https://books.google.com/ngrams/)**: the eng-fiction corpus (version 20200217) behind the pack's word frequencies and part-of-speech sets. [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+
+wordfreq also draws on [Wikipedia](https://wikipedia.org), [OPUS OpenSubtitles](https://opus.nlpl.eu/datasets/OpenSubtitles) 2018, ParaCrawl and the Leeds Internet Corpus.
+
+Other language packs are fetched on demand and built from various sources that might use their own licenses; see [the st-worldsapart-lang repo](https://github.com/siliconlotus/st-worldsapart-lang) for details.
+
+WorldsApart's own code is MIT.
 
 [^1]: Unless the sum of constant entries exceeds the entire budget
