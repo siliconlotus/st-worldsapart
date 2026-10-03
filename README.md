@@ -37,36 +37,43 @@ The box will also ask you which branch you want; we use the same branch names as
 - Release (default) is the stable version, updated when we're sure everything works
 - Staging gets new features and fixes first, but may have some instability.
 
-Updates stay on the channel you chose. SillyTavern checks at startup and tells you when one is waiting; it installs
-updates by itself only when SillyTavern's own version changes.
+Updates stay on the channel you chose. SillyTavern checks at startup and tells you when one is waiting; it installs updates by itself only when SillyTavern's own version changes.
 
-If you use a multi-user setup, we recommend installing for all users to allow the system administrator to manage updates and prevent version mismatches across users.
+**In multi-user setups, we strongly recommend installing for all users.** This prevents version drift weirdness for everyone, and also prevents a security issue if you install the plugin [(see below)](#multi-user-warning).
 
 ### Server plugin bootstrap
 > [!IMPORTANT]
 > **WorldsApart ships with a plugin.** SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search. Entries still get retrieved by similarity, but ST's endpoint doesn't return the similarity scores, so relevance is predicted from text, proper nouns and density alone — technically still better than ST alone, but noticeably worse than with the plugin (about four points of F2 across all entries, concentrated on vectorized entries).
 
 **If you installed WorldsApart for all users:**
+
 From your SillyTavern root folder, run:
 ```bash
 node public/scripts/extensions/third-party/st-worldsapart/deploy-plugin.mjs
 ```
+
 **If you installed WorldsApart for one user:**
+
 From your SillyTavern root folder, run:
 ```bash
 node data/default-user/extensions/st-worldsapart/deploy-plugin.mjs
 ```
-<sub>(If you installed WA into only the user account of a different user, replace `default-user` with the user handle. Again, we recommend installing for all users to prevent versioning issues.)</sub>
+<sub>(If you installed WA into only the user account of a different user, replace `default-user` with the user handle.)</sub>
 
-This does two things:
-- It puts a small loader in the plugins/ directory, which loads the plugin straight from the WorldsApart install you ran it from
-- It edits your config.yaml to set `enableServerPlugins: true`, because plugins are off by default.
-(If you would like to verify that that's true, see [deploy-plugin.mjs](deploy-plugin.mjs))
+<a id="multi-user-warning"></a>
+
+> [!WARNING]
+> **The server runs the plugin from whichever install you deploy it from.** If that is a user's local copy in a multi-user setup, that user could replace it and execute arbitrary code on the server (i.e., a substitution attack). Deploying from the all-users install means the admin-controlled copy is the one the server runs.
 
 Then restart SillyTavern.
 
-On restart the server console prints `[WorldsApart] server plugin ready`, and WA settings show
-**✓ Server plugin active**, with the WorldsApart install it loads.
+The script does two things:
+- It puts a small loader in the plugins/ directory, which loads the plugin straight from the WorldsApart install you ran it from
+- It edits your config.yaml to set `enableServerPlugins: true`, because plugins are off by default.
+
+(If you would like to verify these claims, see [deploy-plugin.mjs](deploy-plugin.mjs))
+
+On restart the server console prints `[WorldsApart] server plugin ready`, and WA settings show **✓ Server plugin active**, with the WorldsApart install it loads.
 
 After installing the plugin the first time, subsequent updates will be automatic and require only a server restart.
 

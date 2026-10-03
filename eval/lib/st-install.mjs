@@ -1,6 +1,6 @@
 // st-install.mjs — locates the SillyTavern install this checkout sits in, and resolves paths inside it. node:* only.
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve as resolvePath } from 'node:path';
+import { dirname, relative, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -20,4 +20,10 @@ export function stInstall() {
     const dataRoot = resolvePath(root, m ? m[1] : './data');
     const resolve = p => p.startsWith('/') ? p : p.startsWith('data/') ? dataRoot + p.slice('data'.length) : `${root}/${p}`;
     return { root, dataRoot, resolve };
+}
+
+/** Whether `dir` is an extension installed for one user, `<dataRoot>/<handle>/extensions/<name>`: a folder that user can replace through ST. */
+export function isPerUserInstall(st, dir) {
+    const parts = relative(st.dataRoot, dir).split(sep);
+    return parts[0] !== '..' && parts.length === 3 && parts[1] === 'extensions';
 }

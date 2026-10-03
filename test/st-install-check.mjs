@@ -3,7 +3,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { stInstall } from '../eval/lib/st-install.mjs';
+import { stInstall, isPerUserInstall } from '../eval/lib/st-install.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const roots = [];
@@ -21,6 +21,9 @@ const plain = install('dataRoot: ./data\n');
 eq(at(plain).resolve('data/default-user/worlds'), `${plain}/data/default-user/worlds`, 'the default dataRoot sits under the root');
 eq(at(plain).root, plain, 'and root is the install itself');
 eq(at(plain).dataRoot, `${plain}/data`, 'dataRoot is absolute, so a caller never re-joins it against the root');
+eq(isPerUserInstall(at(plain), `${plain}/data/tester/extensions/st-worldsapart`), true, 'an extension under a user\'s data folder is that user\'s install');
+eq(isPerUserInstall(at(plain), `${plain}/public/scripts/extensions/third-party/st-worldsapart`), false, '...one installed for all users is not');
+eq(isPerUserInstall(at(plain), '/somewhere/else/WorldsApart'), false, '...nor a checkout outside the install');
 
 const moved = install('dataRoot: ./custom-data\n');
 eq(at(moved).resolve('data/default-user/worlds'), `${moved}/custom-data/default-user/worlds`,

@@ -4,7 +4,7 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
-import { stInstall } from './eval/lib/st-install.mjs';
+import { stInstall, isPerUserInstall } from './eval/lib/st-install.mjs';
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const ST = stInstall();
@@ -81,6 +81,12 @@ if (cfg === null) {
     console.log('ok       enableServerPlugins already true in config.yaml');
 } else {
     console.log('NOTE     enableServerPlugins not found in config.yaml — set it to true manually');
+}
+
+if (isPerUserInstall(ST, SRC) && /^enableUserAccounts:\s*true\b/m.test(cfg ?? '')) {
+    console.log('WARNING  this install belongs to one user account, and user accounts are enabled. The server runs the plugin from this folder,\n'
+        + '         so whoever can replace that account\'s extensions decides what code the server runs. Install WorldsApart for all users\n'
+        + '         unless that account is the server administrator\'s own.');
 }
 
 console.log(`\nThe plugin now loads WorldsApart from ${SRC}.\nRestart SillyTavern. From now on, updating the extension and restarting SillyTavern updates the plugin too.`);
