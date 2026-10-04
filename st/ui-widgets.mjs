@@ -471,6 +471,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
    same reason the chips use it: a fixed border colour vanishes on near-black themes. */
 .wa-kw-sec { border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding-top: 7px; }
 .wa-kw-sec .wa-mode { margin-right: 0.6em; align-self: flex-start; }
+.wa-sec-fold { display: inline-flex; align-items: center; gap: 0.3em; margin-right: 0.8em; font-size: 0.9em; opacity: 0.6; cursor: pointer; }
 /* Whitelisted (ignored) keys: purple so a deliberately-spared key reads apart from an unflagged one. */
 .wa-kw-ignored { border-color: #a879e0 !important; background: color-mix(in srgb, #a879e0 18%, transparent); }
 /* Docked top drawer: full-width block below the header, columns so it stays shallow, divider beneath. */

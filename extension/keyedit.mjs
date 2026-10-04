@@ -50,6 +50,15 @@ export function addVariant(entries, key, term, list = 'key') {
     return added;
 }
 
+/** Adds `term` to `entry.keysecondary` unless it holds it under kwNorm; false when it does. The first secondary turns the gate
+ *  on (`selective`), since one nothing reads is no gate; a later one leaves a gate the author switched off as it is. */
+export function addSecondary(entry, term) {
+    if (hasKey(entry, term, 'keysecondary')) return false;
+    if (Array.isArray(entry.keysecondary) && entry.keysecondary.length) entry.keysecondary.push(term);
+    else { entry.keysecondary = [term]; entry.selective = true; }
+    return true;
+}
+
 /** Where the i-th of `n` selected rows lands in the block [start, start+n-1]; `desc` puts the top at the end. */
 export const blockTarget = (start, n, desc) => i => start + (desc ? n - 1 - i : i);
 

@@ -1,7 +1,7 @@
 // keyedit-check.mjs — keyedit.mjs: kwNorm, hasKey, keyHolders, renameKeyOn, deleteKey, replaceKey, addVariant.
 // Self-checking; run with no arguments.
 
-import { addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
+import { addSecondary, addVariant, deleteKey, hasKey, keyHolders, kwNorm, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const book = () => [{ key: ['Cat', 'dog'] }, { key: ['cat'] }, { key: ['bird'] }, { key: [] }, {}];
@@ -36,6 +36,21 @@ eq(keyHolders(book(), 'CAT').length, 2, 'holders finds every entry with the key,
     eq(deleteKey(es, 'kitten'), 2, 'a delete removes it from every holder');
     eq(es.every(e => !hasKey(e, 'kitten')), true, 'and from none other');
     eq(deleteKey(es, 'nothing'), 0, 'a key nothing has touches nothing');
+}
+
+// --- addSecondary: the first one starts the gate
+{
+    const bare = { key: ['cat'] };
+    eq(addSecondary(bare, 'night'), true, 'an entry with no secondary takes its first');
+    eq(`${bare.keysecondary.join(',')} ${bare.selective}`, 'night true', '...and its gate is switched on, a secondary nothing reads being no gate');
+    const empty = { key: ['cat'], keysecondary: [], selective: false };
+    addSecondary(empty, 'night');
+    eq(empty.selective, true, 'an empty list is no secondary, so its first one switches the gate on too');
+    const off = { key: ['cat'], keysecondary: ['night'], selective: false };
+    eq(addSecondary(off, 'rain'), true, 'an entry that has one takes another');
+    eq(`${off.keysecondary.join(',')} ${off.selective}`, 'night,rain false', '...and a gate the author switched off stays off');
+    eq(addSecondary(off, 'Night'), false, 'a secondary it already holds, under kwNorm, is not added again');
+    eq(off.keysecondary.length, 2, '...and the list is untouched');
 }
 
 console.log(process.exitCode ? 'FAILED  keyedit' : 'ok   keyedit: rename merges, and the book-wide three report what they touched');
