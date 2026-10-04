@@ -125,6 +125,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const expanded = new Set();      // level 2: entry text expanded (textarea) vs. first-line preview
     const tall = new Set();          // entry uids whose editor is popped out to full Studio height
     const advOpen = new Set();       // entry uids with the Advanced tray (recursion/budget/timing) expanded
+    const secOpen = new Set();       // entry uids whose EMPTY secondary-keys tray is unfolded; one with keys is always open
     const sugg = new Map();          // uid -> { tfidf:string[], llm:string[] } transient suggestion chips
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
     let tab = 'explorer';            // 'explorer' | 'cleanup' | 'lab'
@@ -402,7 +403,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         data.entries = u.entries;
         if (u.originalData) data.originalData = u.originalData;
         // A renumber's per-uid view state goes back to the uids it came from, as the entries do.
-        if (u.uidBack) for (const set of [entryOpen, expanded, tall, advOpen]) {
+        if (u.uidBack) for (const set of [entryOpen, expanded, tall, advOpen, secOpen]) {
             const moved = [...set].filter(uid => u.uidBack.has(uid));
             for (const uid of moved) set.delete(uid);
             for (const uid of moved) set.add(u.uidBack.get(uid));
@@ -514,7 +515,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         for (const [oldUid, newUid] of plan.moves) { const e = byUid.get(oldUid); e.uid = newUid; e.order = newUid; next[newUid] = e; }
         data.entries = next;
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
-        entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
+        entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
         const latches = rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))), ordered);
         armEntryUndo({ ...snap, n, latches, rekeyBack: uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(nu), o]))), uidBack: new Map(plan.moves.map(([o, nu]) => [nu, o])) });
@@ -1196,23 +1197,23 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }, { placeholder: t`keyword` }));
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
-        // On the key row while the entry has no secondary, at the end of the secondary row once it has.
-        const hasSec = Array.isArray(e.keysecondary) && e.keysecondary.length > 0;
-        const addSec = document.createElement('i');
-        addSec.className = `fa-solid ${hasSec ? 'fa-plus' : 'fa-filter'} wa-tool`; addSec.title = t`Add a secondary key`;
-        addSec.addEventListener('click', () => inlineInput(addSec, (nv, ok) => {
-            if (ok && nv && !keyWriteOk(nv, 'keysecondary', e)) return false;
-            if (ok && nv && addSecondary(e, nv)) save();
-            renderEntry(e);
-        }, { placeholder: t`secondary key` }));
-
-        // --- Secondary keys: rendered only when present; a refused or dead one is painted (unusableKeysOf) and nothing else, a gate not being a trigger.
-        let secPara = null;
-        if (hasSec) {
+        // --- Secondary keys: a tray under the keys it gates, folded to its heading while the entry has none. A refused or dead key is
+        // painted (unusableKeysOf) and nothing else, a gate not being a trigger.
+        const secKeys = Array.isArray(e.keysecondary) ? e.keysecondary : [];
+        const secShown = secKeys.length > 0 || secOpen.has(e.uid);
+        const sec = document.createElement('div');
+        sec.className = 'wa-kw-para wa-kw-sec';
+        if (!secKeys.length) {
+            const fold = document.createElement('span'); fold.className = 'wa-sec-fold';
+            fold.title = t`How the secondary keys gate the primaries above. They never activate on their own.`;
+            const chev = document.createElement('i'); chev.className = 'fa-solid fa-chevron-right wa-chevron' + (secShown ? ' wa-open' : '');
+            fold.append(chev, t`Secondary keys`);
+            fold.addEventListener('click', () => { secShown ? secOpen.delete(e.uid) : secOpen.add(e.uid); renderEntry(e); });
+            sec.append(fold);
+        }
+        if (secShown) {
             const gated = e.selective !== false;
             const bad = new Map((scan?.unusableKeysOf(e) ?? []).map(r => [r.key, r]));
-            const sec = document.createElement('div');
-            sec.className = 'wa-kw-para wa-kw-sec';
 
             // OFF is `selective: false`, not a fifth logic; switching off leaves `selectiveLogic` alone so switching back restores the operator.
             const logic = document.createElement('select'); logic.className = 'wa-mode';
@@ -1224,7 +1225,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 ? t`How the secondary keys gate the primaries above. They never activate on their own.`
                 : t`Switched off: ST and WorldsApart both ignore these keys. Pick an operator to gate on them again.`;
             // A negation-only secondary changes meaning per operator with no visible change; warn at the moment it moves.
-            const negOnly = e.keysecondary.filter(k => validateSmartKey(k).some(f => f.code === 'negation-only'));
+            const negOnly = secKeys.filter(k => validateSmartKey(k).some(f => f.code === 'negation-only'));
             logic.addEventListener('change', () => {
                 if (logic.value === 'off') { e.selective = false; }
                 else { e.selective = true; e.selectiveLogic = Number(logic.value); }
@@ -1239,7 +1240,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 save(); renderEntry(e);
             });
             sec.append(logic);
-            for (const key of e.keysecondary) {
+            for (const key of secKeys) {
                 const v = bad.get(key);
                 const item = document.createElement('span'); item.className = 'wa-kw-item' + (gated ? '' : ' wa-off');
                 const chip = document.createElement('span'); chip.className = 'wa-kw';
@@ -1263,9 +1264,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (why) { const r = document.createElement('span'); r.className = 'wa-kw-reason'; r.textContent = `(${why})`; item.append(r); }
                 sec.append(item);
             }
+            const addSec = document.createElement('i'); addSec.className = 'fa-solid fa-plus wa-tool'; addSec.title = t`Add a secondary key`;
+            addSec.addEventListener('click', () => inlineInput(addSec, (nv, ok) => {
+                if (ok && nv && !keyWriteOk(nv, 'keysecondary', e)) return false;
+                if (ok && nv && addSecondary(e, nv)) save();
+                renderEntry(e);
+            }, { placeholder: t`secondary key` }));
             sec.append(addSec);
-            secPara = sec;
-        } else para.append(addSec);
+        }
 
         // --- Level 2: text section ---
         const textSec = document.createElement('div'); textSec.className = 'wa-text-sec';
@@ -1296,7 +1302,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         thead.addEventListener('click', () => { expanded.has(e.uid) ? expanded.delete(e.uid) : expanded.add(e.uid); syncText(); });
         textSec.append(thead, fullWrap);
         body.append(textSec, para);   // entry text first, then keywords (reads more naturally)
-        if (secPara) body.append(secPara);   // the gate reads under the keys it gates
+        body.append(sec);   // the gate reads under the keys it gates
 
         if (advOpen.has(e.uid)) body.prepend(buildAdvancedTray(e, renderEntry));   // above the text + keywords
         row.append(body);
@@ -1586,7 +1592,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Off the deleted book before the latch pass awaits: save() writes `selected`, and would recreate it.
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
-            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
+            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
         }
         dirty = false;
         renderBooks();
@@ -3618,7 +3624,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const openBook = async name => {
         orphanView = false;
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
-        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
+        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
         cleanupChecks.clear(); cleanupUndo = null; clearEntryUndo();   // rowId is (uid, term): uids collide across books, so a tick or an undo must not cross one
         explorer.innerHTML = `<div style="opacity:0.6;padding:8px;">${escapeHtml(t`Loading…`)}</div>`; explorer.append(closeBtn);   // same re-adopt as the no-book branch
         renderBooks();
