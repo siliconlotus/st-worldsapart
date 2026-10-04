@@ -79,6 +79,19 @@ After installing the plugin the first time, subsequent updates will be automatic
 
 ---
 
+### Uninstalling
+
+Delete WorldsApart from **Extensions → Manage extensions**, like any other extension.
+
+On SillyTavern 1.19 or later, the delete dialog has a box labelled **Also clean up extension data**. Tick it and WA will ask what you want removed: downloaded language packs, its vector collections, your settings, your lorebook priorities, your per-book curation, and the server plugin's loader. Anything you leave unticked is kept, so reinstalling later picks up where you left off. (The broom button on WA's row does the same cleanup without uninstalling.)
+
+On SillyTavern 1.17 or 1.18, or if you'd rather do it by hand, delete the `plugins/worlds-apart` folder in your SillyTavern root. If WA was the only plugin you used, you can also set `enableServerPlugins` back to `false` in `config.yaml`; if the deploy script turned it on, the original is at `config.yaml.wa-backup`.
+
+> [!NOTE]
+> **Your lorebooks are untouched**, but some things in them only work with WA installed:
+> - **SmartKeys.** SillyTavern reads a key starting with `?` as plain text, so those keys will stop matching.
+> - **Most decorators.** SillyTavern itself only acts on `@@activate` and `@@dont_activate`. The other Character Card V3 decorators (`@@depth`, `@@activate_only_after` and so on) and WA's own `@@promote` are ignored without WA: they won't apply, and they won't leak into the prompt.
+
 ### Languages
 
 WA's interface is available in English and French (feel free to submit PRs with translation to your language!).
