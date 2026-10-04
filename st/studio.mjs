@@ -18,7 +18,7 @@ import { chatUser, createScanScope, macroMap, usableMessages, validateSmartKey }
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
-import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
+import { addSecondary, addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
 const SEVERITY_COLOR = { severe: '#e06c6c', moderate: '#d9b74a', minor: '#7bbf6a' };
@@ -1196,9 +1196,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }, { placeholder: t`keyword` }));
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
+        // On the key row while the entry has no secondary, at the end of the secondary row once it has.
+        const hasSec = Array.isArray(e.keysecondary) && e.keysecondary.length > 0;
+        const addSec = document.createElement('i');
+        addSec.className = `fa-solid ${hasSec ? 'fa-plus' : 'fa-filter'} wa-tool`; addSec.title = t`Add a secondary key`;
+        addSec.addEventListener('click', () => inlineInput(addSec, (nv, ok) => {
+            if (ok && nv && !keyWriteOk(nv, 'keysecondary', e)) return false;
+            if (ok && nv && addSecondary(e, nv)) save();
+            renderEntry(e);
+        }, { placeholder: t`secondary key` }));
+
         // --- Secondary keys: rendered only when present; a refused or dead one is painted (unusableKeysOf) and nothing else, a gate not being a trigger.
         let secPara = null;
-        if (Array.isArray(e.keysecondary) && e.keysecondary.length) {
+        if (hasSec) {
             const gated = e.selective !== false;
             const bad = new Map((scan?.unusableKeysOf(e) ?? []).map(r => [r.key, r]));
             const sec = document.createElement('div');
@@ -1253,15 +1263,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 if (why) { const r = document.createElement('span'); r.className = 'wa-kw-reason'; r.textContent = `(${why})`; item.append(r); }
                 sec.append(item);
             }
-            const addSec = document.createElement('i'); addSec.className = 'fa-solid fa-plus wa-tool'; addSec.title = t`Add a secondary key`;
-            addSec.addEventListener('click', () => inlineInput(addSec, (nv, ok) => {
-                if (ok && nv && !keyWriteOk(nv, 'keysecondary', e)) return false;
-                if (ok && nv && !e.keysecondary.some(k => kwNorm(k) === kwNorm(nv))) { e.keysecondary.push(nv); save(); }
-                renderEntry(e);
-            }, { placeholder: t`secondary key` }));
             sec.append(addSec);
             secPara = sec;
-        }
+        } else para.append(addSec);
 
         // --- Level 2: text section ---
         const textSec = document.createElement('div'); textSec.className = 'wa-text-sec';
