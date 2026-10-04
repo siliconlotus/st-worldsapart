@@ -81,7 +81,9 @@ After installing the plugin the first time, subsequent updates will be automatic
 
 ### Languages
 
-WA has UI internationalization in English and French, and offers text corpus statistics to improve retrieval in several languages (see WA settings or https://github.com/siliconlotus/st-worldsapart-lang for the current list.)
+WA's interface is available in English and French (feel free to submit PRs with translation to your language!).
+
+Matching works the same in every language[^2]. Some other features, such as keyword suggestions and how names are scored, depend on a language pack. WorldsApart ships with its English features; others can be downloaded via the settings menu. What each language supports is listed in [the st-worldsapart-lang repo](https://github.com/siliconlotus/st-worldsapart-lang). Regrettably, relevancy scoring in most languages will not yet perform as well as English.
 
 ### Contributing
 
@@ -102,3 +104,5 @@ Other language packs are fetched on demand and built from various sources that m
 WorldsApart's own code is MIT.
 
 [^1]: Unless the sum of constant entries exceeds the entire budget
+
+[^2]: With one exception: whole-word matching does not work in scripts written without spaces between words, such as Chinese, Japanese and Thai. See [Matching](docs/matching.md).
