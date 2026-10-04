@@ -1,12 +1,9 @@
 // reindex.mjs — rebuild a vector collection from a sample's embedded books, offline, into eval-data/indexes — never into ST's live vectors.
-// Usage (any cwd):
-//   node .../reindex.mjs <sample.json> [--chunkSize 400] [--chunkMode paragraph|length] [--minChunkSize 20]
-//                        [--book <name>] [--out <index.json>] [--batch 64] [--force]
+// The CLI is eval/reindex.mjs.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { chunkEntry } from '../../extension/chunking.mjs';
 import { getStringHash } from './scene.mjs';
-import { arg } from './metrics.mjs';
 import { openBundle } from '../../extension/grading.mjs';
 import { isMemory, PREFIXES } from '../../extension/relevance.mjs';
 import { defaultSettings } from '../../extension/state.mjs';
@@ -26,7 +23,7 @@ export const chunkConfig = (S, overrides = {}) => {
 };
 
 /**
- * The exact item set syncWorld would store: vectorized && !disable && content entries, chunks trimmed and blanks dropped, one item per (entry, chunk) and NO de-duplication — collapsing shared text moves the entry ranking (P4).
+ * The item set syncWorld stores when `all` is set — every enabled entry with content; without it the vectorized ones only — chunks trimmed and blanks dropped, one item per (entry, chunk) and NO de-duplication — collapsing shared text moves the entry ranking (P4).
  * `all` drops the vectorized gate; `archived` adds disabled memory entries as centroidOnly.
  * @returns {Array<{hash: number, text: string, index: number, centroidOnly?: boolean}>}
  */

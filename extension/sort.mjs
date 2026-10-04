@@ -1,5 +1,7 @@
 // sort.mjs — entry ordering: the field comparators (SORT_FNS), tiered grouping (TIER_DEFS, tierRank) and the
-// presentation-order vocabulary. Pure, no imports; the sort controls live in ui-widgets.mjs.
+// presentation-order vocabulary. Pure; the sort controls live in ui-widgets.mjs.
+// layout.mjs imports this module back: isConstant must only be read inside a function, never at top level.
+import { isConstant } from './layout.mjs';
 
 export const wiTitleOf = e => (e.comment && e.comment.trim()) ? e.comment.trim() : `UID ${e.uid}`;
 
@@ -11,7 +13,7 @@ export const gradeOrder = (rows, rank) => (rows ?? [])
 
 /** Tier definitions for the explorer's tiered grouping; the config's order is precedence, first enabled match wins. */
 export const TIER_DEFS = {
-    constant: { label: 'Constant', test: e => !e.disable && e.constant },
+    constant: { label: 'Constant', test: e => !e.disable && isConstant(e) },
     sticky:   { label: 'Sticky',   test: e => !e.disable && Number(e.sticky) > 0 },
     keyword:  { label: 'Keyword',  test: e => !e.disable && !e.vectorized },
     vector:   { label: 'Vector',   test: e => !e.disable && e.vectorized },

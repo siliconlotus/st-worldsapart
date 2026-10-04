@@ -1,4 +1,4 @@
-// Stage-2 recursion in eval/scene.mjs: the fixpoint's admissions, the depth each entry is reached at, and the
+// Activation recursion in eval/scene.mjs: the fixpoint's admissions, the depth each entry is reached at, and the
 // gates that decide who feeds it and who it may not reach. Hand-written vectors; recursion off is the default.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,7 +31,7 @@ const S = {
 
 const HAY = ['Morning light suits the workshop, and the lamps stay warm past midnight.'];
 const run = (overrides = {}) => {
-    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
     const rows = makeCandidateSet({ ...loadScene(structuredClone(S), { indexFile: INDEX, params: P }), params: P })(
         2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
     return new Map(rows.map(r => [r.uid, r]));
@@ -73,6 +73,57 @@ const run = (overrides = {}) => {
     eq(on.get(1).keywordScore, off.get(1).keywordScore,
         'the entry that seeded the buffer scores exactly what it scored from chat alone');
     eq(/workshop/.test(S.books.B[1].content), true, 'and its own content really does repeat its key — the premise of that claim');
+}
+
+// --- a constant retrieval never returned still feeds the buffer, as core activates it on its first loop, and a weight it reaches counts.
+{
+    const books = { B: { ...S.books.B,
+        7: entry(7, [], 'The harbour smells of kelpfire.', { constant: true }),
+        8: entry(8, ['? kelpfire::3'], 'Kelpfire burns green.'),
+    } };
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+    const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
+        2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
+    const r8 = rows.find(r => r.uid === 8);
+    eq(r8?.triggerDepth, 1, 'the unretrieved constant\'s content reaches uid 8 at recursion depth 1');
+    eq(Number(Math.exp(r8?.logWeight ?? NaN).toFixed(6)), 3, '...and its ::3 weighs as it would from the chat');
+}
+
+// --- ...but only a constant core would have activated: its gates rule, a delayUntilRecursion one waits a pass, and it feeds once.
+{
+    const withConstant = (extra, gates) => {
+        const books = { B: { ...S.books.B,
+            7: entry(7, extra.key ?? [], 'The harbour smells of kelpfire.', { constant: true, ...extra }),
+            8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
+        } };
+        const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+        const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P, gates })(
+            2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
+        return rows.find(r => r.uid === 8);
+    };
+    eq(withConstant({ delay: 5 }, { chatLength: 2 }), undefined, 'a constant its delay holds back feeds nothing');
+    eq(withConstant({ delayUntilRecursion: true })?.triggerDepth, 2, 'a delayUntilRecursion constant feeds from the first recursion pass');
+    eq(withConstant({ key: ['workshop'] })?.keywordScore, withConstant({})?.keywordScore, 'a keyed constant the chat also matches feeds its content once');
+}
+
+// --- a standing buffer ends the scan, unless a second delay level makes core force the pass that opens it.
+{
+    const quiet = level2 => {
+        const books = { B: {
+            1: entry(1, ['workshop'], 'The workshop is quiet.', { preventRecursion: true }),
+            6: S.books.B[6],
+            7: entry(7, [], 'The harbour smells of kelpfire.', { constant: true, delayUntilRecursion: true }),
+            8: entry(8, ['kelpfire'], 'Kelpfire burns green.'),
+            ...(level2 ? { 9: entry(9, ['nowhere'], 'Unmatched.', { delayUntilRecursion: 2, disable: true }) } : {}),
+        } };
+        const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', recursive: true });
+        const rows = makeCandidateSet({ ...loadScene(structuredClone({ ...S, books }), { indexFile: INDEX, params: P }), params: P })(
+            2, 0.75, null, [0, 1, 0], 'nothing', () => HAY);
+        return new Map(rows.map(x => [x.uid, x]));
+    };
+    eq(quiet(false).has(6), false, 'one delay level and pass 0 fed nothing: no recursion pass, so the delayed entry never activates');
+    eq(quiet(true).get(6)?.triggerDepth, 1, 'a second level, even on a disabled entry, forces the pass, and level 1 activates in it');
+    eq(quiet(true).get(8)?.triggerDepth, 2, '...and a delayed constant feeds the pass after');
 }
 
 // --- the step cap.

@@ -46,3 +46,20 @@ for (const c of cites) {
     }
 }
 eq(unknown.join('\n'), '', 'every cited symbol is an exported declaration, or a heading in the cited document');
+
+// A heading that exists is not the right heading: where the cited document names the claim's ID, each section naming it is cited.
+const entryOf = at => doc.slice(0, at).match(/^- \*\*([A-Z]{1,2}\d{1,3})\*\*/gm)?.at(-1)?.match(/[A-Z]{1,2}\d{1,3}/)[0];
+const misplaced = [];
+for (const m of doc.matchAll(CITE)) {
+    const [, file, rest, marked] = m;
+    if (marked || !file.endsWith('.md') || !rest.trim() || ignored.has(file)) continue;
+    const id = entryOf(m.index), named = new RegExp(`(?<![\\w-])${id}(?![\\w-])`);
+    const cited = new Set(rest.split('§').map(x => x.trim()));
+    let heading = '';
+    for (const line of readFileSync(join(ROOT, file), 'utf8').split('\n')) {
+        const h = line.match(/^#{1,6}\s+(.*)$/);
+        if (h) heading = h[1].trim().replace(/`/g, '');
+        else if (heading && named.test(line) && !cited.has(heading)) misplaced.push(`${id}: ${file} names it under "${heading}"`);
+    }
+}
+eq([...new Set(misplaced)].join('\n'), '', 'where a cited document names the claim, the section naming it is among those cited');

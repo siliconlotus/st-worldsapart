@@ -12,7 +12,7 @@ export function stRelative(path) {
     return m ? path.slice(m.index + 1).replace(/\\/g, '/') : path;
 }
 
-/** A book's entries keyed by uid, verbatim and whole: a trimmed book moves stage 3's BM25 through the gazetteer. */
+/** A book's entries keyed by uid, verbatim and whole: a trimmed book moves scoring's BM25 through the gazetteer. */
 export function keyByUid(entries) {
     const out = {};
     for (const entry of (Array.isArray(entries) ? entries : Object.values(entries ?? {}))) out[entry.uid] = entry;
@@ -145,7 +145,19 @@ export function mergeGrades(prior, fresh, who = {}) {
     return [...by.values()];
 }
 
-/** The sample's `primaryBook`: the book contributing the most retrieved rows (`cosine !== null`, never truthiness — a 0 cosine is retrieved), or null. */
+/** A /wa-super-eval section's review rows: one per row the reviewer touched, its bare `grade` the verdict apply-review appends,
+ *  beside the verdicts it was weighed against, which apply-review strips. An untouched row is absent, so it stays unreviewed.
+ *  @param {(row: object) => string|null} [textOf] the entry text shown to the reviewer */
+export const reviewRows = (edited, prior, textOf = () => null) => {
+    const priorOf = new Map((prior ?? []).map(g => [rowKey(g), g]));
+    return (edited ?? []).map(g => {
+        const p = priorOf.get(rowKey(g));
+        const text = textOf(g);
+        return { ...g, ...(p?.grades?.length ? { grades: p.grades } : {}), ...(text ? { entryText: String(text) } : {}) };
+    });
+};
+
+/** The sample's `primaryBook`: the book contributing the most similarity-scored rows (`cosine !== null`, never truthiness — a 0 cosine is scored), or null. */
 export function searchedBook(rows) {
     const counts = new Map();
     for (const row of rows ?? []) {
@@ -158,9 +170,11 @@ export function searchedBook(rows) {
 
 /** Assembles the sample. `queryChat`/`scanChat` are ST's {name, mes} messages; `injects` are {key, text, ambient, depth}; `sources` is
  *  matcher.usedMatchSources output; `books` is world -> uid-keyed entries; `chat`/`book`/`index` are paths, recorded not embedded; `now` is injected. */
-export function buildSample({ name, notes, query, queryChat, scanChat, injects, sources, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now }) {
+export function buildSample({ name, notes, query, queryChat, scanChat, injects, sources, depth, chat, book, index, primaryBook, embedModel, params, snapshot, candidates, books, priority, grades, cutoff, gradedCandidates, pluginFP, sourceFP, waVersion, stVersion, now, ...more }) {
     const { budget, ...rest } = snapshot ?? {};
     return {
+        // Only the gate inputs: anything else a caller spread in is dropped.
+        ...Object.fromEntries(GATE_INPUT_FIELDS.filter(f => more[f] !== undefined).map(f => [f, more[f]])),
         name,
         notes: notes || `Graded ${now} from a live /wa-grade run.`,
         createdAt: now,
@@ -208,14 +222,22 @@ export function buildSample({ name, notes, query, queryChat, scanChat, injects, 
 /** Fields identical across every arm, stored once at document level. Not query, candidates, params, cutoff or primaryBook: those are per-arm. */
 const SHARED_FIELDS = ['name', 'notes', 'createdAt', 'createdBy', 'bookPriority', 'gradeScale', 'embedModel', 'budget', 'pluginFP', 'sourceFP'];
 
-const GATE_INPUT_FIELDS = ['assistantCount', 'greetingIndex', 'personaName', 'firedLatches'];
+/** What a scene records of the chat's shape and cannot re-derive from its own window: the activation gates' inputs and the macro map. */
+const GATE_INPUT_FIELDS = ['assistantCount', 'greetingIndex', 'personaName', 'macros', 'chatLength', 'firedLatches'];
 
 const SCENE_FIELDS = ['chat', 'scanChat', 'injects', 'sources'];   // a sample's names for sceneChat / sceneChats / sceneInjects / sceneSources
 
 /** Numeric signal values, which live under `scores` and a fitted model indexes by name; ranks and the fused score stay flat, being arm-relative. */
-const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'properNouns', 'length'];
+const SIGNAL_FIELDS = ['cosine', 'text', 'keys', 'properNouns', 'density'];
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 3.1;
+
+/** A scene's `{ start, end }` as ST message indices, hidden messages counted. `win` is the query window, whose `i` indexes `chat` with its hidden messages out. */
+export function sceneSpan(chat, win) {
+    const visible = (chat ?? []).flatMap((m, i) => (m && !m.is_system ? [i] : []));
+    if (!win?.length) { const last = Math.max(0, (chat ?? []).length - 1); return { start: last, end: last }; }
+    return { start: visible[win[0].i], end: visible[win[win.length - 1].i] };
+}
 
 /** A scene's id, `<chat basename>-msg-<end>`, every run outside `[A-Za-z0-9_]` collapsed to `-`. */
 const sceneId = (chat, end) => {
@@ -345,7 +367,7 @@ export async function hashBooks(books) {
             Object.entries(bk ?? {}).map(([uid, e]) => [uid, withoutLocation(e)]))))])));
 }
 
-/** Packs one sample per arm into one schemaVersion 3 document; one scene is a one-element `scenes` list. `scene.user` is the rater
+/** Packs one sample per arm into one bundle document; one scene is a one-element `scenes` list. `scene.user` is the rater
  *  id for freshly typed grades (state.mjs `raterId`); `extra` is document-level fields to carry. */
 export async function bundleSamples(arms, scene = {}, extra = {}) {
     const first = arms[0]?.sample ?? {};
@@ -372,12 +394,12 @@ export async function bundleSamples(arms, scene = {}, extra = {}) {
         if (sample.paramSnapshot !== undefined) per.paramSnapshot = sample.paramSnapshot;
         const cell = { sceneStart: scene.start, depth: sample.depth };
         for (const [k, v] of Object.entries(sample)) {
-            if (SHARED_FIELDS.includes(k) || SCENE_FIELDS.includes(k) || k in extra) continue;
+            if (SHARED_FIELDS.includes(k) || SCENE_FIELDS.includes(k) || GATE_INPUT_FIELDS.includes(k) || k in extra) continue;
             if (['arm', 'grades', 'candidates', 'params', 'paramSnapshot', 'depth', 'waVersion', 'stVersion', 'scoredBy', 'books'].includes(k)) continue;
             if (v === undefined) continue;
             cell[k] = v;
         }
-        // Layout order, load-bearing: every stage-5 cap is a prefix cut replayed over the array as it stands. `why` moves to the trailing block, by position.
+        // Layout order, load-bearing: every delivery cap is a prefix cut replayed over the array as it stands. `why` moves to the trailing block, by position.
         const cands = (sample.candidates ?? []).map(toCandidate);
         cell.candidates = cands.map(({ why: _why, ...c }) => c);
         const whys = cands.map(c => c.why ?? []);
@@ -455,7 +477,7 @@ export const armNames = (doc, scene = null) => {
 
 /** Writes verdict rows (the entry shape openBundle hands out) back onto a single-scene document — the only writer of the layout besides bundleSamples. */
 export function setGrades(doc, rows, who = {}) {
-    if (!Array.isArray(doc?.scenes)) throw new Error('setGrades expects a schemaVersion 3 document');
+    if (!Array.isArray(doc?.scenes)) throw new Error('setGrades expects a bundle document');
     if (doc.scenes.length !== 1) throw new Error(`setGrades is for single-scene documents; this one has ${doc.scenes.length}`);
     const indexed = indexVerdicts(gradeEntries(rows, who));
     doc.scenes[0].entries = indexed.entries;
@@ -472,6 +494,8 @@ export const GRADE_ANCHORS = [
     'Directly relevant; should absolutely be included',
 ];
 export const GRADE_SCALE = GRADE_ANCHORS.length - 1;
+/** A value a verdict may carry: a whole number on the scale. */
+export const isGrade = v => Number.isInteger(v) && v >= 0 && v <= GRADE_SCALE;
 
 export function sampleFile(sample) {
     const slug = String(sample.name || 'scene').trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'scene';

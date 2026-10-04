@@ -1,4 +1,4 @@
-// Self-check for the referenceCentroid arms: the reference tier's stage-3 cosine under each centring, memory rows and stage 1 untouched. Hand-written vectors.
+// Self-check for the referenceCentroid arms: the reference tier's scoring cosine under each centring, memory rows and the similarity query untouched. Hand-written vectors.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +20,7 @@ const S = {
 };
 const QV = [1, 0, 0];
 const rowsOf = overrides => {
-    const P = sceneParams(S, { denseAllEntries: true, ...overrides });
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: true, ...overrides });
     const scene = loadScene(S, { indexFile: INDEX, params: P });
     const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['nothing here']);
     return new Map(rows.map(r => [r.uid, r.score]));

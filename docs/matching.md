@@ -46,7 +46,8 @@ The "what you meant, not what you wrote" principle extends to hyphens; WA expand
 > **Hyphens are a one-way journey**. If you think the hyphenated form might appear in the text, it's best to draft the key with them; if the text doesn't use them, it will still match, but if you write a non-hyphenated key and the model uses hyphens, it won't.
 
 > [!IMPORTANT]
-> **WA does NOT strip accents like some systems do**; `cafe` does not match `café`. Use an OR group to capture accent variants if they might arise: `? =cafe OR café`
+> **WorldsApart does NOT strip accents like some systems do**; `cafe` does not match `café`. Use an OR group to capture accent variants if they might arise: `? =cafe OR café`
+
 
 ---
 
@@ -112,16 +113,41 @@ Dreamweaver, Adobe's once-vaunted web development suite, // No match (segment st
 
 ---
 
+## Macros
+
+A key may hold a macro such as `{{user}}` or `{{char}}`, replaced by its value when the scan runs, as SillyTavern does. Macros are composable; if the user persona is `Sally Ride`, then `{{user}}'s` is expanded and matched as `Sally Ride's`.
+
+### Macro Unpacking
+WorldsApart allows you to use individual words within the macro. `{{user}}[N]` is the Nth word of the evaluated macro (split by spaces), so if the user persona is `Sally Ride`, `{{user}}[1]` is `Sally`, and `{{user}}[2]` is `Ride`. If the user persona is just `Sally`, `{{user}}[2]` is an empty string. You can also work backwards from the end: `{{user}}[-1]` is `Ride`, `{{user}}[-2]` is `Sally`.  
+
+
+### In plain keys
+
+You may use the full expansion, e.g. `{{user}}`, or one or more of its components; the expanded string will be matched against the text. Case sensitivity and whole-word matching are inherited from the entry, so by default, `{{user}}` for persona `Sally Ride` matches `universally riders`. 
+
+### In SmartKeys
+This capability is much more powerful when used as terms in SmartKeys; see the [SmartKeys user guide](smartkeys.md#macros).
+
+### In regular expressions
+Expanded forms are escaped, so `/\b{{user}}('s)?\b/` on persona `Sally Ride (Astronaut)` is expanded to `/\bSally Ride \(Astronaut\)('s)?\b/`
+
+> [!TIP]
+> **It's better to be literal when you can.** Users may rename character cards; the sensible `? {{char}} house` when you name the character `Dirk Gently` won't survive the rename to `Holistic Detective v3`.
+> 
+> **Macros are really meant for entry text and chat turns, not keys.**
+
+---
+
 ## Settings that change matching
 
-**Word boundary**[^3] decides what counts as *inside* a word, for whole-word matching only:
+**Word boundary**[^3] decides what counts as *inside* a word: where whole-word matching stops, and what counts as a word between the terms of a proximity group (`~N`, see [SmartKeys](smartkeys.md#proximity)):
 
 | | inside a word | `Joe` matches |
 |---|---|---|
 | **Strict** (default) | letters, digits, marks, `-` `'` | *Joe*, not *Joe's* or *Joe-adjacent* |
 | **Permissive** | letters, digits, marks | *Joe*, *Joe's* and *Joe-adjacent* |
 
-Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_` matches: underscore is a word character for programming identifiers, not for prose. **Word boundaries are Unicode-aware**: a word character is any letter, digit or combining mark in any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`.
+Neither matches *Joel* — a letter alongside always blocks. `_` is a boundary in both, so `_Joe_` matches: underscore is a word character for programming identifiers, not for prose. A doubled hyphen is a boundary in both too, because an em dash is written `--` after normalisation, so whole-word `Joe` matches *Joe—wait* even under Strict. **Word boundaries are Unicode-aware**: a word character is any letter, digit or combining mark in any script, so whole-word `caf` does not match `café` and `Мари` does not match `Марию`.
 
 **Match window** is the unit every part of a key must match within — *Paragraph* (the default), *Message*, or *Whole scan window* (SillyTavern's own behaviour). Under *Paragraph*, `? apple banana` needs both words in the same paragraph. A block element's open or close ends a window as a blank line does, so a preset that writes chat bubbles or a tracker panel as `<div>`s gives each one its own; `<b>`, `<em>`, `<span>` and `<br>` do not.
 
@@ -149,7 +175,7 @@ If you write a regex containing unescaped slashes and plan to port it to a non-W
 /(home\/user|~\/user)\/file/      both: pattern. Identical matches; `\/` is just `/` to a regex.
 ```
 
-Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The Studio warns on the first row's shape, for a bare `/regex/` key and a `? /re/` term alike.
+Escaping costs nothing under WA, so a book that may be shared is worth writing the escaped way. The Studio warns when the key is saved and the audit lists it, for a bare `/regex/` key and a `? /re/` term alike.
 
 [^1]: `REGEX_KEY_RE` in `extension/matcher.mjs` is the authority for which flags a key may carry.
       Core's own list is the narrower `CORE_REGEX_KEY_RE` beside it, which is why `/d` and `/v` are WA-only.

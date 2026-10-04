@@ -1,6 +1,7 @@
-// relevance-model-check — the stage-4 relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
+// relevance-model-check — the selection relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
 import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates, modelKey } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
+import { buildTermWeights } from '../extension/entity.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 import fs from 'node:fs';
 
@@ -13,9 +14,19 @@ eq(properNames('We met at Home today.').has('home'), false,
     'a common English word is not counted as a name even mid-sentence');
 eq(properNames('We met in London today.').has('london'), true,
     'a proper noun is never stoplisted');
+const FR = new Set(['bonjour', 'maison']);
+eq([...properNames('Elle a dit Bonjour à Maren. On rentre à Home.', FR)].sort().join(','), 'home,maren',
+    'another language\'s list decides what is ordinary: its common words go, and English ones are names there');
+eq(properNames('Elle a dit Bonjour à Maren.').has('bonjour'), true, '...where the default, the bundled English list, keeps it');
+eq(buildNameDf([{ uid: 1, world: 'W', content: 'Elle a dit Bonjour à Maren.' }], FR).df.has('bonjour'), false,
+    'the name index is built under the list it is given');
 
 eq(properNames('At Maren’s Gap').has([...properNames("At Maren's Gap")][0]), true,
     'a curly and a straight apostrophe produce the same name');
+
+// The query-term boost follows the same statement: a language whose capitals do not mark names boosts none.
+eq(JSON.stringify(buildTermWeights('Then Maren reached the gate.', new Set(['gate']), 3)), '{"maren":3,"gate":1}', 'a capitalised query term takes the boost');
+eq(JSON.stringify(buildTermWeights('Then Maren reached the gate.', new Set(['gate']), 3, false)), '{"gate":1}', '...and where capitals do not mark names it is not a term at all, the gazetteer aside');
 
 // ---- buildNameDf -------------------------------------------------------------------------------
 

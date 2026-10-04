@@ -34,14 +34,18 @@ eq(isCounterless(''), false, 'empty is not counterless');
 
 // The bump script is shipped code, so it is driven as a copy of itself over a fixture manifest, not re-derived here.
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
-const drive = manifestVersion => {
+const drive = (manifestVersion, releaseVersion) => {
     const dir = mkdtempSync(join(tmpdir(), 'wa-bump-'));
+    // The env is what the workflow feeds it; a stray WA_RELEASE_VERSION in the shell must not leak into the unset case.
+    const env = { ...process.env };
+    delete env.WA_RELEASE_VERSION;
+    if (releaseVersion != null) env.WA_RELEASE_VERSION = releaseVersion;
     mkdirSync(join(dir, '.github/scripts'), { recursive: true });
     mkdirSync(join(dir, 'eval/lib'), { recursive: true });
     copyFileSync(join(REPO, '.github/scripts/bump-staging-version.mjs'), join(dir, '.github/scripts/bump-staging-version.mjs'));
     copyFileSync(join(REPO, 'eval/lib/version.mjs'), join(dir, 'eval/lib/version.mjs'));
     writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ version: manifestVersion }));
-    const r = spawnSync('node', [join(dir, '.github/scripts/bump-staging-version.mjs')], { encoding: 'utf8' });
+    const r = spawnSync('node', [join(dir, '.github/scripts/bump-staging-version.mjs')], { encoding: 'utf8', env });
     const version = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')).version;
     rmSync(dir, { recursive: true, force: true });
     return { status: r.status, version };
@@ -52,6 +56,8 @@ eq(drive('1.20.0+build.14').status, 0, 'the script exits clean after a bump');
 const held = drive('1.20.0');
 eq(held.version, '1.20.0', 'the script holds a counterless version');
 eq(held.status, 0, 'holding is not a failure');
+eq(drive('1.20.0', '1.19.0').version, '1.20.0', 'a counterless version release does not yet carry is held');
+eq(drive('1.20.0', '1.20.0').version, '1.20.0+build.1', 'a counterless version release carries restarts the counter');
 eq(drive('garbage').status !== 0, true, 'the script refuses a version it cannot parse');
 
 if (process.exitCode !== 1) console.log('version-check: ok');

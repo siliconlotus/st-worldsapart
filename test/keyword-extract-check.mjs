@@ -1,6 +1,7 @@
 // Guards buildKeyPruneScan / buildKeySuggest (keyword-audit.mjs, keyword-suggest.mjs) on a tiny synthetic book.
 import assert from 'node:assert';
 import { buildKeyPruneScan, KEY_MIN_LENGTH, KEY_MIN_SHARED_ENTRIES } from '../extension/keyword-audit.mjs';
+import { createScanScope, KEY_ALERTS } from '../extension/smartkeys.mjs';
 import { buildKeySuggest, classifyLlmCand } from '../extension/keyword-suggest.mjs';
 
 // --- buildKeyPruneScan ---------------------------------------------------------------------------
@@ -14,7 +15,7 @@ const pruneBook = { entries: {
 } };
 const pruneOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: false,
     pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false,     minLength: KEY_MIN_LENGTH };
-const ps = buildKeyPruneScan(pruneBook, pruneOpts, new Set());
+const ps = buildKeyPruneScan(pruneBook, pruneOpts, new Set(), { scope: createScanScope() });
 assert.strictEqual(ps.entries.length, 4, 'all keyword entries scanned');
 const flagsOf = uid => Object.fromEntries(ps.classifyEntry(pruneBook.entries[uid]).map(r => [r.key, r.flag]));
 const f0 = flagsOf(0);
@@ -27,17 +28,24 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
         0: { uid: 0, comment: 'Cosmonaut', content: 'the cosmonaut waited', key: ['cosmonaut', '? -zebra', '/[/'],
             keysecondary: ['? -gagarin', '? "moon', 'apollo'], selectiveLogic: 3 },
         1: { uid: 1, comment: 'Clean', content: 'apollo flew', key: ['apollo'], keysecondary: [] },
+        2: { uid: 2, comment: 'Portable', content: 'the a/b path', key: ['/a/b/'], keysecondary: [] },
     } };
-    const scan = buildKeyPruneScan(book, pruneOpts, new Set());
+    const scan = buildKeyPruneScan(book, pruneOpts, new Set(), { scope: createScanScope() });
     const prim = scan.classifyEntry(book.entries[0]);
     assert.deepStrictEqual(prim.map(f => `${f.key}:${f.flag}:${f.code ?? ''}`),
         ['? -zebra:unusable:negation-only', '/[/:unusable:regex-invalid'],
         'an unusable primary is flagged as such, with the validator\'s own code, not as unattested');
-    assert.ok(prim.every(f => scan.reasonOf(f).text.startsWith('unusable') && scan.reasonOf(f).severity),
-        'it reads as unusable on the chip and carries a severity colour');
+    assert.ok(prim.every(f => scan.reasonOf(f).label === KEY_ALERTS[f.code].label && scan.reasonOf(f).message && scan.reasonOf(f).severity),
+        'it reads as the validator\'s label on the chip, carries its sentence as the tip, and a severity colour');
     assert.deepStrictEqual(scan.unusableKeysOf(book.entries[0]).map(r => `${r.key}:${r.code}`), ['? "moon:stray-quote'],
         'only the secondary needs the separate list; the negation-only one is legitimate there');
-    assert.ok(scan.unusableKeysOf(book.entries[0]).every(r => r.message), 'each carries the validator message the author reads');
+    assert.ok(scan.unusableKeysOf(book.entries[0]).every(r => r.alert?.message), 'each carries the alert whose message the author reads');
+    // An info-level alert is a note: minor, and only where no evidence flag fired, so the pattern must be attested.
+    const note = scan.classifyEntry(book.entries[2]);
+    assert.deepStrictEqual(note.map(f => `${f.flag}:${f.code}`), ['note:regex-core-refuses'], 'a WA-only pattern the book attests reads as a note');
+    assert.strictEqual(scan.reasonOf(note[0]).label, 'WA-only regex', '...with the alert label as its label');
+    assert.strictEqual(scan.severityOf(note[0]), 'minor', '...at minor severity');
+    assert.deepStrictEqual(scan.classifyEntry({ uid: 3, key: ['/c/d/'] }).map(f => f.flag), ['unattested'], 'a dead WA-only pattern reads as dead, the note being moot');
     // selectiveLogic 3 (AND_ALL) above is load-bearing: under AND_ANY the negation-only secondary is reported too.
     assert.deepStrictEqual(
         scan.unusableKeysOf({ ...book.entries[0], selectiveLogic: 0 }).map(r => `${r.key}:${r.code}`),
@@ -48,7 +56,7 @@ assert.ok(!('Quillfeather' in f0), 'a real findable name is not flagged');
 
 assert.ok(!('zzzznope' in flagsOfIgnored()), 'a whitelisted key is skipped');
 function flagsOfIgnored() {
-    const p = buildKeyPruneScan(pruneBook, pruneOpts, new Set(['zzzznope']));
+    const p = buildKeyPruneScan(pruneBook, pruneOpts, new Set(['zzzznope']), { scope: createScanScope() });
     return Object.fromEntries(p.classifyEntry(pruneBook.entries[0]).map(r => [r.key, r.flag]));
 }
 
@@ -56,10 +64,10 @@ function flagsOfIgnored() {
 // `chat common`. With a chat, ubiquity in entry text is a fact about the story, not the key, and draws nothing.
 const mkBook = (n, hits, key) => ({ entries: Object.fromEntries(Array.from({ length: n }, (_, i) =>
     [i, { uid: i, key: i === 0 ? [key] : [], content: i < hits ? `A ${key} appears here.` : 'Nothing notable here.' }])) });
-const gateFlag = (n, hits) => { const p = buildKeyPruneScan(mkBook(n, hits, 'widgetron'), pruneOpts, new Set()); return Object.fromEntries(p.classifyEntry(p.entries[0]).map(r => [r.key, r.flag])).widgetron; };
+const gateFlag = (n, hits) => { const p = buildKeyPruneScan(mkBook(n, hits, 'widgetron'), pruneOpts, new Set(), { scope: createScanScope() }); return Object.fromEntries(p.classifyEntry(p.entries[0]).map(r => [r.key, r.flag])).widgetron; };
 assert.strictEqual(gateFlag(10, 10), 'book common', 'a key in every entry\'s text is book common while no chat is scanned');
 {
-    const withChat = buildKeyPruneScan(mkBook(10, 10, 'widgetron'), pruneOpts, new Set(), { chatScan: { messagesWith: new Map([['widgetron', 0]]), messages: 50 } });
+    const withChat = buildKeyPruneScan(mkBook(10, 10, 'widgetron'), pruneOpts, new Set(), { scope: createScanScope(), chatScan: { messagesWith: new Map([['widgetron', 0]]), messages: 50 } });
     assert.strictEqual(withChat.classifyEntry(mkBook(10, 10, 'widgetron').entries[0])[0], undefined, '...and with a chat that does not bear it out, nothing: ubiquity in entry text is a fact about the story');
 }
 
@@ -195,23 +203,23 @@ const sharedBook = { entries: Object.fromEntries([...Array(12)].map((_, i) => [i
 }])) };
 const sharedOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: false, pruneCommon: true, pruneShort: false, pruneShared: true, ignoreProper: false, minLength: KEY_MIN_LENGTH, bookShared: 0.75 };
 {
-    const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set());
+    const s = buildKeyPruneScan(sharedBook, sharedOpts, new Set(), { scope: createScanScope() });
     const row = s.classifyEntry(sharedBook.entries[5]).find(r => r.key === 'astronaut');
     assert.ok(row, '"astronaut" flagged though it appears in only one entry\'s text');
     assert.strictEqual(row.flag, 'book shared', 'flagged on how many entries LIST it, not on its content df');
     assert.strictEqual(row.bookListed, 12, 'bookListed counts entries that LIST the key');
-    assert.strictEqual(s.reasonOf(row).text, 'book shared (100%)', 'reason names the corpus and reports the share');
+    assert.strictEqual(s.reasonOf(row).label, 'book shared (100%)', 'reason names the corpus and reports the share');
     assert.ok(!s.classifyEntry(sharedBook.entries[0]).some(r => r.key === 'moonwalk' && r.flag === 'book shared'), 'a key on one entry is not over-shared');
 }
 {
-    const off = buildKeyPruneScan(sharedBook, { ...sharedOpts, pruneShared: false }, new Set());
+    const off = buildKeyPruneScan(sharedBook, { ...sharedOpts, pruneShared: false }, new Set(), { scope: createScanScope() });
     assert.ok(!off.classifyEntry(sharedBook.entries[5]).length, 'the flag is disableable');
 }
 {
-    const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, bookShared: 1 }, new Set());
+    const hi = buildKeyPruneScan(sharedBook, { ...sharedOpts, bookShared: 1 }, new Set(), { scope: createScanScope() });
     assert.strictEqual(hi.reasonOf(hi.classifyEntry(sharedBook.entries[5])[0]).severity, 'severe', '100% share at threshold 100% is severe');
     const tiny = { entries: Object.fromEntries([...Array(9)].map((_, i) => [i, { uid: i, key: ['astronaut'], content: 'x' }])) };
-    const small = buildKeyPruneScan(tiny, sharedOpts, new Set());
+    const small = buildKeyPruneScan(tiny, sharedOpts, new Set(), { scope: createScanScope() });
     assert.ok(!small.classifyEntry(tiny.entries[0]).some(r => r.flag === 'book shared'), 'skipped below KEY_MIN_SHARED_ENTRIES');
 }
 
@@ -224,7 +232,7 @@ const scopeBook = { entries: {
 } };
 const scopeOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, minLength: 4 };
 const scoped = (over) => {
-    const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set());
+    const s = buildKeyPruneScan(scopeBook, { ...scopeOpts, ...over }, new Set(), { scope: createScanScope() });
     return Object.values(scopeBook.entries).filter(e => s.classifyEntry(e).length).map(e => e.uid);
 };
 assert.deepStrictEqual(scoped({}), [0, 1, 2, 3], 'all classes flagged when all are in scope');
@@ -237,7 +245,9 @@ assert.deepStrictEqual(scoped({ includeInactive: false }), [0, 1, 2], 'disabled 
 console.log('keyword-extract-check: ok');
 
 // --- looksLikeFragment: the clause-fragment flag -------------------------------------------------
-import { looksLikeFragment, FUNCTION_WORDS } from '../extension/keyword-audit.mjs';
+import { looksLikeFragment } from '../extension/keyword-audit.mjs';
+import { table as langTable } from '../extension/lang.mjs';
+const FUNCTION_WORDS = langTable().functionWords;
 
 for (const k of ['naked for morale', 'try stuff and see', 'web not spoke wheel', 'the soft stuff',
     'claiming the first wave', 'the morning is mine', 'apology to his son', 'stop parenting me',
@@ -431,7 +441,7 @@ import { cleanupRows } from '../extension/keyword-audit.mjs';
     // A stand-in scan: only the two methods cleanupRows calls.
     const stub = flagged => ({
         classifyEntry: () => flagged.map(([key, flag, severity, text]) => ({ key, flag, severity, text })),
-        reasonOf: p => ({ text: p.text, severity: p.severity }),
+        reasonOf: p => ({ label: p.text, severity: p.severity }),
     });
     const entry = { uid: 1, key: ['ravensgate', 'the gate', 'gate', 'moss'] };
     const scan = stub([['gate', 'too-common', 'severe', 'matches almost every message'],
@@ -464,3 +474,45 @@ import { cleanupRows } from '../extension/keyword-audit.mjs';
         'a missing key list is empty, not a throw');
 }
 console.log('cleanupRows: ok');
+
+import { flagProbe, STUDIO_PRUNE_OPTS } from '../extension/keyword-audit.mjs';
+{
+    const curly = buildKeySuggest({ entries: { 0: { uid: 0, key: [], content: 'D’Arcy came home.' }, 1: { uid: 1, key: [], content: 'Rain.' } } },
+        { dfCeil: 0.35, maxN: 4, excludeDates: true, excludeShort: true, onlyActive: false, cap: 30 });
+    assert.strictEqual(curly.dfSubstr("d'arcy"), 1, 'dfSubstr folds as countKey does: a straight apostrophe finds the curly one');
+    const both = { uid: 0, key: ['Eve'], content: 'x', caseSensitive: true, matchWholeWords: true };
+    assert.strictEqual(flagProbe('Eve', true, true), '? =^"Eve"', 'both flags make one probe');
+    const chatScan = { messagesWith: new Map([['Eve', 5], ['? =^"Eve"', 0]]), messages: 10, unit: 'message' };
+    const flags = buildKeyPruneScan({ entries: { 0: both } }, STUDIO_PRUNE_OPTS, new Set(), { chatScan, scope: createScanScope() }).classifyEntry(both).map(p => p.flag);
+    assert.ok(!flags.includes('chat common'), 'a key with both flags is rated by the probe under both, not by its bare hits');
+}
+{
+    const spaced = { uid: 0, key: ['red moon'], content: 'x' };
+    const chatScan = { messagesWith: new Map([['red moon', 5], ['? ="red moon"', 1]]), messages: 10, unit: 'message' };
+    const [p] = buildKeyPruneScan({ entries: { 0: spaced } }, STUDIO_PRUNE_OPTS, new Set(), { chatScan, scope: createScanScope() }).classifyEntry(spaced);
+    assert.strictEqual(p?.suggest, '? ="red moon"', 'a spaced key is suggested quoted, so the flag covers the phrase rather than its first word');
+}
+
+// --- nameEvidence follows the language's nameDetector: capitals are evidence of a name only where the pack says so
+{
+    const { nameEvidence } = await import('../extension/keyword-suggest.mjs');
+    const { usePack, BUNDLED } = await import('../extension/lang.mjs');
+    const text = 'Dann sah der Hund das Haus. Später lief der Hund zum Haus der NASA, und Maren folgte.';
+    const under = pack => { usePack(pack); const ev = nameEvidence(); ev.wordSeq(text); return ['hund', 'haus', 'maren', 'nasa'].filter(ev.isName).join(','); };
+    assert.strictEqual(under(BUNDLED), 'hund,haus,maren,nasa', 'under a pack that says capitals mark names, a word capitalised mid-sentence is one');
+    assert.strictEqual(under({ lang: 'de', packed: '', common: '', features: { freq: {}, common: {} } }), 'nasa',
+        'under a pack with no nameDetector no capital makes a name, so a language that capitalises every noun does not pass them all; an acronym still is one');
+    usePack(BUNDLED);
+}
+
+// --- the fragment flag is the pack's: its function words, and its say on whether a capitalised frame is a name
+{
+    const { usePack, BUNDLED } = await import('../extension/lang.mjs');
+    const under = pack => { usePack(pack); return ['the door', 'the Spire', 'Isle of Wight', 'casa a la playa'].filter(looksLikeFragment).join(' | '); };
+    assert.strictEqual(under(BUNDLED), 'the door | casa a la playa', 'under the English pack a function word makes a fragment, a capitalised frame aside');
+    assert.strictEqual(under({ lang: 'es', packed: '', common: '', features: { nameDetector: { capitalised: true } } }), '',
+        'a pack with no fragmentDetector raises no fragment flag, so English function words are not read into another language');
+    assert.strictEqual(under({ lang: 'xx', packed: '', common: '', features: { fragmentDetector: { functionWords: 'the of a' } } }), 'the door | the Spire | Isle of Wight | casa a la playa',
+        '...and where capitals do not mark names, a capitalised frame is no exemption');
+    usePack(BUNDLED);
+}

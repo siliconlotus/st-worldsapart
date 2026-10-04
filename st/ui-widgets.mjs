@@ -6,6 +6,7 @@ import { DOMPurify } from '../../../../../lib.js';
 import { Popup, POPUP_TYPE } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from '../extension/sort.mjs';
+import { runState } from '../extension/state.mjs';
 
 export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢');
 
@@ -133,10 +134,13 @@ export function makeSortControl({ getSort, setSort, getTiered, setTiered, getTie
 export function wiTooltip({ item, block }) {
     const e = item.entry;
     const lines = [`[${e.world}] ${wiTitleOf(e)}`, block];
-    if (Number.isFinite(item.eCredit)) lines.push(`E[credit] ${item.eCredit.toFixed(4)}`);
-    if (item.score !== undefined) lines.push(`vector ${item.score.toFixed(3)}`);
+    // Every column the fit reads, under the doc's feature names, so a rank can be read off the tooltip alone.
+    if (Number.isFinite(item.eCredit)) lines.push(`E[credit] ${item.eCredit.toFixed(4)}${item.eCreditTier ? ` (${item.eCreditTier})` : ''}`);
+    if (item.logWeight) lines.push(`weight ×${Math.exp(item.logWeight).toFixed(2)}`);
+    if (item.score !== undefined) lines.push(`cosine ${item.score.toFixed(3)}`);
     if (item.textScore) lines.push(`text ${item.textScore.toFixed(2)}`);
-    if (item.keywordScore) lines.push(`keys ${item.keywordScore.toFixed(2)}`);
+    if (Number.isFinite(item.properNouns)) lines.push(`properNouns ${item.properNouns.toFixed(3)}`);
+    if (Number.isFinite(item.density)) lines.push(`density ${item.density.toFixed(2)}`);
     if (item.keywordHits?.length) { const hits = item.keywordHits.map(h => `${h.key} ×${h.count}`).join(', '); lines.push(t`hits: ${hits}`); }
     return lines.join('\n');
 }
@@ -407,6 +411,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-entry-titleline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wa-entry-titleline .wa-entry-title { flex: 0 1 auto; }
 .wa-entry-meta-sub { white-space: normal; overflow: visible; }
+.wa-meta-edit { cursor: pointer; }
+.wa-meta-edit:hover { text-decoration: underline dotted; }
 .wa-entry-badge { font-size: 0.78em; background: var(--wa-kw-flag-bg, #274d78); color: #fff;
     border-radius: 8px; padding: 1px 7px; white-space: nowrap; flex-shrink: 0; }
 .wa-entry-body { margin-top: 2px; }
@@ -549,4 +555,17 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
 .wa-adv-warn i { color: var(--golden, #e0a86c); }`;
     document.head.append(style);
+}
+
+/** A plugin route failed, or answered without a field the extension reads: the caller takes the no-plugin path for that call.
+ *  The route and cause go to the console every time; the toast fires once per load, and the delivery panel shows the state. */
+export function pluginFallback(route, cause) {
+    console.warn(`WorldsApart: plugin ${route} failed (${String(cause?.message ?? cause)}), taking the no-plugin path`);
+    if (runState.pluginFailures.has(route)) return;
+    const first = !runState.pluginFailures.size;
+    runState.pluginFailures.add(route);
+    if (first) {
+        toastr.warning(t`The server plugin failed, and WorldsApart ran without it. See WorldsApart's settings.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+    }
+    document.dispatchEvent(new CustomEvent('wa-plugin-fallback'));   // a new route repaints the settings bar's list
 }

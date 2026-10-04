@@ -1,10 +1,10 @@
-// What each stage-3 signal is worth as a predictor of per-entry relevance, and how a parameter moves that.
+// What each scoring signal is worth as a predictor of per-entry relevance, and how a parameter moves that.
 // Usage (from SillyTavern root):
 //   node .../relevance-regress.mjs <sample.json> [...] [--sweep gazetteerSource=keys,titles]
 //        --tier all|memory|reference [--cut 4] [--ordinal] [--loso] [--lobo] [--calibration] [--cutoff] [--at 0.10] [--degree 2] [--interactions] --features cosine,text,properNouns,density [--drop-keys flagged.json] [--emit-rows rows.json] [--emit-model relevance-model-<tier>.json] [--proper-nouns count|idf|idf-len|jaccard|gaz] [--proper-nouns-extract regex|entity|bare|span|book|named] [--density-extract entity|book]
 //   --tier and --features are required. With properNouns in --features, --proper-nouns and --proper-nouns-extract are
 //   required. A --sweep read with --cutoff requires --at: arms compare at one set cutoff.
-import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel } from './lib/scene.mjs';
+import { haystackFor, indexPath, isMemory, loadScene, openSample, sceneParams, makeCandidateSet, makeGradeOf, embed, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 import { ensureIndex, resolveModel } from './lib/reindex.mjs';
 import fs from 'node:fs';
 import { gradeValue, gradeCredit, fbeta, RECALL_WEIGHT, signTest, arg } from './lib/metrics.mjs';
@@ -15,6 +15,7 @@ usePack(PACK);
 const COMMON_WORDS = table().common;
 import { logisticFit, auc, cumulativeFit, prCurve, reliability, sigmoid } from './lib/logistic.mjs';
 import * as entity from '../extension/entity.mjs';
+import { isConstant, weightedCredit } from '../extension/layout.mjs';
 import { mean, sd } from '../extension/relevance.mjs';
 import { properNames, properDensity, modelKey, properNounsOf, NAME_PARTICLES } from '../extension/relevance.mjs';
 import { nameEvidence } from '../extension/keyword-suggest.mjs';
@@ -54,6 +55,8 @@ if (!['scene', 'book', 'pooled'].includes(STD_BY)) { console.error(`--standardis
 // Experiment: the relevant line for the scoring bars; at 2 the cut score is P(>=2), with no half band.
 const RELEVANT_AT = Number(arg(argv, '--relevant-at') ?? 3);
 const creditOf = g => (RELEVANT_AT === 2 ? (g >= 2 ? 1 : 0) : gradeCredit(g));
+// What selection delivers at `cut`: the fold's E[credit] with the row's term weights, as the runtime cut reads it.
+const deliveredAt = (r, cut) => weightedCredit({ eCredit: r.e, logWeight: r.logWeight }) >= cut;
 const AT = arg(argv, '--at') === null ? null : Number(arg(argv, '--at'));
 const DEGREE = Number(arg(argv, '--degree') ?? 1);
 const SQUARE = String(arg(argv, '--square') ?? '').split(',').filter(Boolean);
@@ -261,7 +264,7 @@ const queryVec = async (S, name, value, em) => {
         const perScene = [];
         let dropped = 0;
         for (const { S, qv, name, book } of loaded) {
-            const P = sceneParams(S, { ...(sweep ? { [SWEPT]: value } : {}), ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
+            const P = sceneParams(S, { ...boundaryOverride(), ...(sweep ? { [SWEPT]: value } : {}), ...(DROP_KEYS ? { dropKeys: DROP_KEYS } : {}) });
             // denseAllEntries needs a collection covering every entry, or it reports a null result that reads like an answer.
             const em = resolveModel(EMBED_SWEEP ? value : MODEL);
             const indexFile = P.denseAllEntries || EMBED_SWEEP
@@ -351,7 +354,7 @@ const queryVec = async (S, name, value, em) => {
             }
             const gradeOf = makeGradeOf(S.entries, scene);
             const kept = [], ungraded = [], offTier = [];
-            for (const r of rows.filter(r => !r.entry?.constant)) {
+            for (const r of rows.filter(r => !isConstant(r.entry))) {
                 // Kept, not dropped: under --standardise pooled the other tier is part of the statistics.
                 if (TIER !== 'all' && (isMemory(r.entry) ? 'memory' : 'reference') !== TIER) { offTier.push(r); continue; }
                 const g = gradeOf(r);
@@ -535,7 +538,7 @@ const queryVec = async (S, name, value, em) => {
                 let gi = 0;
                 const scenes = perScene.map(({ kept, ungraded, name, query }, si) => {
                     const fold = bookOf[gi];
-                    const idOf = r => ({ uid: r.entry?.uid, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
+                    const idOf = r => ({ uid: r.entry?.uid, book: r.entry?.world, logWeight: r.logWeight, title: r.entry?.comment || r.entry?.title || `uid ${r.entry?.uid}`,
                         feats: Object.fromEntries(FEATURES.map(([n, get]) => [n, get(r)])) });
                     const rows = kept.map(k => ({ e: scoreRow(X[gi++], fold), g: k.g, ...idOf(k.r) }));
                     for (const u of ungraded) {
@@ -558,7 +561,7 @@ const queryVec = async (S, name, value, em) => {
                     meanRelevant: mean(scenes.map(sc => sc.relevant)),
                     grid: grid.map(cut => {
                         const per = scenes.map(sc => {
-                            const got = sc.rows.filter(r => r.e >= cut);
+                            const got = sc.rows.filter(r => deliveredAt(r, cut));
                             const precision = got.length ? mean(got.map(r => creditOf(r.g))) : 0;
                             const recall = (HALF_RECALL ? got.reduce((a, r) => a + creditOf(r.g), 0) : got.filter(r => r.g >= RELEVANT_AT).length) / sc.relevant;
                             return { f: fbeta(precision, recall, BETA), precision, recall, n: got.length };
@@ -695,8 +698,8 @@ const queryVec = async (S, name, value, em) => {
                     features: FEATURES.map(([n]) => n),
                     scenes: b.sceneRows.map(sc => ({
                         name: sc.name, relevant: sc.relevant, query: sc.query,
-                        rows: sc.rows.map(r => ({ uid: r.uid, title: r.title, g: r.g, ungraded: !!r.ungraded,
-                            e: Number(r.e.toFixed(4)), delivered: r.e >= best.cut, feats: r.feats })),
+                        rows: sc.rows.map(r => ({ uid: r.uid, book: r.book, title: r.title, g: r.g, ungraded: !!r.ungraded,
+                            e: Number(r.e.toFixed(4)), delivered: deliveredAt(r, best.cut), feats: r.feats })),
                     })),
                 }, null, 1));
                 console.log(`  per-row delivery written to ${EMIT_ROWS}`);

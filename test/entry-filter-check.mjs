@@ -24,16 +24,18 @@ eq(facetMatch(e({ vectorized: true }), 'vector', null), true, 'vectorized is the
 eq(facetMatch(e({ disable: true }), 'enabled', null), false, 'disabled is not enabled');
 eq(facetMatch(e(), 'flagged', null), false, 'without a scan the audit facets admit nothing');
 
-// A stand-in for buildKeyPruneScan: only the three methods the facets call.
+// A stand-in for buildKeyPruneScan: only the three methods the facets call. Both lists carry rows severityOf reads.
 const scanOf = (flagged, unusable = []) => ({
     classifyEntry: () => flagged.map(([key, sev]) => ({ key, sev })),
-    unusableKeysOf: () => unusable,
+    unusableKeysOf: () => unusable.map(([key, sev]) => ({ key, sev })),
     severityOf: p => p.sev,
 });
 eq(facetMatch(e(), 'flagged', scanOf([])), false, 'no flags and no unusable keys is not flagged');
 eq(facetMatch(e(), 'flagged', scanOf([['the gate', MINOR]])), true, 'one flagged key flags the entry');
-eq(facetMatch(e(), 'flagged', scanOf([], ['?bad('])), true, 'an unusable key alone flags the entry');
-eq(facetMatch(e(), SEVERE, scanOf([], ['?bad('])), true, 'an unusable key counts severe, as it does on the badge');
+eq(facetMatch(e(), 'flagged', scanOf([], [['?bad(', SEVERE]])), true, 'an unusable key alone flags the entry');
+eq(facetMatch(e(), SEVERE, scanOf([], [['?bad(', SEVERE]])), true, 'an unusable key counts severe, as it does on the badge');
+eq(facetMatch(e(), 'flagged', scanOf([], [['zzghost', '']])), true, 'an unattested secondary flags the entry');
+eq(facetMatch(e(), SEVERE, scanOf([], [['zzghost', '']])), false, 'but is not severe: a dead key is neutral, as it is for a primary');
 eq(facetMatch(e(), MODERATE, scanOf([['a', MINOR], ['b', MODERATE]])), true, 'severity is "holds at least one"');
 eq(facetMatch(e(), SEVERE, scanOf([['a', MINOR], ['b', MODERATE]])), false, 'and only the severities it holds');
 
@@ -62,3 +64,5 @@ eq(rankBySearch(groups, 'moss', { keywords: true }).map(x => x.entry.uid).join('
     'a narrowed scope drops the bands it does not read');
 eq(rankBySearch(groups, 'moss', ALL).find(x => x.entry.uid === 1).rows.length, 1,
     'rows are never filtered, only the group is');
+eq(facetMatch({ content: '@@activate\nx' }, 'constant'), true, 'an @@activate entry is a constant');
+eq(facetMatch({ content: '@@activate\nx' }, 'keyword'), false, '...and not a keyword entry');

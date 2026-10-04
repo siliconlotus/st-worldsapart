@@ -11,6 +11,7 @@ const pack = {
 eq(table().lang, 'en', 'the first read is the bundled English pack');
 eq(table().zipf.get('the') > 7, true, 'and it carries the English table');
 eq(table().common.has('the'), true, 'and its common list');
+eq(table().nameDetector, 'capitalised', 'and says capitals mark names in English');
 
 const t = usePack(pack);
 eq(t.lang, 'xx', 'usePack sets the language');
@@ -21,12 +22,19 @@ eq(t.posVAStrict.has('ran') && t.posVA.has('ran') && t.posVA.has('slept') && !t.
 eq(t.posAdj.has('briny'), true, 'ADJ85 is the adjective set');
 eq(t.common.has('and') && !t.common.has('tavern'), true, 'common is the pack list');
 eq(t.loaded, true, 'a pack is loaded');
+eq(t.nameDetector, null, 'a pack with no nameDetector has no name detection: absence is never a default');
 eq(table(), t, 'table() is the current object');
+eq(usePack({ ...pack, features: { freq: {}, nameDetector: { capitalised: true } } }).nameDetector, 'capitalised', 'a pack that says capitals mark names gets the capital rule');
+eq(usePack({ ...pack, features: { nameDetector: { capitalised: true, model: 'hf://someone/ner@abc', labels: ['PER'] } } }).nameDetector, 'capitalised',
+    '...and still does beside a model this WA cannot run, which it ignores');
+eq(usePack({ ...pack, features: { nameDetector: { capitalised: false, model: 'hf://someone/ner@abc', labels: ['PER'] } } }).nameDetector, null,
+    'a pack whose names need the model, and where capitals do not mark them, has none here');
 
 const d = standDown('yy');
 eq(d.lang, 'yy', 'stand-down keeps the requested language');
 eq(d.zipf.size + d.posVA.size + d.posAdj.size + d.common.size, 0, 'stand-down empties every collection');
 eq(d.loaded, false, 'and is not loaded');
+eq(d.nameDetector, null, 'and detects no names');
 eq(parsePacked('').size, 0, 'an empty packed string is an empty table');
 {
     const store = new Map();
@@ -70,5 +78,15 @@ eq(parsePacked('').size, 0, 'an empty packed string is an empty table');
 {
     const big = JSON.stringify(BUNDLED) + 'Русский ' .repeat(1000);
     eq(Buffer.from(toBase64(big), 'base64').toString('utf8') === big, true, 'a pack-sized UTF-8 string round-trips through toBase64');
+}
+{
+    let release;
+    const slow = new Promise(r => { release = r; });
+    const store = { get: async () => null, put: async () => {} };
+    const pending = setLanguage('xx', { fetchPack: () => slow, store });
+    await setLanguage('en', { fetchPack: () => slow, store });
+    release(pack);
+    await pending;
+    eq(table().lang, 'en', 'a switch a later one superseded changes nothing when it resolves');
 }
 console.log(process.exitCode ? 'FAIL' : 'ok');

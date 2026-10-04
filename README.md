@@ -25,6 +25,8 @@ WorldsApart includes the Lorebook Studio, an interface designed from the ground 
 
 ## Install
 
+WorldsApart needs SillyTavern 1.17.0 or later.
+
 In SillyTavern: **Extensions → Install extension**, and paste
 
 ```
@@ -35,56 +37,85 @@ The box will also ask you which branch you want; we use the same branch names as
 - Release (default) is the stable version, updated when we're sure everything works
 - Staging gets new features and fixes first, but may have some instability.
 
-Updates stay on the channel you chose. SillyTavern checks at startup and tells you when one is waiting; it installs
-updates by itself only when SillyTavern's own version changes.
+Updates stay on the channel you chose. SillyTavern checks at startup and tells you when one is waiting; it installs updates by itself only when SillyTavern's own version changes.
 
-### Server plugin
+**In multi-user setups, we strongly recommend installing for all users.** This prevents version drift weirdness for everyone, and also prevents a security issue if you install the plugin [(see below)](#multi-user-warning).
+
+### Server plugin bootstrap
 > [!IMPORTANT]
 > **WorldsApart ships with a plugin.** SillyTavern loads extensions and server plugins separately, so after installing the extension you will need to deploy the plugin using your system's command line terminal. It is not strictly *necessary* to install the plugin, but it is ***very highly recommended***. Without the plugin, WA falls back to SillyTavern's stock vector search. Entries still get retrieved by similarity, but ST's endpoint doesn't return the similarity scores, so relevance is predicted from text, proper nouns and density alone — technically still better than ST alone, but noticeably worse than with the plugin (about four points of F2 across all entries, concentrated on vectorized entries).
+
+**If you installed WorldsApart for all users:**
 
 From your SillyTavern root folder, run:
 ```bash
 node public/scripts/extensions/third-party/st-worldsapart/deploy-plugin.mjs
 ```
 
-This does two things:
-- It copies the plugin files from the extension install into the plugins/ directory
-- It edits your config.yaml to set `enableServerPlugins: true`, because plugins are off by default.
-(If you would like to verify that that's true, see [deploy-plugin.mjs](deploy-plugin.mjs))
+**If you installed WorldsApart for one user:**
+
+From your SillyTavern root folder, run:
+```bash
+node data/default-user/extensions/st-worldsapart/deploy-plugin.mjs
+```
+<sub>(If you installed WA into only the user account of a different user, replace `default-user` with the user handle.)</sub>
+
+<a id="multi-user-warning"></a>
+
+> [!WARNING]
+> **The server runs the plugin from whichever install you deploy it from.** If that is a user's local copy in a multi-user setup, that user could replace it and execute arbitrary code on the server (i.e., a substitution attack). Deploying from the all-users install means the admin-controlled copy is the one the server runs.
 
 Then restart SillyTavern.
 
-On restart the server console prints `[Worlds Apart] server plugin ready`, and WA settings show
-**✓ Server plugin active** — with a copyable redeploy command that's now a full absolute path (the
-running plugin reports the SillyTavern root, so you can run it from any terminal, not just the ST
-folder).
+The script does two things:
+- It puts a small loader in the plugins/ directory, which loads the plugin straight from the WorldsApart install you ran it from
+- It edits your config.yaml to set `enableServerPlugins: true`, because plugins are off by default.
 
-**After changing anything in `plugin/`**, re-run the deploy command and restart — no version to bump.
-The extension fingerprints its source copies of those files and the running plugin fingerprints its
-deployed copies (`/ping`); if they differ, WA settings
-shows **⚠ Server plugin out of date — redeploy**. The check fires only when those files actually
-changed, so unrelated extension updates never trigger it.
+(If you would like to verify these claims, see [deploy-plugin.mjs](deploy-plugin.mjs))
+
+On restart the server console prints `[WorldsApart] server plugin ready`, and WA settings show **✓ Server plugin active**, with the WorldsApart install it loads.
+
+After installing the plugin the first time, subsequent updates will be automatic and require only a server restart.
 
 ---
 
+### Uninstalling
+
+Delete WorldsApart from **Extensions → Manage extensions**, like any other extension.
+
+On SillyTavern 1.19 or later, the delete dialog has a box labelled **Also clean up extension data**. Tick it and WA will ask what you want removed: downloaded language packs, its vector collections, your settings, your lorebook priorities, your per-book curation, and the server plugin's loader. Anything you leave unticked is kept, so reinstalling later picks up where you left off. (The broom button on WA's row does the same cleanup without uninstalling.)
+
+On SillyTavern 1.17 or 1.18, or if you'd rather do it by hand, delete the `plugins/worlds-apart` folder in your SillyTavern root. If WA was the only plugin you used, you can also set `enableServerPlugins` back to `false` in `config.yaml`; if the deploy script turned it on, the original is at `config.yaml.wa-backup`.
+
+> [!NOTE]
+> **Your lorebooks are untouched**, but some things in them only work with WA installed:
+> - **SmartKeys.** SillyTavern reads a key starting with `?` as plain text, so those keys will stop matching.
+> - **Most decorators.** SillyTavern itself only acts on `@@activate` and `@@dont_activate`. The other Character Card V3 decorators (`@@depth`, `@@activate_only_after` and so on) and WA's own `@@promote` are ignored without WA: they won't apply, and they won't leak into the prompt.
+
 ### Languages
 
-WA has UI internationalization in English and French, and offers text corpus statistics to improve retrieval in several languages (see WA settings or https://github.com/siliconlotus/st-worldsapart-lang for the current list.)
+WA's interface is available in English and French (feel free to submit PRs with translation to your language!).
+
+Matching works the same in every language[^2]. Some other features, such as keyword suggestions and how names are scored, depend on a language pack. WorldsApart ships with its English features; others can be downloaded via the settings menu. What each language supports is listed in [the st-worldsapart-lang repo](https://github.com/siliconlotus/st-worldsapart-lang). Regrettably, relevancy scoring in most languages will not yet perform as well as English.
 
 ### Contributing
 
 Branch from `staging`, PR against `staging`, run `test/`. [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 
-### Data sources and licenses
+### Credits and licenses
 
-The code is MIT. Two generated data files carry their own terms, stated in their headers:
+WorldsApart ships with an English language pack, `extension/wa-pack-en.js`, which is indebted to several open language resources, some of which carry their own licenses.
 
-- `extension/wa-pack-en.js` — the bundled English pack: word frequencies and part-of-speech sets from the
-  [Google Books Ngram](https://books.google.com/ngrams/) eng-fiction corpus, version 20200217, licensed under
-  [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), and a common-word list derived from
-  [wordfreq](https://github.com/rspeer/wordfreq) by Robyn Speer, whose data is
-  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), so the file is too. wordfreq's own sources include
-  Google Books Ngrams, Wikipedia, OPUS OpenSubtitles 2018, ParaCrawl, the Leeds Internet Corpus, and the SUBTLEX word
-  lists by Marc Brysbaert et al., which are freely available data and are credited here as wordfreq requires.
+- **[wordfreq](https://github.com/rspeer/wordfreq)** by Robyn Speer: the pack's vocabulary and common-word list. wordfreq's data is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/), and so the pack is too.
+- **[SUBTLEX-US](https://www.ugent.be/pp/experimentele-psychologie/en/research/documents/subtlexus)** by Brysbaert & New and **[SUBTLEX-UK](https://shiny.psychology.nottingham.ac.uk/lpzwjv/SUBTLEX-UK/)** by van Heuven, Mandera, Keuleers & Brysbaert: freely available subtitle word frequencies for English, which reach us through wordfreq.
+- **[Google Books Ngram](https://books.google.com/ngrams/)**: the eng-fiction corpus (version 20200217) behind the pack's word frequencies and part-of-speech sets. [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+
+wordfreq also draws on [Wikipedia](https://wikipedia.org), [OPUS OpenSubtitles](https://opus.nlpl.eu/datasets/OpenSubtitles) 2018, ParaCrawl and the Leeds Internet Corpus.
+
+Other language packs are fetched on demand and built from various sources that might use their own licenses; see [the st-worldsapart-lang repo](https://github.com/siliconlotus/st-worldsapart-lang) for details.
+
+WorldsApart's own code is MIT.
 
 [^1]: Unless the sum of constant entries exceeds the entire budget
+
+[^2]: With one exception: whole-word matching does not work in scripts written without spaces between words, such as Chinese, Japanese and Thai. See [Matching](docs/matching.md).

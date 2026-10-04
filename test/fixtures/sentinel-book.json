@@ -12,7 +12,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "1": {
             "uid": 1,
@@ -25,7 +26,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "2": {
             "uid": 2,
@@ -38,7 +40,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "3": {
             "uid": 3,
@@ -51,7 +54,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "4": {
             "uid": 4,
@@ -64,7 +68,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "5": {
             "uid": 5,
@@ -77,7 +82,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "6": {
             "uid": 6,
@@ -90,7 +96,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "7": {
             "uid": 7,
@@ -103,7 +110,8 @@
             "constant": false,
             "vectorized": false,
             "disable": false,
-            "selectiveLogic": 0
+            "selectiveLogic": 0,
+            "position": 0
         },
         "8": {
             "uid": 8,
@@ -117,6 +125,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "matchWholeWords": true,
             "group": "terrace",
             "groupOverride": true
@@ -133,6 +142,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "group": "terrace"
         },
         "10": {
@@ -145,6 +155,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "sticky": 3,
             "comment": "STICKY 3 — fires when \"cold frame\" is in the window, then persists 3 turns. On the turns the key has LEFT the window, WA's matcher scores it 0 but the sticky exemption (args.timedEffects) keeps it out of lastPruned — a regression there silently deletes sticky entries.",
             "content": "The cold frame by the wall holds the tender cuttings."
@@ -159,6 +170,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "cooldown": 2,
             "comment": "COOLDOWN 2 — fires on \"first light\", then core suppresses re-fires for 2 messages. Core checks cooldown BEFORE external activations, so even WA's union force cannot break the cooldown; while cooling it simply never activates, and the prune has nothing to judge.",
             "content": "At first light the yard gate is unlocked."
@@ -173,6 +185,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "RECURSION SOURCE — fires on \"workshop\" from chat; its content carries \"duskmoth\", which is uid 13's only key. With recursion enabled this drags uid 13 in on the RECURSION pass.",
             "content": "The workshop rafters shelter a duskmoth colony, and gloamvetch grows along the sill."
         },
@@ -186,6 +199,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "RECURSION TARGET — \"duskmoth\" appears in NO chat message, only in uid 12's content. It activates on the recursion pass, where the prune never judges (INITIAL only): WA's chat-window verdict would be a reject, which is exactly why the pass gate is load-bearing. Must never appear in lastPruned.",
             "content": "The duskmoth wakes at dusk and steers by the lamps, drawn to vellumwing blossom."
         },
@@ -199,8 +213,9 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "delayUntilRecursion": 1,
-            "comment": "DELAY UNTIL RECURSION — \"midnight\" IS in chat and WA DOES emit it: the takeover blanks core's matcher, so declining to emit would mean no route in at all. Core refuses it on the initial pass (both delay gates are checked before the external-activation branch) and the emit then stands for the whole scan. WHETHER IT EVER ACTIVATES IS CORE'S: this book has ONE delay level, so core's level list is empty after its preset shift, and with world_info_recursive off no RECURSION pass is ever scheduled — expect uid 14 to stay out of the prompt. Turn recursion on to see it admitted.",
+            "comment": "DELAY UNTIL RECURSION — \"midnight\" IS in chat and WA DOES emit it: the takeover blanks core's matcher, so declining to emit would mean no route in at all. Core refuses it on the initial pass (both delay gates are checked before the external-activation branch) and the emit then stands for the whole scan. With world_info_recursive off nothing may admit it: uid 27 gives the book a second delay level, so core forces a RECURSION pass once the scan ends (upstream-st.md #19), and WA ends that pass — expect uid 14 out of the prompt and no RECURSION pass in the [WI] log. Turn recursion on to see it admitted.",
             "content": "Past midnight the lanes are quiet."
         },
         "15": {
@@ -213,13 +228,14 @@
                 "? -zzunattested",
                 "? \"moon"
             ],
-            "comment": "SECONDARY GATE under AND_ALL, carrying one of each kind. `morning` is an ordinary positive secondary and is present. `? -zzunattested` is NEGATION-ONLY — fatal as a primary, since it would fire on absence alone, and legitimate here because a secondary never fires by itself: the term appears only in the hidden message, which both matchers drop, so the condition holds. `? \"moon` is UNUSABLE (stray quote) and is dropped before the logic runs — were it evaluated as never-matching, AND_ALL could never be satisfied and this entry would be silently dead. So uid 15 activating is what certifies the drop, and the Studio paints the third chip red while the first two stay green.",
+            "comment": "SECONDARY GATE under AND_ALL, carrying one of each kind. `morning` is an ordinary positive secondary and is present. `? -zzunattested` is NEGATION-ONLY — fatal as a primary, since it would fire on absence alone, and legitimate here because a secondary never fires by itself: the term appears only in the hidden message, which both matchers drop, so the condition holds. `? \"moon` is UNUSABLE (stray quote) and is dropped before the logic runs — were it evaluated as never-matching, AND_ALL could never be satisfied and this entry would be silently dead. So uid 15 activating is what certifies the drop, and the Studio paints the third chip red; `morning` is in no entry's text, so it reads unattested (book) until a chat is scanned and green after, while the negation-only one is green throughout.",
             "content": "Rounds are walked at dawn, before anyone else is awake.",
             "constant": false,
             "vectorized": false,
             "disable": false,
             "selective": true,
-            "selectiveLogic": 3
+            "selectiveLogic": 3,
+            "position": 0
         },
         "16": {
             "uid": 16,
@@ -231,6 +247,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "DEPTH-2 TARGET — \"vellumwing\" is in no chat message and in no entry uid 12 reaches: only uid 13's content, which enters the buffer on the SECOND pass. Its stage-3 keys score is divided by 1 + 2. Also preventRecursion, so \"sedgewhistle\" in its own content never reaches uid 18.",
             "content": "A vellumwing opens at full dark. Sedgewhistle marks the same hour.",
             "preventRecursion": true
@@ -245,6 +262,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "NON-RECURSABLE — \"gloamvetch\" is in no chat message, only in uid 12's content, so the buffer carries its key. Core suppresses it on the recursion pass; stage 3 is WA's own loop with core not in it, so the exclusion is applied there by hand. Must score keys 0 against chat AND against the buffer.",
             "content": "Gloamvetch keeps its flower shut until the frost.",
             "excludeRecursion": true
@@ -259,6 +277,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "UNREACHABLE — \"sedgewhistle\" is in no chat message and appears only in uid 16's content, and uid 16 is preventRecursion, so that content never enters the buffer. Must never activate, at any depth.",
             "content": "The sedgewhistle sounds once and is not heard again."
         },
@@ -272,6 +291,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "VARIANT ONLY — \"lamp-post\" as typed appears in no entry text and no chat message; only the space form does, in its own content. The audit flags it minor: the key fires, but never on the form the author wrote.",
             "content": "A lamp post leans at the corner of the lane."
         },
@@ -285,6 +305,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "REGEX ORTHOGRAPHY — a regex is fold-exempt, so this ASCII apostrophe matches only itself, where the plain key Cap'n matches the whole family. The audit suggests the class; it does not rewrite the pattern, the fold-exemption being the author's.",
             "content": "Cap'n Rourke keeps the ledger. Cap'n Rourke keeps the keys."
         },
@@ -298,6 +319,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "REGEX HYPHEN — the content writes the pair with an en-dash, which this pattern cannot reach, so the key is dead. The hyphen flags only because the book holds what the en-dash form WOULD have matched, and that evidence outranks unattested: the pattern is mis-written, not dead. A range marker would not be swapped.",
             "content": "The Bose–Einstein condensate forms below the critical point."
         },
@@ -311,6 +333,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "SHORT, MOSTLY INSIDE WORDS — three letters that land in \"special\", \"official\" and \"social\" and only once as the word. The short flag carries the same suggestion substring makes, measured over the book: consider ? =CIA. FBI would be short and clean, and offered nothing.",
             "content": "A special report: the official social calendar, and one CIA memo."
         },
@@ -324,6 +347,7 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "LOWERCASE LOCATIVE — the shape test reads \"of\" as a function word and calls this a fragment; the book says \"Isle of Wight\", capitalised, so it is a name. Not flagged.",
             "content": "The Isle of Wight ferry runs at dawn."
         },
@@ -337,8 +361,92 @@
             "vectorized": false,
             "disable": false,
             "selectiveLogic": 0,
+            "position": 0,
             "comment": "PHRASE FRAGMENT, control — same shape as uid 23, and nothing in the book capitalises it. Flagged.",
             "content": "It was a piece of cake, she said."
+        },
+        "25": {
+            "uid": 25,
+            "key": [
+                "zzgatehouse"
+            ],
+            "keysecondary": [
+                "zzghostgate"
+            ],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0,
+            "comment": "SECONDARY GATE under AND_ANY whose one secondary appears nowhere: in no entry and in no message. The primary sits in its own text and is clean, so nothing on the primary row says the gate can never open. The Studio paints the secondary chip unattested, never green.",
+            "content": "The zzgatehouse is shut before dawn."
+        },
+        "26": {
+            "uid": 26,
+            "key": [
+                "? =/re/"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0,
+            "comment": "VALIDATOR WARNING: `=` in front of `/re/` lexes as a whole-word literal, which is legal and so not unusable, and which nobody means. The audit reports the validator's warn as `warning`, moderate, ahead of the dead verdict it explains: the Studio paints the chip amber and Cleanup lists it.",
+            "content": "A flag written in front of a pattern."
+        },
+        "27": {
+            "uid": 27,
+            "key": [
+                "zzlevelgate"
+            ],
+            "keysecondary": [],
+            "constant": false,
+            "vectorized": false,
+            "disable": true,
+            "selectiveLogic": 0,
+            "position": 0,
+            "delayUntilRecursion": 2,
+            "comment": "SECOND DELAY LEVEL, disabled — never activates. It is here only to give the book a second delayUntilRecursion level: core reads the levels before its disable check, and with two it forces a RECURSION pass even with world_info_recursive off. That pass is uid 14's check.",
+            "content": "The zzlevelgate opens on the second level."
+        },
+        "28": {
+            "uid": 28,
+            "key": [],
+            "keysecondary": [],
+            "comment": "VECTOR, ONE NAME SHARED — no key, so only the similarity route activates it. Its cast is Thornwick, Hesper and Jorund; the chat names Thornwick, so properNouns is above zero.",
+            "content": "The seedlings under glass are tended by Thornwick, who waters them before the sun is high. Each dusk Hesper checks the soil for damp, and Jorund mends the cracked panes.",
+            "constant": false,
+            "vectorized": true,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0
+        },
+        "29": {
+            "uid": 29,
+            "key": [],
+            "keysecondary": [],
+            "comment": "VECTOR, NO NAME SHARED — no key, off the topic of the chat, and none of Corliss, Brannoch and Tamsin is in the chat: properNouns is zero.",
+            "content": "The harbour pilots answer to Corliss, who sets the toll per mast. The tide tables for the estuary are kept by Brannoch and Tamsin.",
+            "constant": false,
+            "vectorized": true,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0
+        },
+        "30": {
+            "uid": 30,
+            "key": [
+                "Ottoline"
+            ],
+            "keysecondary": [],
+            "comment": "VECTOR AND KEY — both routes reach it. Its cast is Ottoline, Idony and Leofric; the chat names Ottoline.",
+            "content": "The seed ledger is kept by Ottoline, with Idony and Leofric as witnesses. Nothing is sown until all three have signed the page.",
+            "constant": false,
+            "vectorized": true,
+            "disable": false,
+            "selectiveLogic": 0,
+            "position": 0
         }
     }
 }

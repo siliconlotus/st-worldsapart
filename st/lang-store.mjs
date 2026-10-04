@@ -19,10 +19,16 @@ export const packStore = {
     put: async (lang, pack) => {
         try {
             const r = await fetch('/api/files/upload', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ name: `wa-pack-${lang}.json`, data: toBase64(JSON.stringify(pack)) }) });
-            if (!r.ok) console.warn(`Worlds Apart: storing the ${lang} pack failed (${r.status}); it is in memory for this session`);
-        } catch (e) { console.warn('Worlds Apart: storing the pack failed', e); }
+            if (!r.ok) console.warn(`WorldsApart: storing the ${lang} pack failed (${r.status}); it is in memory for this session`);
+        } catch (e) { console.warn('WorldsApart: storing the pack failed', e); }
     },
 };
+
+/** Deletes the stored pack for `lang`; a pack that was never stored is not an error. */
+export async function removePack(lang) {
+    const r = await fetch('/api/files/delete', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ path: filePath(lang) }) });
+    if (!r.ok && r.status !== 404) throw new Error(`${r.status} ${filePath(lang)}`);
+}
 
 // Remote, and bounded: a slow GitHub is the pack's absence — lang.mjs falls back to the bundled 'en' — never a hang.
 const getJson = async url => { const r = await fetch(url, { cache: 'no-cache', signal: AbortSignal.timeout(30000) }); if (!r.ok) throw new Error(`${r.status} ${url}`); return r.json(); };

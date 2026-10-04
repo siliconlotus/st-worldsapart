@@ -59,11 +59,11 @@ eq(tierRecall(pop, [memRow(1, 4)], gradeOfRow).memory.got, 0, 'a copy of a kept 
 
 // --- sceneParams layering: harness defaults < the arm's own `params` < an explicit override ---
 const S = { params: { K1: 2, LEXW: 1.5 } };
-eq(sceneParams(S).K1, 2, 'a sample overrides the harness default');
-eq(sceneParams(S).B, 0.75, 'unspecified params fall back to the harness default');
-eq(sceneParams(S, { K1: 3 }).K1, 3, 'an arm override beats the sample');
-eq(sceneParams(S, { K1: 3 }).LEXW, 1.5, 'an arm override leaves other params on the sample baseline');
-eq(sceneParams({}).entityFilter, true, 'a view with no params still gets a full param set');
+eq(sceneParams(S, { wordBoundary: 'strict' }).K1, 2, 'a sample overrides the harness default');
+eq(sceneParams(S, { wordBoundary: 'strict' }).B, 0.75, 'unspecified params fall back to the harness default');
+eq(sceneParams(S, { wordBoundary: 'strict', K1: 3 }).K1, 3, 'an arm override beats the sample');
+eq(sceneParams(S, { wordBoundary: 'strict', K1: 3 }).LEXW, 1.5, 'an arm override leaves other params on the sample baseline');
+eq(sceneParams({}, { wordBoundary: 'strict' }).entityFilter, true, 'a view with no params still gets a full param set');
 
 // --- the arm-reuse guard: sweeping gazetteerSource against a preloaded scene must throw
 // Asserted on the MESSAGE, not merely on throwing: a preloaded stub throws for a dozen other reasons.
@@ -115,7 +115,7 @@ eq(twoBooks({ uid: 1, entry: { world: 'spaceflight' }, title: 'x' }), 4, 'a scor
 eq(twoBooks({ uid: 1, title: 'x' }), 0, 'a row naming no book is the primary\'s, as every reader here assumes');
 
 // --- makeKeywordScore
-const kwP = makeKeywordScore(sceneParams({}));
+const kwP = makeKeywordScore(sceneParams({}, { wordBoundary: 'strict' }));
 eq(kwP({ vectorized: true, key: ['villa'] }, 'meet me at the villa', 1.2) > 0, true, 'a vectorized entry\'s keys are scored, as the live scan scores them');
 eq(kwP({ vectorized: false, key: ['villa'] }, 'meet me at the villa', 1.2) > 0, true, 'non-vectorized keys score too');
 eq(kwP({ vectorized: true, key: [] }, 'meet me at the villa', 1.2), 0, 'an entry with no keys scores nothing, which is an absence and not a suppression');
@@ -227,7 +227,7 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
         ],
         sources: { scenario: 'SCEN' },
     };
-    const h = haystackFor(S, sceneParams({}));
+    const h = haystackFor(S, sceneParams({}, { wordBoundary: 'strict' }));
     const win = e => h(e).join('\n');
 
     eq(win({ uid: 1 }).includes('first'), true, 'the chat messages are in every entry\'s haystack');
@@ -244,7 +244,7 @@ eq(twice.entries.length, 2, '...and the grade list is stable across a second pas
     eq(win({ uid: 4, scanDepth: 1 }).includes('first'), false, 'a per-entry scanDepth narrows the window to its own value');
     eq(win({ uid: 4, scanDepth: 1 }).includes('second'), true, '...keeping what that depth reaches');
 
-    const bare = haystackFor({ scanChat: S.scanChat, depth: 2 }, sceneParams({}));
+    const bare = haystackFor({ scanChat: S.scanChat, depth: 2 }, sceneParams({}, { wordBoundary: 'strict' }));
     eq(bare({ uid: 1 }).join('\n'), 'A: first\nB: second', 'no injects and no sources composes to the chat window alone');
 }
 

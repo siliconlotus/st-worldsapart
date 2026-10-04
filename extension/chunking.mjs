@@ -1,5 +1,5 @@
 // chunking.mjs — how an entry's text is cut up before it is embedded. Pure; settings are passed in. A change
-// here silently invalidates every existing vector index; eval/chunking-check.mjs is the oracle (P3).
+// here silently invalidates every existing vector index; test/chunking-check.mjs is the oracle (P3).
 
 /** ST's recursive text splitter, ported verbatim from public/scripts/utils.js; do not "improve" it. `delimiters` is coarsest first, '' splits between characters. */
 export function splitRecursive(input, length, delimiters = ['\n\n', '\n', ' ', '']) {

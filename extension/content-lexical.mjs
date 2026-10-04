@@ -1,5 +1,5 @@
-// content-lexical.mjs — stage 3's text signal: BM25 over EVERY entry's content, chunked as syncWorld chunks.
-// Scoring only, never admission; stage 1 never consults it.
+// content-lexical.mjs — scoring's text signal: BM25 over EVERY entry's content, chunked as syncWorld chunks.
+// Scoring only, never admission; the similarity query never consults it.
 import { buildLexical, bm25Scores, DEFAULT_K1, DEFAULT_B } from './lexical.mjs';
 import { chunkEntry } from './chunking.mjs';
 
@@ -53,7 +53,7 @@ export const indexFingerprint = (entries, { chunkMode, chunkSize, minChunkSize }
         if (e.disable || typeof e.content !== 'string' || !e.content.trim()) continue;
         n++; chars += e.content.length;
         // Sum, not XOR, with the uid folded in: a delete-and-grow edit and a book rename both move it, a reorder does not.
-        hash = (hash + fnv1a(`${e.world}␟${e.uid}␟${e.content}`)) >>> 0;
+        hash = (hash + fnv1a(`${e.world}\u001f${e.uid}\u001f${e.content}`)) >>> 0;
     }
     return `${n}:${chars}:${hash.toString(16)}:${chunkMode}:${chunkSize}:${minChunkSize}`;
 };

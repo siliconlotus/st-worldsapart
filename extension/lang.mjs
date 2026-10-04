@@ -34,6 +34,10 @@ export function table() {
     return current;
 }
 
+/** How this WA can find names under a pack's `features.nameDetector`: 'capitalised' where the pack says capitals mark names, else null.
+ *  A `model` there is one this WA cannot run, so only `capitalised` decides; no detector at all is no name detection, never a default. */
+const nameDetector = spec => (spec?.capitalised === true ? 'capitalised' : null);
+
 /** A pack object (the shape build-zipf.py writes) becomes the current table. */
 export function usePack(pack) {
     const strict = words(pack.va95);
@@ -44,6 +48,9 @@ export function usePack(pack) {
         posVA: new Set([...strict, ...words(pack.va85)]),
         posAdj: words(pack.adj85),
         common: words(pack.common),
+        nameDetector: nameDetector(pack.features?.nameDetector),
+        // The one fragment detector this WA runs: a function-word list. A pack's other kind of detector leaves the set empty.
+        functionWords: words(pack.features?.fragmentDetector?.functionWords),
         loaded: true,
     };
     return current;
@@ -51,19 +58,21 @@ export function usePack(pack) {
 
 /** No table for `lang`: every word reads rare, every filter is a no-op. */
 export function standDown(lang) {
-    current = { lang, label: lang, hash: null, zipf: new Map(), posVAStrict: new Set(), posVA: new Set(), posAdj: new Set(), common: new Set(), loaded: false };
+    current = { lang, label: lang, hash: null, zipf: new Map(), posVAStrict: new Set(), posVA: new Set(), posAdj: new Set(), common: new Set(), nameDetector: null, functionWords: new Set(), loaded: false };
     return current;
 }
 
-/** The table for `lang`: the bundled pack for 'en', else the store's copy, else one fetch that is then stored; a failure stands down. */
+let request = 0;
+/** The table for `lang`: the bundled pack for 'en', else the store's copy, else one fetch that is then stored; a failure stands down. A call a later one has superseded changes nothing. */
 export async function setLanguage(lang, { fetchPack, store }) {
+    const mine = ++request;
     if (!lang || lang === 'en') return usePack(EN);
     let pack = await store.get(lang);
     if (!pack) {
         try { pack = await fetchPack(lang); await store.put(lang, pack); }
-        catch { return standDown(lang); }
+        catch { return mine === request ? standDown(lang) : current; }
     }
-    return usePack(pack);
+    return mine === request ? usePack(pack) : current;
 }
 
 /** The index for the dropdown; a stored pack whose hash the index has moved is refetched and replaced. Null when the index is unreachable. */

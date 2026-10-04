@@ -6,43 +6,46 @@ import {
     event_types,
     getRequestHeaders,
     getMaxPromptTokens,
-    is_send_press,
+    isGenerating,
     saveSettingsDebounced,
     substituteParams,
     getExtensionPromptByName,
     extension_prompt_types,
     name1,
 } from '../../../../script.js';
-import { extension_settings, getContext } from '../../../extensions.js';
+import { extension_settings, extensionTypes, getContext } from '../../../extensions.js';
+import { accountsEnabled, getCurrentUserHandle, isAdmin } from '../../../user.js';
 import { t } from '../../../i18n.js';
 
-import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
+import { checkWorldInfo, getSortedEntries, getWorldInfoPrompt, world_names, world_info_include_names, world_info_depth, world_info_max_recursion_steps, world_info_min_activations, world_info_match_whole_words, world_info_case_sensitive, world_info_recursive, selected_world_info, world_info, METADATA_KEY, scan_state } from '../../../world-info.js';
 import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { getStringHash, escapeHtml, getCharaFilename } from '../../../utils.js';
-import { pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
+import { LOADER_VERSION, pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
 import { admitCeiling } from './plugin/scoring.mjs';
 import * as query from './extension/query.mjs';
 import * as entity from './extension/entity.mjs';
 import * as matcher from './extension/matcher.mjs';
-import { registerKeys, resetSmartKeys } from './extension/smartkeys.mjs';
+import { createScanScope, macroMap, registerKeys } from './extension/smartkeys.mjs';
 import * as selection from './extension/selection.mjs';
 import * as layout from './extension/layout.mjs';
+import { ARM_WAIT_MS, createRuns, RUN_WAIT_MS } from './extension/runs.mjs';
 import * as delivery from './extension/delivery.mjs';
 import { getTokenCountAsync, getTokenizerModel } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
 
-import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, makeTierEditor, showEntryText, wiGlyph, wiTooltip } from './st/ui-widgets.mjs';
+import { runState, defaultSettings, settings, ensureSettings, cleanedSettings } from './extension/state.mjs';
+import { ensureStudioStyle, makeSortControl, makeTierEditor, pluginFallback, showEntryText, wiGlyph, wiTooltip } from './st/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './st/studio.mjs';
 import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './st/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
 import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
-import { packStore, fetchIndex, fetchPack } from './st/lang-store.mjs';
+import { packStore, fetchIndex, fetchPack, removePack } from './st/lang-store.mjs';
+import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
@@ -50,6 +53,20 @@ import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, 
 
 /** Base of the rewritten `order` sequence, parked above any authored value and ST's default of 100. */
 const ORDER_BASE = 99000;
+
+/** A line narrating one turn's own run: off by default, on under `debugLog` and during either slash-command run.
+ *  ST's own dry runs fire on every chat load, so they stay silent unless the setting is on. */
+const dbg = (...args) => { if (settings().debugLog || runState.dryRunInProgress) console.log(...args); };
+
+/** The selected language's table. A pack that could not be had is said aloud: scoring then finds no names, and nothing else shows it. */
+async function loadLanguage() {
+    const tb = await setLanguage(settings().language, { fetchPack, store: packStore });
+    if (!tb.loaded) {
+        console.error(`WorldsApart: the ${tb.lang} language pack could not be loaded`);
+        toastr.error(t`The language pack for "${tb.lang}" could not be loaded. Until it is, WorldsApart finds no names in that language and treats every word as rare. Check the connection, then choose the language again.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+    }
+    return tb;
+}
 
 // Vector backend — Vector Storage's provider config and ST's own endpoints.
 
@@ -113,23 +130,45 @@ function updateEmbedInfo() {
     $('#wa_embed_info').text(t`Embed: ${endpoint} · ${model}`);
 }
 
-// Time bounds for the generation path's fetches. A query is one embedding round-trip — legitimate answers arrive in
-// well under ten seconds, so past that the endpoint is wedged and the stock fallback or the cosine-free fit is the
-// better turn. The bulk embed is the exception: its bound is a hang-detector, not a patience bound, because the
-// server finishes and persists the embed regardless of the client, and the next turn's `list` picks the chunks up.
+/** The bound on a fetch that embeds nothing: a ping, a list, a file. */
 const QUERY_TIMEOUT_MS = 10_000;
-const SYNC_TIMEOUT_MS = 300_000;
+/** The bound on a fetch that embeds, query or bulk: a hang detector, since a cold model can take minutes and Stop ends the wait. */
+const EMBED_TIMEOUT_MS = 300_000;
 
-async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
-    const response = await fetch(`/api/vector/${route}`, {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(vectorRequestBody(args)),
-        signal: AbortSignal.timeout(timeoutMs),
-    });
+/** A fetch signal ending at `ms` or at `stop` (the generation's Stop), whichever is first. */
+const until = (ms, stop) => (stop ? AbortSignal.any([AbortSignal.timeout(ms), stop]) : AbortSignal.timeout(ms));
+
+/** The embedding source a request body names, as the user knows it. */
+const targetOf = body => (body.apiUrl ? `${body.source} (${body.apiUrl})` : body.source);
+
+/** The error a timed-out embedding fetch throws, its `explanation` the toast's text. */
+const timedOut = (route, target, ms) => Object.assign(new Error(`WorldsApart: ${route}: ${target} did not answer within ${ms / 1000} s`),
+    { explanation: [t`The embedding source ${target} did not answer within ${ms / 1000} seconds.`] });
+
+/** @param {AbortSignal} [stop] the generation's Stop; a stopped fetch throws its AbortError unchanged */
+async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS, stop = null) {
+    const body = vectorRequestBody(args);
+    const target = targetOf(body);
+    let response;
+    try {
+        response = await fetch(`/api/vector/${route}`, {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify(body),
+            signal: until(timeoutMs, stop),
+        });
+    } catch (error) {
+        if (error?.name === 'TimeoutError') throw timedOut(`/api/vector/${route}`, target, timeoutMs);
+        throw error;
+    }
 
     if (!response.ok) {
-        throw new Error(`Worlds Apart: /api/vector/${route} failed with ${response.status}`);
+        // ST's vector routes answer every failure with a bare 500, and on these three the embedding call is what fails.
+        if (response.status === 500 && ['insert', 'query', 'query-multi'].includes(route)) {
+            throw Object.assign(new Error(`WorldsApart: /api/vector/${route} failed with 500 (${target})`),
+                { explanation: [t`SillyTavern could not get embeddings from ${target}.`, t`Check SillyTavern server logs for more info.`] });
+        }
+        throw new Error(`WorldsApart: /api/vector/${route} failed with ${response.status}`);
     }
 
     return response.status === 200 && response.headers.get('content-type')?.includes('json')
@@ -138,6 +177,9 @@ async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS) {
 }
 
 
+/** The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not. */
+const EXT_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/+$/, '').split('/').pop();
+
 /** Whether the WA server plugin is loaded, checked once; absent is the stock install, not an error. */
 async function hasPlugin() {
     if (runState.pluginAvailable !== null) {
@@ -145,45 +187,102 @@ async function hasPlugin() {
     }
 
     try {
-        // The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not.
-        const dir = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/$/, '').split('/').pop();
-        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
+        const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir: EXT_DIR }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
         runState.pluginAvailable = response.ok;
-        if (response.ok) { try { const d = await response.json(); runState.pluginRoot = d?.root ?? null; runState.pluginFP = d?.fingerprint ?? null; } catch { /* older plugin: no root/fingerprint fields */ } }
+        if (response.ok) {
+            // Each field absent from an older plugin, whose copy predates the loader: `loader` null is what asks for the redeploy.
+            try {
+                const d = await response.json();
+                runState.pluginRoot = d?.root ?? null;
+                runState.pluginFP = d?.fingerprint ?? null;
+                runState.pluginLoader = Number(d?.loader) || null;
+                runState.pluginInstall = d?.install ?? null;
+                runState.pluginDataRoot = d?.dataRoot ?? null;
+                runState.pluginShared = d?.shared === true;
+            } catch { /* no JSON body: nothing more is known */ }
+        }
     } catch {
         runState.pluginAvailable = false;
     }
 
-    console.log(`Worlds Apart: server plugin ${runState.pluginAvailable ? 'detected — mean-centered search available' : 'not found, using stock vector search'}`);
+    console.log(`WorldsApart: server plugin ${runState.pluginAvailable ? 'detected — mean-centered search available' : 'not found, using stock vector search'}`);
     return runState.pluginAvailable;
 }
 
-/** Fingerprint of this extension's source plugin files, hashed exactly as the plugin hashes its deployed copy; cached. */
+/** Fingerprint of the plugin files as this page serves them, hashed exactly as the server hashes what it loaded; cached. */
 async function computeSourceFingerprint() {
     if (runState.sourceFP !== null) return runState.sourceFP;
     try {
         const texts = await Promise.all(
             // `r.ok` checked, or a 404 hashes the error page: a fetch only rejects at the network layer, so a
             // PLUGIN_FILES entry naming a missing file would fingerprint as drift for ever.
-            PLUGIN_FILES.map(([src]) => fetch(new URL(`./plugin/${src}`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
+            PLUGIN_FILES.map(src => fetch(new URL(`./plugin/${src}`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
                 .then(r => { if (!r.ok) throw new Error(`${src}: ${r.status}`); return r.text(); })),
         );
         runState.sourceFP = pluginFingerprint(...texts);
-    } catch (error) { console.warn('Worlds Apart: could not fingerprint the plugin source, drift unknown —', error); runState.sourceFP = null; }
+    } catch (error) { console.warn('WorldsApart: could not fingerprint the plugin source, drift unknown —', error); runState.sourceFP = null; }
     return runState.sourceFP;
 }
 
-/** The deployed plugin is not the source this extension ships. A null fingerprint — a plugin predating the field, or a
- *  source file that would not load — reads as no drift: the check cannot tell, and a false alarm is worse. */
+/** The server runs other plugin files than this page serves. A null fingerprint — a source file that would not load — reads
+ *  as no drift: the check cannot tell, and a false alarm is worse. */
 const pluginDrifted = () => Boolean(runState.pluginAvailable && runState.sourceFP && runState.pluginFP !== runState.sourceFP);
 
-/** Fills the plugin setup box with copyable install and redeploy commands, and the drift banner. */
+/** This install as the deploy records it: a per-user copy lives under its user's data folder, a global one under public/. */
+const IS_LOCAL = () => extensionTypes[`third-party/${EXT_DIR}`] === 'local';
+const userHandle = () => getCurrentUserHandle();
+
+/** Whether the server loads this copy. Unknown — a plugin predating the field — reads as yes, as an unknown drift does. */
+/** This user has a copy of the folder name installed for all users: ST lists and updates theirs but serves the shared copy's files,
+ *  static public/ being mounted ahead of the per-user route. Read off `install` too: a shared copy that old may predate `shared`. */
+const isShadowing = () => IS_LOCAL() && (runState.pluginShared
+    || String(runState.pluginInstall ?? '').replace(/\\/g, '/').endsWith(`public/scripts/extensions/third-party/${EXT_DIR}`));
+
+const pluginIsMine = () => {
+    const at = String(runState.pluginInstall ?? '').replace(/\\/g, '/');
+    if (!at) return true;
+    return at.endsWith(IS_LOCAL() ? `/${userHandle()}/extensions/${EXT_DIR}` : `public/scripts/extensions/third-party/${EXT_DIR}`);
+};
+
+/** The folder the browser's WorldsApart is served from: absolute once the plugin has reported where ST and its data live. */
+function installDir() {
+    const root = runState.pluginRoot?.replace(/\\/g, '/');
+    const data = runState.pluginDataRoot?.replace(/\\/g, '/');
+    return IS_LOCAL()
+        ? `${data ?? 'data'}/${userHandle()}/extensions/${EXT_DIR}`
+        : `${root ? `${root}/` : ''}public/scripts/extensions/third-party/${EXT_DIR}`;
+}
+
+/** The command that points the plugin at installDir. Quoted: a folder name may hold a space. */
+const deployCommand = () => `node "${installDir()}/deploy-plugin.mjs"`;
+
+/** What the plugin's state asks of the person reading: `text` is the remedy, for the banner and the startup toast; `why` the cause,
+ *  for its tooltip; `cmd` true where an admin's fix is the deploy command; `panelOnly` keeps it out of the startup toast. Null when
+ *  nothing is due; an absent plugin is renderPluginSetup's install box. A user who is not an admin gets one remedy for every cause. */
+function pluginAdvice() {
+    if (!runState.pluginAvailable) return null;
+    let why, remedy = 'deploy';
+    if ((runState.pluginLoader ?? 0) < LOADER_VERSION) why = t`The deployed plugin loader is from an older version of WorldsApart.`;
+    // Whatever the versions: the copy this user can update is not the one whose files run.
+    else if (isShadowing()) {
+        return { text: t`⚠ WorldsApart is installed in both "all users" and "just for me" modes. This is likely to cause unexpected behavior due to SillyTavern load precedence; we recommend removing the user copy.`, panelOnly: true };
+    }
+    else if (!pluginDrifted()) return null;
+    else if (pluginIsMine()) { why = t`The server plugin loads its code when SillyTavern starts, and WorldsApart has changed since.`; remedy = 'restart'; }
+    else { why = t`SillyTavern runs the server plugin from one copy and the extension from the other, so the two can disagree.`; remedy = 'remove'; }
+    if (!isAdmin()) return { text: t`⚠ The server plugin is out of date. Ask whoever runs this SillyTavern server to update it.`, why };
+    if (remedy === 'restart') return { text: t`⚠ WorldsApart has changed since SillyTavern started. Restart SillyTavern.`, why };
+    if (remedy === 'remove') {
+        return { text: t`⚠ WorldsApart is also installed at ${String(runState.pluginInstall).replace(/\\/g, '/')}, and the server plugin runs from there. Remove that copy, then restart SillyTavern.`, why };
+    }
+    return { text: t`⚠ The server plugin needs redeploying. Run this, then restart SillyTavern:`, why, cmd: true };
+}
+
+/** Fills the plugin setup box and the drift banner from pluginAdvice. */
 function renderPluginSetup() {
     const box = $('#wa_plugin_setup');
     if (!box.length) return;
-    const extDir = new URL('.', import.meta.url).pathname.replace(/\/+$/, '').split('/').pop();
-    const rel = `public/scripts/extensions/third-party/${extDir}/deploy-plugin.mjs`;
-    const deployCmd = runState.pluginRoot ? `node "${runState.pluginRoot.replace(/\\/g, '/')}/${rel}"` : `node ${rel}`;
+    const deployCmd = deployCommand();
     const row = (cmd) => {
         const r = $('<div class="flex-container alignItemsCenter flexnowrap" style="gap:6px;margin:3px 0;"></div>');
         const code = $('<code style="flex:1;overflow-x:auto;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--black30a,rgba(0,0,0,0.2));"></code>').text(cmd);
@@ -197,80 +296,112 @@ function renderPluginSetup() {
     };
     const alert = $('#wa_plugin_alert').empty();
     // Top of the drawer, so neither state needs the setup box open to be seen.
-    const banner = (text, ...rest) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>')
-        .append($('<div style="color:var(--warning,#d80);"></div>').text(text), ...rest);
+    const AMBER = 'var(--golden, #e0a86c)', RED = '#e06c6c';
+    const banner = (...children) => $('<div style="margin:0 0 8px;padding:6px 8px;border-radius:5px;font-size:0.9em;background:color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);border:1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent);"></div>').append(...children);
+    const line = (text, colour, why) => $(`<div style="color:${colour};"></div>`).text(text)
+        .append(why ? [' ', $('<span class="fa-solid fa-circle-question note-link-span"></span>').attr('title', why)] : []);
     box.empty();
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
+    // With accounts on, a per-user copy is one of several the server plugin can load, each updated on its own.
+    if (accountsEnabled && IS_LOCAL() && isAdmin() && !isShadowing()) {
+        box.append($('<div style="margin-bottom:3px;"></div>').text(t`With user accounts on, install WorldsApart for all users instead of per user: the server plugin and every user then share one copy to update.`));
+    }
     if (runState.pluginAvailable) {
-        const stale = pluginDrifted();
-        if (stale) {
-            const warn = t`⚠ Server plugin out of date — the deployed copy differs from this extension's source. Redeploy and restart:`;
-            alert.append(banner(warn, row(deployCmd)));
-            box.append($('<div style="color:var(--warning,#d80);"></div>').text(warn));
-            box.append(row(deployCmd));
+        const advice = pluginAdvice();
+        // One box for both facts: a route that failed this load, in red, above whatever else is due.
+        const lines = [];
+        const routes = [...runState.pluginFailures].join(', ');
+        if (routes) lines.push(line(t`⚠ Server plugin has demonstrated incompatibility with this extension version; WA is falling back to running without it wherever it fails (${routes}).`, RED));
+        if (advice) lines.push(line(advice.text, AMBER, advice.why));
+        if (lines.length) alert.append(banner(...lines, ...(advice?.cmd ? [row(deployCmd)] : [])));
+        if (advice) {
+            box.append(line(advice.text, AMBER, advice.why));
+            if (advice.cmd) box.append(row(deployCmd));
             return;
         }
         box.append($('<div style="color:var(--active,#7ac);"></div>').text(runState.sourceFP ? t`✓ Server plugin active — up to date (build ${runState.sourceFP}).` : t`✓ Server plugin active.`));
-        box.append($('<div style="margin-top:3px;"></div>').text(t`After editing plugin code, redeploy and restart SillyTavern:`));
-        box.append(row(deployCmd));
+        if (runState.pluginInstall) box.append($('<div style="margin-top:3px;"></div>').text(t`Loading WorldsApart from ${String(runState.pluginInstall).replace(/\\/g, '/')}.`));
         return;
     }
-    const absent = t`⚠ Server plugin not installed — retrieval runs on ST's own vector search, without mean-centering or server-side pooling.`;
-    alert.append(banner(absent));
+    const absent = t`⚠ Server plugin not installed — activation by similarity runs on ST's own vector search, without mean-centering or server-side pooling.`;
+    alert.append(banner(line(absent, AMBER)));
+    if (!isAdmin()) {
+        box.append($('<div></div>').text(t`${absent} Ask whoever runs this SillyTavern server to install it.`));
+        return;
+    }
     box.append($('<div></div>').text(t`${absent} To install:`));
     box.append($('<div style="margin-top:3px;"></div>').text(t`1. Open a terminal in your SillyTavern folder and deploy the plugin (also enables server plugins in config):`));
     box.append(row(deployCmd));
-    box.append($('<div style="margin-top:3px;"></div>').text(t`2. Restart SillyTavern. This box will then show the exact redeploy command with your full path.`));
+    box.append($('<div style="margin-top:3px;"></div>').text(t`2. Restart SillyTavern. From then on, updating WorldsApart and restarting SillyTavern updates the plugin too.`));
 }
 
 /** Multi-collection query through the plugin's mean-centered search, or the no-plugin path (ST's own /api/vector)
  *  when the plugin is absent or errors. */
-async function queryCollections(args) {
+async function queryCollections(args, stop = null) {
     // The model's query prefix goes on here and only here: the caller's `searchText` also feeds queryTermWeights.
     const prefix = queryPrefix(vectorRequestBody().model);
     if (prefix) args = { ...args, searchText: prefix + args.searchText };
 
-    // The ceiling is chosen per path here, since the no-plugin path can fire mid-request. Gated on the plugin's
-    // presence, not on `meanCentered`, which is a plugin parameter.
-    if (await hasPlugin()) {
-        try {
-            const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
-            const response = await fetch('/api/plugins/worlds-apart/query-multi', {
-                method: 'POST',
-                headers: getRequestHeaders(),
-                body: JSON.stringify({
-                    ...body,
-                    centered: settings().meanCentered,
-                    // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
-                    sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
-                }),
-                signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
-            });
+    const target = targetOf(vectorRequestBody());
+    let slowToast = null;
+    const slow = setTimeout(() => {
+        slowToast = toastr.info(t`Waiting for ${target} to embed the query. Press Stop to give up.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+    }, 3000);
+    try {
+        // The ceiling is chosen per path here, since the no-plugin path can fire mid-request. Gated on the plugin's
+        // presence, not on `meanCentered`, which is a plugin parameter.
+        if (await hasPlugin()) {
+            try {
+                const body = vectorRequestBody({ ...args, topK: admitCeiling(true) });
+                const response = await fetch('/api/plugins/worlds-apart/query-multi', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({
+                        ...body,
+                        centered: settings().meanCentered,
+                        // Every provider field minus the query fields; narrowing it makes a provider fail on a missing setting.
+                        sourceSettings: (({ collectionIds, searchText, centroidUids, topK, ...rest }) => rest)(body),
+                    }),
+                    signal: until(EMBED_TIMEOUT_MS, stop),
+                });
 
-            if (response.ok) {
-                return await response.json();
+                // 422: a source the plugin cannot embed; 502: the provider failed. Neither is skew, and the no-plugin path reports the provider's error.
+                if (response.status === 422 || response.status === 502) {
+                    console.warn(`WorldsApart: the plugin could not embed the query (${response.status} ${await response.text()}), taking the no-plugin path`);
+                } else {
+                    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+                    const results = await response.json();
+                    // Only what the similarity query reads: a scored metadata array per collection answered. Anything more is fine.
+                    if (!results || typeof results !== 'object' || !Object.values(results).every(g => Array.isArray(g?.metadata) && g.metadata.every(x => typeof x?.score === 'number'))) throw new Error('unscored or missing metadata');
+                    return results;
+                }
+            } catch (error) {
+                // A Stop or a hang ends the query: the no-plugin path would only ask the same embedder again, and neither is a version mismatch.
+                if (error?.name === 'AbortError') throw error;
+                if (error?.name === 'TimeoutError') throw timedOut('query-multi', target, EMBED_TIMEOUT_MS);
+                pluginFallback('query-multi', error);
             }
-
-            console.warn(`Worlds Apart: plugin query failed (${response.status}), taking the no-plugin path`, await response.text());
-        } catch (error) {
-            console.warn('Worlds Apart: plugin query threw, taking the no-plugin path', error);
         }
-    }
 
-    // No threshold and no server-side pooling here, so K counts chunks.
-    return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }) ?? {};
+        // No threshold and no server-side pooling here, so K counts chunks.
+        return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }, EMBED_TIMEOUT_MS, stop) ?? {};
+    } finally {
+        clearTimeout(slow);
+        if (slowToast) toastr.clear(slowToast);
+    }
 }
 
-// Retrieval
+// The similarity query
 
 /** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
 const US = '';
 
-/** Chunks a book's entries and brings its vector collection in sync with them.
+/** Chunks a book's entries and brings its vector collection in sync with them. A Stop ends the wait on the server, never the embed.
+ *  @param {AbortSignal} [stop] the generation's Stop
  *  @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>} owners: chunk hash -> `${world}.${uid}` */
-async function syncWorld(world, entries) {
+async function syncWorld(world, entries, stop = null) {
     const collectionId = `wa_${getStringHash(world)}`;
-    const saved = await vectorPost('list', { collectionId }) ?? [];
+    const saved = await vectorPost('list', { collectionId }, QUERY_TIMEOUT_MS, stop) ?? [];
 
     const items = [];
     /** @type {Map<number, string[]>} A list, because identical (text, uid) in two attached books collides once scoreEntriesUnsafe merges these. */
@@ -291,37 +422,63 @@ async function syncWorld(world, entries) {
     }
 
     const wanted = new Set(items.map(x => x.hash));
-    const newItems = items.filter(x => !saved.includes(x.hash));
+    let newItems = items.filter(x => !saved.includes(x.hash));
     const staleHashes = saved.filter(x => !wanted.has(x));
 
+    // The chat-bound book with no rows yet is usually STMemoryBooks' copy-on-branch clone: the plugin copies what a sibling
+    // collection holds for the same (text, uid) instead of re-embedding it. Never runs again once the collection has rows.
+    if (!saved.length && newItems.length && world === chatBook() && await hasPlugin()) {
+        try {
+            const sourceSettings = vectorRequestBody();
+            const response = await fetch('/api/plugins/worlds-apart/adopt', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ collectionId, hashes: newItems.map(x => x.hash), source: sourceSettings.source, sourceSettings }),
+                signal: until(EMBED_TIMEOUT_MS, stop),
+            });
+            if (!response.ok) throw new Error(`${response.status}`);
+            const j = await response.json();
+            if (!Array.isArray(j?.adopted)) throw new Error('no adopted list');
+            const adopted = new Set(j.adopted);
+            if (adopted.size) {
+                newItems = newItems.filter(x => !adopted.has(x.hash));
+                console.log(`WorldsApart: adopted ${adopted.size} chunks for "${world}" from another collection under the same model`);
+            }
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            if (error?.name === 'TimeoutError') console.warn(`WorldsApart: adopting chunks for "${world}" did not finish within ${EMBED_TIMEOUT_MS / 1000} s, embedding them instead`);
+            else pluginFallback('adopt', error);
+        }
+    }
+
     if (newItems.length) {
-        console.log(`Worlds Apart: embedding ${newItems.length} new chunks for "${world}"`);
+        console.log(`WorldsApart: embedding ${newItems.length} new chunks for "${world}"`);
         let announced = false;
         const slow = setTimeout(() => {
             announced = true;
-            toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'Worlds Apart', { timeOut: 15000 });
+            toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'WorldsApart', { timeOut: 15000 });
         }, 3000);
         const started = Date.now();
         try {
-            await vectorPost('insert', { collectionId, items: newItems }, SYNC_TIMEOUT_MS);
+            await vectorPost('insert', { collectionId, items: newItems }, EMBED_TIMEOUT_MS, stop);
         } finally {
             clearTimeout(slow);
         }
         const secs = Math.round((Date.now() - started) / 1000);
-        if (announced) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'Worlds Apart', { timeOut: 5000 });
+        if (announced) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'WorldsApart', { timeOut: 5000 });
     }
 
     if (staleHashes.length) {
-        console.log(`Worlds Apart: dropping ${staleHashes.length} stale chunks for "${world}"`);
+        console.log(`WorldsApart: dropping ${staleHashes.length} stale chunks for "${world}"`);
         await vectorPost('delete', { collectionId, hashes: staleHashes });
     }
 
     return { collectionId, owners };
 }
 
-const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost);
+const buildTermWeights = (queryText, gazetteer) => entity.buildTermWeights(queryText, gazetteer, settings().properNounBoost, table().nameDetector === 'capitalised');
 
-/** @type {Map<string, {fingerprint: string, index: object, nameDf: object|null}>} Per-book content-lexical and name indexes, rebuilt when the book's fingerprint moves. */
+/** @type {Map<string, {fingerprint: string, index: object, nameDf: object|null, common: Set<string>|null}>} Per-book content-lexical and name indexes, rebuilt when the book's fingerprint moves; the name index also when the language table does. */
 const contentIndexes = new Map();
 
 /** Both per-book indexes over one book's entries behind one fingerprint; the name index only when `names` is set.
@@ -329,16 +486,19 @@ const contentIndexes = new Map();
 function bookIndexes(world, entries, { names = false } = {}) {
     const fingerprint = indexFingerprint(entries, settings());
     const hit = contentIndexes.get(world);
-    if (hit?.fingerprint === fingerprint && (!names || hit.nameDf)) return hit;
+    // The Set itself: lang.mjs makes a new one per table, so identity is the language in force.
+    const common = table().common;
+    const namesCurrent = hit?.nameDf && hit.common === common;
+    if (hit?.fingerprint === fingerprint && (!names || namesCurrent)) return hit;
     const index = hit?.fingerprint === fingerprint ? hit.index : buildContentIndex(entries, settings());
-    const nameDf = names ? buildNameDf(entries) : hit?.fingerprint === fingerprint ? hit.nameDf : null;
-    const fresh = { fingerprint, index, nameDf };
+    const nameDf = names ? buildNameDf(entries, common) : hit?.fingerprint === fingerprint && namesCurrent ? hit.nameDf : null;
+    const fresh = { fingerprint, index, nameDf, common: nameDf ? common : null };
     contentIndexes.set(world, fresh);
     if (hit?.fingerprint !== fingerprint) {
-        console.log(`Worlds Apart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
+        console.log(`WorldsApart: content-lexical index for "${world}" — ${index.entryCount} entries, ${index.docCount} chunks`);
     }
     if (names && nameDf && nameDf !== hit?.nameDf) {
-        console.log(`Worlds Apart: name index for "${world}" — ${nameDf.ndoc} entries, ${nameDf.df.size} distinct names`);
+        console.log(`WorldsApart: name index for "${world}" — ${nameDf.ndoc} entries, ${nameDf.df.size} distinct names`);
     }
     return fresh;
 }
@@ -348,18 +508,23 @@ function bookIndexes(world, entries, { names = false } = {}) {
  *  @returns {Promise<{unclaimed: object[], staleConfig: object[], live: object[], bytes: number}|null>} */
 async function findOrphanCollections() {
     if (!await hasPlugin()) return null;
-    const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders() });
-    if (!response.ok) return null;
-    const all = await response.json();
+    let all;
+    try {
+        const sourceSettings = vectorRequestBody();
+        const response = await fetch('/api/plugins/worlds-apart/collections', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ source: sourceSettings.source, sourceSettings }) });
+        if (!response.ok) throw new Error(`${response.status}`);
+        all = await response.json();
+        // Every field the report reads, on every row.
+        if (!Array.isArray(all) || !all.every(c => typeof c?.collectionId === 'string' && typeof c?.source === 'string' && typeof c?.model === 'string' && typeof c?.bytes === 'number' && typeof c?.mtimeMs === 'number' && typeof c?.current === 'boolean')) throw new Error('rows missing fields');
+    } catch (error) {
+        pluginFallback('collections', error);
+        return null;
+    }
     const claimed = new Set((world_names ?? []).map(n => `wa_${getStringHash(n)}`));
-    const v = extension_settings.vectors ?? {};
-    const source = v.source || 'transformers';
-    // Per source, not a `??` chain: `ollama_model` carries a non-empty default, so a chain reads it under any source.
-    const model = String(({ ollama: v.ollama_model, vllm: v.vllm_model })[source] ?? v[`${source}_model`] ?? '');
     const unclaimed = [], staleConfig = [], live = [];
     for (const c of all) {
         if (!claimed.has(c.collectionId)) unclaimed.push(c);
-        else if (c.source !== source || (model && c.model !== model)) staleConfig.push(c);
+        else if (!c.current) staleConfig.push(c);
         else live.push(c);
     }
     return { unclaimed, staleConfig, live, bytes: all.reduce((a, c) => a + c.bytes, 0) };
@@ -373,7 +538,7 @@ async function reportOrphanCollections() {
     if (!found) return t`Needs the server plugin.`;
     const { unclaimed, staleConfig, live, bytes } = found;
     const table = rows => rows.map(c => ({ collection: c.collectionId, source: c.source, model: c.model, size: mib(c.bytes), lastWritten: new Date(c.mtimeMs).toISOString().slice(0, 10) }));
-    console.log(`%cWorlds Apart · vector collections — ${mib(bytes)} total`, 'font-weight: bold');
+    console.log(`%cWorldsApart · vector collections — ${mib(bytes)} total`, 'font-weight: bold');
     if (live.length) { console.log(`in use by a book you still have, at the current source/model (${live.length}):`); console.table(table(live)); }
     if (staleConfig.length) { console.log(`the book still exists, but these were built under another source or model (${staleConfig.length}) — switching back would use them again:`); console.table(table(staleConfig)); }
     if (unclaimed.length) { console.log(`NO lorebook hashes to these (${unclaimed.length}) — renamed or deleted books. Nothing will ever read them again:`); console.table(table(unclaimed)); }
@@ -401,25 +566,25 @@ function loadRelevanceModel() {
         fetch(new URL(`./extension/relevance-model-${tier}.json`, import.meta.url), { signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) })
             .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
             .then((file) => {
-                // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, retrieval outage).
+                // Own fit, else UNFITTED_FALLBACK's, else `noCosine` for a turn with no cosine (no-plugin path, a failed query).
                 const m = file?.byModel?.[key] ?? file?.byModel?.[UNFITTED_FALLBACK] ?? file?.noCosine ?? null;
                 if (m) m.noCosine = file?.noCosine ?? null;
                 if (m && !file?.byModel?.[key]) {
-                    console.warn(`Worlds Apart: no ${tier} relevance fit for embedding model "${key}" — `
+                    console.warn(`WorldsApart: no ${tier} relevance fit for embedding model "${key}" — `
                         + `scoring through "${UNFITTED_FALLBACK}"'s (have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}). `
                         + 'Fit this one with eval/relevance-regress.mjs --emit-model.');
                 }
                 if (!m) {
-                    console.warn(`Worlds Apart: no ${tier} relevance model for embedding model "${key}" `
+                    console.warn(`WorldsApart: no ${tier} relevance model for embedding model "${key}" `
                         + `(have: ${Object.keys(file?.byModel ?? {}).join(', ') || 'none'}) — that tier's E[credit] will not be scored, `
                         + `so nothing is cut on relevance. Fit one with eval/relevance-regress.mjs --emit-model.`);
                     return [tier, null];
                 }
-                console.log(`Worlds Apart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, fitted under ${m.embedModel} (its own best cutoff was ${m.cutoff}; the cut runs at the relevanceCutoff setting)`);
+                console.log(`WorldsApart: relevance model — ${m.tier} tier, ${m.features?.join(', ')}, fitted under ${m.embedModel} (its own best cutoff was ${m.cutoff}; the cut runs at the relevanceCutoff setting)`);
                 return [tier, m];
             })
             .catch((e) => {
-                console.warn(`Worlds Apart: no ${tier} relevance model, that tier's E[credit] will not be scored —`, e.message);
+                console.warn(`WorldsApart: no ${tier} relevance model, that tier's E[credit] will not be scored —`, e.message);
                 return [tier, null];
             })))
         .then((pairs) => {
@@ -434,7 +599,7 @@ function loadRelevanceModel() {
 const entriesByWorld = async (entries = null) => Map.groupBy(entries ?? await getSortedEntries(), e => e.world);
 
 /**
- * Fills the stage-4 relevance column: `properNouns`, `density`, then `E[credit]` per entry. Cuts nothing.
+ * Fills the relevance column selection reads: `properNouns`, `density`, then `E[credit]` per entry. Cuts nothing.
  * @param {Function} windowFor The scan window builder; eval/scene.mjs `haystackFor` calls the same one with the same inputs
  */
 async function scoreRelevanceColumn(items, windowFor, entries = null) {
@@ -444,11 +609,15 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
     const byWorld = await entriesByWorld(entries);
 
     const depth = Number(settings().messageDepth || world_info_depth);
-    const windowNames = properNames(windowFor(depth, {}).join('\n'));
+    const common = table().common;
+    // The language's pack says whether capitals mark names; where they do not, both name columns are zero for every row.
+    const named = table().nameDetector === 'capitalised';
+    const windowNames = named ? properNames(windowFor(depth, {}).join('\n'), common) : null;
 
     for (const item of items) {
+        if (!named) { item.properNouns = 0; item.density = 0; continue; }
         const book = bookIndexes(item.entry.world, byWorld.get(item.entry.world) ?? [], { names: true }).nameDf;
-        const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content);
+        const names = book?.names.get(entryKey(item.entry)) ?? properNames(item.entry.content, common);
         item.properNouns = book ? properShared(names, windowNames, book) : 0;
         item.density = properDensity(item.entry.content);
     }
@@ -468,7 +637,7 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
             density: Number(it.density) || 0,
         });
         // The fit's own population (`standardise`), minus constants, as both calibration sites build it.
-        const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !it.entry?.constant).map(col);
+        const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !layout.isConstant(it.entry)).map(col);
         const eCredit = scoreRelevance(fit, rows.map(col), population);
         rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
     }
@@ -476,14 +645,15 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
     if (runState.verboseRun) {
         const scored = items.filter(it => Number.isFinite(it.eCredit));
         const cuts = Object.entries(models).filter(([, m]) => m).map(([t]) => `${t} >= ${settings().relevanceCutoff}`).join(', ');
-        console.log(`%cWorlds Apart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
+        console.log(`%cWorldsApart · E[credit] over ${scored.length} entries — ${cuts}; the cut runs at selection`, 'font-weight: bold');
         console.table([...scored]
-            .sort((a, b) => b.eCredit - a.eCredit)
+            .sort((a, b) => layout.layoutScore(b) - layout.layoutScore(a))
             .map(it => ({
                 entry: it.entry.comment || it.entry.key?.[0] || it.entry.uid,
                 tier: it.eCreditTier,
                 eCredit: Number(it.eCredit.toFixed(4)),
-                clears: it.eCredit >= settings().relevanceCutoff,
+                weight: it.logWeight ? Number(Math.exp(it.logWeight).toFixed(2)) : 1,
+                clears: layout.weightedCredit(it) >= settings().relevanceCutoff,
                 cosine: Number.isFinite(it.score) ? Number(it.score.toFixed(4)) : null,
                 text: Number((it.textScore ?? 0).toFixed(3)),
                 properNouns: Number(it.properNouns.toFixed(3)),
@@ -492,7 +662,7 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
     }
 }
 
-/** BM25 of the query against every entry's content — the stage-3 text signal.
+/** BM25 of the query against every entry's content — the scoring text signal.
  *  @returns {Promise<Map<string, number>>} `${world}.${uid}` -> best chunk score; empty when unavailable */
 async function contentTextScores(query, entries = null) {
     if (!query) return new Map();
@@ -501,7 +671,7 @@ async function contentTextScores(query, entries = null) {
     if (!byWorld.size) return new Map();
 
     const s = settings();
-    const termWeights = await queryTermWeights(query, { log: false, entries });
+    const termWeights = await queryTermWeights(query, { entries });
     const opts = { k1: s.bm25K1, b: s.bm25B, termWeights, stopwordDf: s.stopwordDocFreq };
     const out = new Map();
     for (const [world, entries] of byWorld) {
@@ -514,9 +684,8 @@ async function contentTextScores(query, entries = null) {
 }
 
 /** The entity-filter term weights for a query, or null when the filter is off. Nothing else derives them (R19).
- *  @param {boolean} [opts.log] Log the kept-term count and, in a verbose run, the surviving terms
  *  @returns {Promise<Record<string, number>|null>} */
-async function queryTermWeights(searchText, { log = true, entries = null } = {}) {
+async function queryTermWeights(searchText, { entries = null } = {}) {
     if (!settings().entityFilter) {
         return null;
     }
@@ -528,36 +697,33 @@ async function queryTermWeights(searchText, { log = true, entries = null } = {})
     const gazetteer = entity.buildGazetteer((entries ?? await getSortedEntries()).map(authored));
     const termWeights = buildTermWeights(searchText, gazetteer);
 
-    if (log) {
-        console.log(`Worlds Apart: entity filter kept ${Object.keys(termWeights).length} terms (gazetteer has ${gazetteer.size})`);
-
-        if (runState.verboseRun) {
-            const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-            console.log(`%cWorlds Apart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
-            console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
-        }
+    if (runState.verboseRun) {
+        const byWeight = Object.entries(termWeights).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        console.log(`WorldsApart: entity filter kept ${byWeight.length} terms (gazetteer has ${gazetteer.size})`);
+        console.log(`%cWorldsApart · surviving query terms — what the entity filter kept, ×N is the proper-noun boost (${byWeight.length} terms)`, 'font-weight: bold');
+        console.log(byWeight.map(([term, weight]) => (weight > 1 ? `${term}×${weight}` : term)).join(' '));
     }
 
     return termWeights;
 }
 
-/** Serialises retrieval so a query cannot read a half-built index. */
-let retrievalQueue = Promise.resolve();
+/** Serialises the similarity query so one cannot read a half-built index. */
+let similarityQueue = Promise.resolve();
 
-/** Scores every entry with content against arbitrary query text; shared by retrieval and /wa-query.
+/** Scores every entry with content against arbitrary query text; shared by activation and /wa-query.
  *  @returns {Promise<{targets: object[], scores: Map<string, {score: number, chunk: string}>, retrieved: Set<string>}>}
- *           `retrieved` is stage 2's admission set, `scores` the stage-3 cosine column; the no-plugin path fills only the first. */
-function scoreEntries(searchText) {
-    const run = () => scoreEntriesUnsafe(searchText);
-    const result = retrievalQueue.then(run, run);
-    // The catch is on the queue, not on `result`: `return result.catch(...)` would make a failure look like retrieve()'s empties.
-    retrievalQueue = result.catch(() => {});
+ *           `retrieved` is activation's admission set, `scores` the scoring cosine column; the no-plugin path fills only the first. */
+function scoreEntries(searchText, stop = null) {
+    const run = () => scoreEntriesUnsafe(searchText, stop);
+    const result = similarityQueue.then(run, run);
+    // The catch is on the queue, not on `result`: `return result.catch(...)` would make a failure look like similarityActivations()'s empties.
+    similarityQueue = result.catch(() => {});
     return result;
 }
 
-async function scoreEntriesUnsafe(searchText) {
+async function scoreEntriesUnsafe(searchText, stop = null) {
     const allEntries = await getSortedEntries();
-    // Every entry with content, not only the vectorized: `vectorized` decides what stage 1 retrieves, a cosine is a column stage 3 reads (F35).
+    // Every entry with content, not only the vectorized: `vectorized` decides what the similarity query activates, a cosine is a column scoring reads (F35).
     const targets = allEntries.filter(x => !x.disable && x.content);
     /** @type {Map<string, {score: number, chunk: string}>} */
     const scores = new Map();
@@ -575,7 +741,7 @@ async function scoreEntriesUnsafe(searchText) {
     const owners = new Map();
 
     for (const [world, entries] of byWorld) {
-        const synced = await syncWorld(world, entries);
+        const synced = await syncWorld(world, entries, stop);
         collectionIds.push(synced.collectionId);
         synced.owners.forEach((v, k) => owners.set(`${synced.collectionId}${US}${k}`, v));
     }
@@ -590,7 +756,7 @@ async function scoreEntriesUnsafe(searchText) {
         collectionIds,
         searchText,
         centroidUids,
-    });
+    }, stop);
 
     // The max is a no-op against a current plugin (one pooled record per entry) and keeps an un-redeployed one, which
     // still returns raw chunks, pooling. `rankOnly` counts chunks with no score: the no-plugin path answered.
@@ -604,8 +770,8 @@ async function scoreEntriesUnsafe(searchText) {
                 return;
             }
 
-            // Admission is retrieval identity, not magnitude: the no-plugin path returns the same chunks, so the same
-            // entries are stage-2 candidates whichever path answered. The Set is the pooling — K counts chunks there.
+            // Admission is which chunks came back, not their magnitude: the no-plugin path returns the same chunks, so the same
+            // entries are activation candidates whichever path answered. The Set is the pooling — K counts chunks there.
             for (const owner of chunkOwners) retrieved.add(owner);
 
             // No invented score: ST's endpoint drops it, and a rank substitute feeds the fit a number in another unit.
@@ -622,8 +788,10 @@ async function scoreEntriesUnsafe(searchText) {
         });
     }
 
-    if (rankOnly) {
-        console.warn(`Worlds Apart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so stage 1 has no cosine. `
+    // Once per load: running without the plugin is a supported configuration, not a per-turn fault.
+    if (rankOnly && !runState.noCosineWarned) {
+        runState.noCosineWarned = true;
+        console.warn(`WorldsApart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so no entry has a cosine. `
             + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
             + 'Check that the server plugin is loaded and that its query is not failing.');
     }
@@ -637,9 +805,9 @@ function reportVectorCandidates(scores, targets, searchText) {
     const rows = [...scores.entries()].sort((a, b) => b[1].score - a[1].score);
     const spread = rows[0][1].score - rows[Math.min(4, rows.length - 1)][1].score;
 
-    console.log(`Worlds Apart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '\u2026' : ''}" (${searchText.length} chars)`);
-    console.log(`Worlds Apart: ${rows.length} entries scored, cosine order, top-5 spread ${spread.toFixed(5)}`);
-    console.log('%cWorlds Apart \u00b7 /wa-query \u2014 every scored entry by cosine, best first', 'font-weight: bold');
+    console.log(`WorldsApart: query "${searchText.slice(0, 80)}${searchText.length > 80 ? '\u2026' : ''}" (${searchText.length} chars)`);
+    console.log(`WorldsApart: ${rows.length} entries scored, cosine order, top-5 spread ${spread.toFixed(5)}`);
+    console.log('%cWorldsApart \u00b7 /wa-query \u2014 every scored entry by cosine, best first', 'font-weight: bold');
     console.table(rows.map(([key, value], index) => ({
         gap: index > 0 ? Number((rows[index - 1][1].score - value.score).toFixed(6)) : null,
         title: byKey.get(key)?.comment,
@@ -649,8 +817,8 @@ function reportVectorCandidates(scores, targets, searchText) {
     })));
 }
 
-/** Retrieval over the chat; returns the vectorized entries that scored. The emit is selectAndActivate's. */
-async function retrieve(chat) {
+/** The similarity query over the chat; returns the vectorized entries it activates. The emit is selectAndActivate's. */
+async function similarityActivations(chat, stop = null) {
     runState.lastScores.clear();
     // Cleared, not just reassigned below: the no-query-text return sits ABOVE that assignment, so a turn with nothing
     // to query on would otherwise leave the PREVIOUS turn's standing for contentTextScores to score BM25 against.
@@ -658,39 +826,40 @@ async function retrieve(chat) {
     runState.lastQueryChat = [];
 
     // One substitution pass serves both the query and the /wa-grade stash: queryMessages must not run twice per generation.
-    const queryChat = query.queryMessages(chat, { depth: settings().messageDepth, substituteParams });
+    // `||`, not `??`: 0 is unset and falls to core's depth, as the keyword window resolves it.
+    const queryChat = query.queryMessages(chat, { depth: settings().messageDepth || world_info_depth, substituteParams });
     const rawText = query.joinQueryMessages(queryChat);
 
     if (!rawText) {
-        console.log('Worlds Apart: no query text, skipping retrieval');
+        dbg('WorldsApart: no query text, skipping the similarity query');
         return [];
     }
 
     const searchText = rawText;
-    console.log(`Worlds Apart: query is ${searchText.length} chars from ${settings().messageDepth} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
+    dbg(`WorldsApart: query is ${searchText.length} chars from ${queryChat.length} message(s), matched against ~${settings().chunkSize}-char entry chunks`);
 
     // Before the empties below: a keyword-only scene is still gradeable against the query.
     runState.lastQuery = searchText;
     // ST's own {name, mes} shape, so query.buildQuery can re-run offline at any depth <= this one; not recoverable by splitting `lastQuery`.
     runState.lastQueryChat = queryChat;
 
-    // No entity filter here: stage 1 has no BM25 to spend its terms on (plugin/scoring.mjs).
-    const { targets, scores, retrieved } = await scoreEntries(searchText);
+    // No entity filter here: the similarity query has no BM25 to spend its terms on (plugin/scoring.mjs).
+    const { targets, scores, retrieved } = await scoreEntries(searchText, stop);
 
     if (!targets.length) {
-        console.log('Worlds Apart: no entries with content in the active books, so retrieval has nothing to score');
+        console.log('WorldsApart: no entries with content in the active books, so the similarity query has nothing to score');
         return [];
     }
     if (!retrieved.size) {
-        console.log('Worlds Apart: the query matched no chunk in any collection');
+        dbg('WorldsApart: the query matched no chunk in any collection');
         return [];
     }
 
-    // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for stage 3.
+    // Only a `vectorized` entry is force-activated; every scored entry keeps its cosine for scoring.
     const vectorizedKeys = new Set(targets.filter(x => x.vectorized).map(x => `${x.world}.${x.uid}`));
     const winnerKeys = new Set([...retrieved].filter(k => vectorizedKeys.has(k)));
 
-    // Every scored entry, not the winners: stage 3 looks its cosine up here.
+    // Every scored entry, not the winners: scoring looks its cosine up here.
     for (const [key, value] of scores) {
         runState.lastScores.set(key, value.score);
     }
@@ -698,20 +867,30 @@ async function retrieve(chat) {
     return targets.filter(x => winnerKeys.has(`${x.world}.${x.uid}`));
 }
 
+/** Sets this scan's match scope from the macros the entries' keys carry, evaluated now, and the wordBoundary setting, keeping the
+ *  scope in use when it already holds every value. */
+function applyMacros(entries) {
+    const keys = entries.flatMap(e => [...(e.key ?? []), ...(e.keysecondary ?? []), ...(e.waKeys ?? []), ...(e.waSecondary ?? [])]);
+    runState.lastMacros = macroMap(keys, substituteParams);
+    const boundary = settings().wordBoundary, held = runState.matchScope;
+    const covers = held && held.boundary === boundary && Object.entries(runState.lastMacros).every(([tok, v]) => held.macros[tok] === v);
+    if (!covers) runState.matchScope = createScanScope({ macros: runState.lastMacros, boundary });
+}
+
 /** The entries WA's own matcher activates over its window; candidacy and the verdict live in matcher.mjs activationAdds. */
 async function keywordActivations(chat) {
     const candidates = await getSortedEntries();
-
-    // Live keys: waOwnsScan is false during this fetch, so onEntriesLoaded does not blank them. The SCAN_DONE feed rematches on these.
-    runState.waCandidates = candidates;
-
     const { windowFor } = await scanWindowFor(chat);
 
+    applyMacros(candidates);
+    // Live keys: waOwnsScan is false during this fetch, so onEntriesLoaded does not blank them. The SCAN_DONE feed rematches on these.
+    // After the scope: the feed matches in it, so a failure before this leaves the feed nothing to run.
+    runState.waCandidates = candidates;
     // Register every key up front, secondaries included (K13): a first-seen key mid-loop rebuilds the automaton and drops every cached scan.
     registerKeys(candidates.flatMap(e => {
         const keys = e.disable ? [] : matcher.usableKeys(e.key);
         return keys.length ? [...keys, ...matcher.secondaryKeys(e)] : [];
-    }));
+    }), runState.matchScope);
 
     return matcher.activationAdds(candidates, windowFor, activationOpts());
 }
@@ -723,30 +902,31 @@ const reportedFailures = new Set();
  * Toasts a generation-time failure with the top stack frame — once per distinct message per session, or, when `loud`,
  * on every occurrence and stuck until dismissed.
  * @param {string} consequence What the user will observe this turn
- * @param {'error'|'warning'} [severity]
+ * @param {Error & {explanation?: string[]}} error `explanation`, translated lines, replaces the message and the stack frame
+ * @param {{severity?: 'error'|'warning', loud?: boolean}} [opts]
  */
-function reportFailure(stage, consequence, error, severity = 'error', loud = false) {
-    console.error(`Worlds Apart: ${stage} — ${consequence}`, error);
+function reportFailure(stage, consequence, error, { severity = 'error', loud = false } = {}) {
+    console.error(`WorldsApart: ${stage} — ${consequence}`, error);
     const cause = String(error?.message ?? error);
-    const key = `${stage}␟${cause}`;
+    const key = `${stage}${US}${cause}`;
     if (!loud && reportedFailures.has(key)) return;
     reportedFailures.add(key);
     const frame = String(error?.stack ?? '').split('\n')[1]?.trim().replace(/^at\s+/, '');
     // ST sets toastr.options.escapeHtml = true globally, which collapses `\n`; opt out per toast and escape by hand.
     toastr[severity](
-        [escapeHtml(consequence),
-            escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : ''),
-            t`See the browser console for the full trace.`].join('<br><br>'),
-        `Worlds Apart: ${stage}`,
+        `${escapeHtml(consequence)}<br><br>` + (error?.explanation
+            ? error.explanation.map(escapeHtml).join('<br>')
+            : escapeHtml(cause) + (frame ? `<br>&nbsp;&nbsp;at ${escapeHtml(frame)}` : '') + '<br>' + t`See the browser console for the full trace.`),
+        `WorldsApart: ${stage}`,
         { timeOut: loud ? 0 : 20000, extendedTimeOut: loud ? 0 : 15000, escapeHtml: false, closeButton: true, tapToDismiss: !loud },
     );
 }
 
-/** Stages 1 and 2: retrieval winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
- *  `token` and `abort` are the generation's identity: after every await a superseded or aborted generation bails
- *  rather than write scan state or emit activations into whoever's prompt is now current. */
-async function selectAndActivate(chat, token, abort) {
-    const superseded = () => token !== runState.scanToken || Boolean(abort?.());
+/** Activation: the similarity route's winners ∪ keyword adds, one FORCE_ACTIVATE emit. The two routes fail independently.
+ *  `token` is the generation's identity: after every await a superseded generation bails rather than write scan
+ *  state or emit activations into whoever's prompt is now current. A stop bumps the token, so it supersedes too. */
+async function selectAndActivate(chat, token, stop = null) {
+    const superseded = () => token !== runState.scanToken;
 
     chat = dropChatTags(chat);
 
@@ -763,14 +943,14 @@ async function selectAndActivate(chat, token, abort) {
 
     let winners = [];
     try {
-        winners = await retrieve(chat);
+        winners = await similarityActivations(chat, stop);
     } catch (error) {
-        reportFailure(t`retrieval failed`,
-            t`No vectorized entry is activated this turn, so an entry with no keys is absent from the prompt rather than ranked lower. Every entry loses its cosine, and relevance falls back to the cosine-free fit. Keyword matching and constants are unaffected.`,
-            error);
+        // A Stop is the user's, not a failure: the return below ends the run.
+        if (error?.name !== 'AbortError') reportFailure(t`similarity activation failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
         runState.lastScores.clear();
     }
-    if (superseded()) return;
+    // A generation's Stop also supersedes it; a slash command's Stop only aborts the signal.
+    if (superseded() || stop?.aborted) return;
 
     let adds = [];
     try {
@@ -778,7 +958,7 @@ async function selectAndActivate(chat, token, abort) {
     } catch (error) {
         // Total: waOwnsScan is set below regardless, so core does not match either.
         reportFailure(t`keyword activation failed`,
-            t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only retrieved, constant and sticky entries.`,
+            t`No entry will activate by key this turn. WA has taken over key matching, so SillyTavern will not match them either — the prompt has only similarity-activated, constant and sticky entries.`,
             error);
     }
     if (superseded()) return;
@@ -788,7 +968,7 @@ async function selectAndActivate(chat, token, abort) {
 
     const activated = [...winners, ...union];
     if (activated.length) {
-        console.log(`Worlds Apart: activating ${winners.length} retrieved + ${union.length} keyword-matched entries`);
+        dbg(`WorldsApart: activating ${winners.length} entries by similarity + ${union.length} by key`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
     }
     if (superseded()) return;
@@ -799,36 +979,89 @@ async function selectAndActivate(chat, token, abort) {
     runState.waOwnsScan = true;
 }
 
-// Hooks
+/** The WA run slot: one run at a time, from a generation's interceptor to its armed scan's last loop. */
+const runs = createRuns({
+    nextToken: () => ++runState.scanToken,
+    onSupersede: why => {
+        // Over before its scan: nothing ran under core, so there is nothing to announce.
+        if (why === 'aborted') { console.info('WorldsApart: the previous generation was aborted before its World Info scan — superseding it'); return; }
+        const had = { unscanned: `started its World Info scan ${RUN_WAIT_MS / 1000} s after it armed`, unfinished: `finished its World Info scan ${RUN_WAIT_MS / 1000} s after it started`, unarmed: `armed within ${ARM_WAIT_MS / 1000} s` }[why];
+        console.warn(`WorldsApart: the previous generation had not ${had} — superseding it`);
+        toastr.warning(t`A new generation started before the previous one finished its World Info scan, and WorldsApart moved to the new one. If the previous one is still running, either may use SillyTavern's own World Info this turn.`, 'WorldsApart', { timeOut: 15000 });
+    },
+});
 
-/** Generation interceptor. ST calls it (chat, contextSize, abort, type): abort() reads the generation's AbortSignal.
- *  Quiet generations scan like visible ones; ST skips interceptors on its dry runs. */
-async function intercept(chat, _maxContext, abort, type) {
-    // A quiet generation never displaces one the user has in flight: it stands down and runs core-native.
-    // is_send_press is the send lock the UI paths hold; Generate('quiet') sets it only later, at the prompt build.
-    if (type === 'quiet' && is_send_press) {
-        return;
-    }
-
-    // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
-    const token = ++runState.scanToken;
-    runState.scanChat = chat.slice();
-    // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
-    runState.waOwnsScan = false;
-
-    if (!settings().enabled) {
-        return;
-    }
-
-    await selectAndActivate(chat, token, abort);
+/** Ends the run `token` names, if it is still the current one, disarming it: no later scan ranks under an ended run. */
+function endRun(token) {
+    if (runState.armedToken === token) runState.armedToken = null;
+    runs.end(token);
 }
 
+/** After selectAndActivate: an armed run lasts until its scan's last loop; one that did not arm ends now. */
+function settleRun(token) {
+    if (runState.armedToken === token) runs.armed(token);
+    else endRun(token);
+}
+
+// Hooks
+
+/** One AbortController per interceptor in flight; GENERATION_STOPPED aborts them all, as Stop stops every generation. */
+const liveStops = new Set();
+
+/** Generation interceptor. ST calls it (chat, contextSize, abort, type); `abort` is a setter that CANCELS the
+ *  generation, never a reader, so it is not taken. Quiet generations scan like visible ones; ST skips its dry runs. */
+async function intercept(chat, _maxContext, _abort, type) {
+    const enabled = settings().enabled;
+    // Registered before the wait below, so a Stop pressed while this generation waits on the run in progress reaches it too.
+    const stop = new AbortController();
+    liveStops.add(stop);
+    try {
+        // Before anything is written: a waiting generation must not touch the state of the run it waits on. A quiet generation
+        // takes ST's lock only after its interceptors, so a lock held now is another generation's.
+        const token = enabled ? await runs.take(type !== 'quiet' && isGenerating()) : ++runState.scanToken;
+        runState.quietScan = type === 'quiet';
+        // Before the gates: this chat IS core's scan haystack (regex applied, files appended). Sliced so ST's later in-place splices cannot shift it.
+        runState.scanChat = chat.slice();
+        // Before the gate: a takeover flag leaked from an aborted scan would blank a disabled generation's keys.
+        runState.waOwnsScan = false;
+
+        if (!enabled) {
+            return;
+        }
+
+        try {
+            if (!stop.signal.aborted) await selectAndActivate(chat, token, stop.signal);
+        } finally {
+            settleRun(token);
+        }
+    } finally {
+        liveStops.delete(stop);
+    }
+}
+
+
+/** The chat length on core's clock, which its delay and timed effects read: the scan haystack, hidden messages out and a
+ *  swiped reply popped. Decorators and latches read it too. */
+const scanLength = () => (runState.scanChat ?? getContext().chat ?? []).length;
+
+/** Sets the `@@reverse_depth` depth onEntriesLoaded withheld, on the entries core activated; runs every scan loop. */
+function applyReverseDepth(args) {
+    const chatLength = scanLength();
+    for (const entry of args?.activated?.entries?.values?.() ?? []) {
+        if (entry?.waReverseDepth !== undefined) entry.depth = chatLength - entry.waReverseDepth;
+    }
+}
 
 /** Blinds core's keyword matcher on a scan WA owns — keys stashed on `waKeys`/`waSecondary`, then blanked — and takes
  *  the budget off core. REASSIGN `key`, never mutate it: the array is loadWorldInfo's cache. */
 function onEntriesLoaded(loaded) {
     if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
+
+    // The armed run's scan has started: a newcomer now waits for it to finish rather than superseding it.
+    if (runState.waOwnsScan && !runState.generationIsDryRun && runState.armedToken !== null) runs.scanning(runState.armedToken);
+    // Core's scan returns before any WORLDINFO_SCAN_DONE when it loads no entries, so the run it belongs to ends here.
+    if (!entries.length && runState.waOwnsScan && !runState.generationIsDryRun) { endRun(runState.armedToken); runState.waOwnsScan = false; }
 
     showExemptCount(entries);
 
@@ -838,15 +1071,19 @@ function onEntriesLoaded(loaded) {
 
     // Gated: with WA off the install behaves as it would with WA not installed.
     if (settings().enabled) {
-        const chatLength = (runState.scanChat ?? getContext().chat ?? []).length;
+        const chatLength = scanLength();
         // Before the stash below, so waSecondary captures the desugared keysecondary.
         for (const entry of entries) {
-            if (entry) Object.assign(entry, matcher.decoratorFields(entry, { chatLength }));
+            if (!entry) continue;
+            const patch = matcher.decoratorFields(entry, { chatLength });
+            // Core hashes the entry after this hook and keys timed effects on the hash: a depth that moves with the chat is set at SCAN_DONE.
+            if (patch.waReverseDepth !== undefined) delete patch.depth;
+            Object.assign(entry, patch);
         }
     }
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
-    if (settings().enabled && !runState.generationIsDryRun) {
+    if (settings().enabled && runState.waOwnsScan && !runState.generationIsDryRun) {
         for (const entry of entries) {
             entry.waIgnoreBudget = Boolean(entry.ignoreBudget);   // always set, so authorIgnoreBudget's `??` falls through only on the ungated paths
             entry.ignoreBudget = true;
@@ -857,7 +1094,7 @@ function onEntriesLoaded(loaded) {
         return;
     }
 
-    // Stashed, not deleted, and secondaries too: stage 3 scores the authored keys and gates on the authored condition.
+    // Stashed, not deleted, and secondaries too: scoring scores the authored keys and gates on the authored condition.
     if (runState.waOwnsScan && !runState.generationIsDryRun) {
         for (const entry of entries) {
             if (!entry || entry.waKeys) continue;   // already stashed and blanked this load
@@ -994,6 +1231,7 @@ async function scanWindowFor(chat) {
 
 /** Match defaults for both activation passes — live settings and ST globals, so it stays a function read at call time. */
 const activationOpts = () => ({
+    scope: runState.matchScope,
     messageDepth: settings().messageDepth,
     fallbackDepth: world_info_depth,
     caseSensitiveDefault: world_info_case_sensitive,
@@ -1004,14 +1242,14 @@ const activationOpts = () => ({
     // IS the greeting index; a card with no alternates has no swipes array.
     greetingIndex: getContext().chat?.[0]?.swipe_id ?? 0,
     personaName: name1,
-    chatLength: (runState.scanChat ?? []).length,
+    chatLength: scanLength(),
     fired: firedLatches(),
 });
 
 /** Entries that have fired a latch decorator in this chat. */
 function firedLatches() {
     const ctx = getContext();
-    return matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, ctx.chat?.length ?? 0);
+    return matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, scanLength());
 }
 
 /** Records the activated entries carrying a latch decorator. */
@@ -1022,8 +1260,9 @@ function recordLatches(entries) {
     if (!meta) return;
     const fired = { ...(meta[matcher.WA_METADATA_KEY]?.fired ?? {}) };
     const before = Object.keys(fired).length;
-    // The chat length WHEN it fired, so any later moment is a filter and a rewind past it un-latches.
-    const at = ctx.chat?.length ?? 0;
+    // The first scan length after this turn: a swipe, a regenerate or a rewind reads a length below it and un-latches, as core's
+    // timed effects do on a chat that has not advanced.
+    const at = scanLength() + 1;
     for (const entry of entries) {
         const key = matcher.latchKey(entry);
         if (matcher.hasLatch(entry) && !(key in fired)) fired[key] = at;
@@ -1051,6 +1290,7 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
     repeatR: settings().repeatR,
     caseSensitiveDefault: world_info_case_sensitive,
     wholeWordsDefault: world_info_match_whole_words,
+    scope: runState.matchScope,
 });
 
 /** Stable per-character (or per-group) key for the priority order; null with nothing selected. */
@@ -1168,7 +1408,7 @@ async function feedScanLoop(args) {
             runState.waMatched.add(`${e.world}.${e.uid}`);
             e.waTriggerDepth = runState.waRecursionDepth;
         }
-        console.log(`Worlds Apart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
+        dbg(`WorldsApart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
     }
 }
@@ -1183,7 +1423,7 @@ function recordCoreSet(activated, args, how) {
             key, uid: entry.uid, world: entry.world,
             title: entry.comment || entry.key?.[0] || `uid ${entry.uid}`,
             order: entry.waOriginalOrder ?? entry.order ?? 0,
-            constant: Boolean(entry.constant),
+            constant: layout.isConstant(entry),
         })),
     };
 }
@@ -1203,7 +1443,7 @@ async function coreSelection() {
         // A copy: an interceptor may rearrange what it is handed.
         if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
             try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
-            catch (error) { console.warn('Worlds Apart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
+            catch (error) { console.warn('WorldsApart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
         }
         // Strings, as `checkWorldInfo` takes them; `vectors_rearrangeChat` above wanted message objects.
         core = await checkWorldInfo(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
@@ -1214,11 +1454,18 @@ async function coreSelection() {
 }
 
 
+/** Whether this scan's map is the one that ships: core's loop ends on a falsy `next`, EXCEPT on the
+ *  max-recursion-steps break, which ends it with `next` still set. */
+function isLastLoop(args) {
+    return !args?.state?.next
+        || (world_info_max_recursion_steps > 0 && world_info_max_recursion_steps <= (args?.state?.loopCount ?? 0));
+}
+
 async function onScanDone(args) {
     const activated = args?.activated?.entries;
 
     // Silent except under /wa-dry, which otherwise could not tell an empty selection from a declined scan.
-    const skip = reason => { if (runState.dryRunInProgress) console.warn(`Worlds Apart: did not rank this scan — ${reason}.`); };
+    const skip = reason => { if (runState.dryRunInProgress) console.warn(`WorldsApart: did not rank this scan — ${reason}.`); };
 
     if (!(activated instanceof Map)) {
         skip('the scan carried no activation map');
@@ -1230,7 +1477,8 @@ async function onScanDone(args) {
         return;
     }
     if (runState.generationIsDryRun) {
-        skip('it is an ST dry generation');
+        // skip() prints only during /wa-dry, so a reader of this line ran one that SillyTavern's own dry generation overlapped.
+        skip('SillyTavern ran its own dry generation during this /wa-dry, as it does on load and on opening a chat; run /wa-dry again in a few seconds');
         // Recorded, never ranked: ranking a keyword-only scan would overwrite the panel and the /wa-dry state.
         recordCoreSet(activated, args, 'ST dry run — keyword route only, interceptors skipped');
         return;
@@ -1249,25 +1497,40 @@ async function onScanDone(args) {
     try {
         await rankOwnedScan(activated, args, skip);
     } catch (error) {
-        delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
+        // Last loop only, as every other delete is: core re-activates what it no longer holds, and asks for one more loop.
+        if (isLastLoop(args)) delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
         reportFailure(t`activation error`,
             t`Only constant and sticky entries were included. Try again.`,
-            error, 'error', true);
+            error, { loud: true });
+    } finally {
+        // After rankOwnedScan, which may end the loop by clearing `next`. The next scan to rank must arm afresh.
+        if (isLastLoop(args)) {
+            endRun(runState.armedToken);
+            runState.armedToken = null;
+        }
     }
 }
 
-/** The owned half of a scan: the recursion feed, then scoring (stage 3), the relevance cut (4) and the budget (5). Throws are the caller's. */
+/** The owned half of a scan: the recursion feed on every loop, then — on the last one — scoring, the
+ *  relevance cut and the budget. Throws are the caller's. */
 async function rankOwnedScan(activated, args, skip) {
+    // Recursion off, `RECURSION` is only core's forced delay-level pass (upstream-st.md #19). Before isLastLoop reads `next`.
+    if (!world_info_recursive && args?.state?.next === scan_state.RECURSION) args.state.next = scan_state.NONE;
+
     // Before the size-0 return: a pass that activated nothing can still be followed by a min-activations widening.
     if (runState.waOwnsScan && Array.isArray(runState.waCandidates)) {
         await feedScanLoop(args);
     }
 
+    // Only the feed above is a per-loop job. Scoring, selection and delivery write what the last loop writes again — and core reads
+    // `order` back in its inclusion-group prio sort, so the rewrite must not stand while the scan is still running.
+    if (!isLastLoop(args)) return;
+
     if (activated.size === 0) {
         skip('core activated nothing');
         runState.lastPromptOrder = [];
         runState.lastLayoutOrder = [];   // only written past this return, so without it the capture reads the PREVIOUS scan's population
-        if (!args?.state?.next) renderDeliveryPanel([]);
+        if (!runState.quietScan) renderDeliveryPanel([]);
         return;
     }
 
@@ -1283,7 +1546,7 @@ async function rankOwnedScan(activated, args, skip) {
         if (postDates(entry, at)) { activated.delete(key); postDated++; }
     }
     if (postDated) {
-        console.log(`Worlds Apart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
+        dbg(`WorldsApart: hid ${postDated} entr(ies) summarising messages after this point in the chat (dropUnavailable)`);
     }
 
     const items = [...activated.entries()].map(([key, entry]) => {
@@ -1314,7 +1577,7 @@ async function rankOwnedScan(activated, args, skip) {
         runState.lastSources = sources;
         windowFor = built.windowFor;
         // Keyword scoring only: the buffer is text WA injected, so it must not enter the window properNouns is counted over.
-        // excludeRecursion honoured here because core's gate is not in this loop — stage 2 inherits it, stage 3 must not.
+        // excludeRecursion honoured here because core's gate is not in this loop — activation inherits it, scoring must not.
         // An entry that fed the buffer must not match its OWN content there: that is the entry naming itself, not the
         // conversation naming it, and core never self-matches because it activates an entry once.
         const recursionTexts = runState.waRecursionTexts ?? [];
@@ -1325,18 +1588,19 @@ async function rankOwnedScan(activated, args, skip) {
                 : windowFor(depth, entry);
         };
 
-        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (docs/matching-architecture.md, *Stage 3 — Scoring*).
+        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (docs/matching-architecture.md, *Scoring*).
         const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
         // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
         const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
             ? { ...entry, keysecondary: entry.waSecondary }
             : entry;
 
+        applyMacros(items.map(it => it.entry));
         // Registered before the loop, secondaries too, so the automaton is built once.
         registerKeys(items.flatMap(it => {
             const keys = scoreKeysOf(it.entry);
             return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
-        }));
+        }), runState.matchScope);
 
         for (const item of items) {
             // Per-entry scanDepth wins, as in core. Nullish, not `||`: 0 is core's authored "match nothing from chat".
@@ -1344,14 +1608,15 @@ async function rankOwnedScan(activated, args, skip) {
             const scanText = keywordWindowFor(depth, item.entry);
             const scoreKeys = scoreKeysOf(item.entry);
             const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
-            // An entry reached at recursion pass d did not have the conversation name it (docs/matching-architecture.md, *Stage 3 — Scoring*).
+            // An entry reached at recursion pass d did not have the conversation name it (docs/matching-architecture.md, *Scoring*).
             item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
+            item.logWeight = scored.logWeight;
             // Verbose runs only: where each key matched, for /wa-grade's why column. Flags mirror the keywordScore call above exactly.
             item.keywordWhy = runState.verboseRun
                 ? scored.hits.slice(0, 4).map(h => {
                     // Every place it landed; `excerpt` is contexts[0], not a second call, so the line and the hover cannot disagree.
-                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords);
+                    const contexts = matcher.keyExcerpts(h.key, scanText, item.entry.caseSensitive, item.entry.matchWholeWords, 28, 20, runState.matchScope);
                     return { key: h.key, count: h.count, score: h.score, excerpt: contexts[0] ?? null, contexts };
                 })
                 : undefined;
@@ -1360,27 +1625,27 @@ async function rankOwnedScan(activated, args, skip) {
         }
 
         // The messages, not the joined window, so a reader can rebuild any window: `scanWindow(scanChat, {depth})`.
-        runState.lastScanChat = chat.slice(-Math.max(1, settings().messageDepth))
+        runState.lastScanChat = chat.slice(-(settings().messageDepth || world_info_depth))
             .map(x => ({ name: String(x?.name ?? ''), mes: String(x?.mes ?? '') }));
 
         if (runState.verboseRun) {
-            console.log('%cWorlds Apart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
+            console.log('%cWorldsApart · keyword scan windows — the exact text WA searched, by depth', 'font-weight: bold');
             console.log(Object.fromEntries([...windowFor.windows]));
-            console.log('%cWorlds Apart · recursion buffer — the entry contents stage 3 appended to every window', 'font-weight: bold');
+            console.log('%cWorldsApart · recursion buffer — the entry contents scoring appended to every window', 'font-weight: bold');
             console.log(runState.waRecursionTexts);
         }
     }
 
     await scoreRelevanceColumn(items, windowFor, scanEntries);
 
-    // Ordering the dynamic block by anything but E[credit] breaks the prefix property applyBudget assumes.
+    // Ordering the dynamic block by anything but the weighted credit the cut reads breaks the prefix property applyBudget assumes.
     const priorityList = charPriority() ?? [];
     const priorityMode = settings().worldPriorityMode;
     const { sticky, constant, promoted, results: dynamicRows, compare, bookTierOf } = layout.layoutOrder(items, {
         // A latched @@keep_activate_after_match is sticky by another name, so it is durable too: hoisted past
         // the relevance cut rather than scored and cut like an ordinary activation.
         isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry))
-            || matcher.latchActive(entry, firedLatches(), getContext().chat?.length ?? 0),
+            || matcher.latchActive(entry, firedLatches(), scanLength()),
         isPromoted: entry => Boolean(entry?.waPromote),
         priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
         priorityMode,
@@ -1393,11 +1658,10 @@ async function rankOwnedScan(activated, args, skip) {
     // Before the cuts, so a capture holds every row this pass judged; survivors and losers cannot be re-interleaved afterwards.
     runState.lastLayoutOrder = [...sticky, ...constant, ...promoted, ...results];
 
-    // On the last loop only: the population grows with each recursion loop, and cutting once it is complete is what
-    // keeps the delivered set independent of recursion depth.
+    // Past the last-loop return above: cutting once the population is complete is what keeps the delivered set
+    // independent of recursion depth.
     const cutoffs = relevanceModel.value ?? {};
-    const { cut: relevanceCutRows } = args?.state?.next ? { cut: [] } : selection.relevanceCut(results, {
-        scoreOf: it => it.eCredit,
+    const { cut: relevanceCutRows } = selection.relevanceCut(results, {
         cutoffOf: it => (cutoffs[isMemory(it.entry) ? 'memory' : 'reference'] ? settings().relevanceCutoff : NaN),
     });
     const cutByRelevance = new Set(relevanceCutRows);
@@ -1407,7 +1671,7 @@ async function rankOwnedScan(activated, args, skip) {
         activated.delete(it.key);
     }
     if (relevanceCutRows.length) {
-        console.log(`Worlds Apart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
+        dbg(`WorldsApart: relevance cut dropped ${relevanceCutRows.length} of ${relevanceCutRows.length + results.length} dynamic entries`
             + (promoted.length ? ` (${promoted.length} promoted entr${promoted.length === 1 ? 'y was' : 'ies were'} exempt)` : ''));
     }
 
@@ -1420,14 +1684,10 @@ async function rankOwnedScan(activated, args, skip) {
     const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w), w.cap]).filter(([n]) => n));
 
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
-        const dynamicSet = new Set(results);
-        const promotedSet = new Set(promoted);
         const { survivors, tokens, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
             walk,
-            isDynamic: item => dynamicSet.has(item),
-            // Capacity's population is dynamic plus promoted: promotion exempts from relevance, not from the caps.
-            isCapped: item => dynamicSet.has(item) || promotedSet.has(item),
-            // The tag, not retrieval provenance.
+            ...delivery.budgetRoles({ promoted, results }),
+            // The tag, not how the row activated.
             isVector: item => Boolean(item.entry?.vectorized),
             maxTokens,
             maxTotal,
@@ -1454,7 +1714,7 @@ async function rankOwnedScan(activated, args, skip) {
                 maxTokens > 0 ? `tokens ${budgeted}/${maxTokens} budgeted${inPrompt !== budgeted ? `, ${inPrompt - budgeted} exempt, ${inPrompt} in prompt` : ''}` : null,
             ].filter(Boolean).join(', ');
             const exempt = survivors.size - counted;
-            console.log(`Worlds Apart: budget dropped ${dropped} entries — ${caps}${exempt ? `, plus ${exempt} ignoreBudget (uncapped)` : ''}, ${survivors.size} in prompt`);
+            dbg(`WorldsApart: budget dropped ${dropped} entries — ${caps}${exempt ? `, plus ${exempt} ignoreBudget (uncapped)` : ''}, ${survivors.size} in prompt`);
         }
 
         runState.lastSkipped = skipped;
@@ -1487,8 +1747,8 @@ async function rankOwnedScan(activated, args, skip) {
     runState.lastPromptOrder = promptOrder.map(item => ({ item, block: blockOf.get(item) ?? 'dynamic' }));
     runState.lastSkipped = runState.lastSkipped.map(x => ({ ...x, block: blockOf.get(x.item) ?? 'dynamic' }));
 
-    // Only the last loop (no further state) is the real prompt — recording earlier would latch entries a later loop still cuts.
-    if (!args?.state?.next) {
+    // A quiet generation is not a chat turn: nothing it activated has fired in the chat, and the panel shows the last turn.
+    if (!runState.quietScan) {
         recordLatches(promptOrder.map(item => item.entry));
         renderDeliveryPanel(runState.lastPromptOrder);
     }
@@ -1514,13 +1774,15 @@ async function rankOwnedScan(activated, args, skip) {
             block: blockOf.get(x) ?? 'dynamic',
             sticky: x.entry.sticky || 0,
             score: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(5)) : null,
+            // The term weights' odds multiplier: the layout and the cut read `score` scaled by it (layout.mjs weightedCredit).
+            weight: x.logWeight ? Number(Math.exp(x.logWeight).toFixed(4)) : 1,
             uid: x.entry.uid,
             wiOrder: x.entry.waOriginalOrder,
             cosine: x.score !== undefined ? Number(x.score.toFixed(5)) : null,
-            pn: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
-            dens: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
-            // Gated as cosine is: an entry with no chunks in the collection has no text score, and the scorer's 0 is a default.
-            text: x.score !== undefined && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
+            properNouns: Number.isFinite(x.properNouns) ? Number(x.properNouns.toFixed(3)) : null,
+            density: Number.isFinite(x.density) ? Number(x.density.toFixed(2)) : null,
+            // Gated on eligibility, not on the cosine: the text score is lexical, so it is present whenever the entry has content, plugin or not.
+            text: x.textEligible && Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(2)) : null,
             // Gated on eligibility, not the value: 0 is both a miss and no scorable keys.
             keys: x.keysEligible === false ? null : (Number.isFinite(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null),
             tokens: tokens[i],
@@ -1535,20 +1797,32 @@ async function rankOwnedScan(activated, args, skip) {
         runState.lastCandidates = rows.map((row, i) => ({ ...row, book: population[i].entry.world, why: population[i].keywordWhy }));
         runState.lastCandidateEntries = population.map(x => x.entry);
 
-        console.log('%cWorlds Apart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit]; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
+        console.log('%cWorldsApart · selection candidates — every activated entry, its signals and what cut it. `score` is E[credit], its odds times `weight` are what the cut reads; a cut row with no cap named lost the relevance cut', 'font-weight: bold');
         console.table(rows);
     }
 
-    // Final loop only, and never on ST's dry runs, which fire on every chat load.
-    if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun && !args?.state?.next) {
+    // Never on ST's dry runs, which fire on every chat load.
+    if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun) {
         await reportLayout(false, maxTokens > 0);
     }
 }
 
 // Dry run
 
-/** Runs retrieval and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED. */
-async function dryRun(verbose = false) {
+/** A slash command's Stop as an AbortSignal, or null outside a command. `command` is the callback's `_abortController`, ST's own event target. */
+function commandStop(command) {
+    if (typeof command?.addEventListener !== 'function') return null;
+    const stop = new AbortController();
+    if (command.signal?.aborted) stop.abort();
+    else command.addEventListener('abort', () => stop.abort());
+    return stop.signal;
+}
+
+/** Runs activation and a full World Info scan without generating. Safe to repeat: a dry-run scan arms no timed effect and emits no WORLD_INFO_ACTIVATED.
+ *  @param {object} [command] the slash command's `_abortController`: its Stop ends the run before the scan
+ *  @returns {Promise<string>} '' for the slash command; a stopped run returns before reporting anything */
+async function dryRun(verbose = false, command = null) {
+    const stop = commandStop(command);
     const context = getContext();
     // is_system first: ST filters them out of `coreChat` before any interceptor, so production never sees them (G9).
     const rawChat = context.chat ?? [];
@@ -1556,21 +1830,23 @@ async function dryRun(verbose = false) {
 
     // The only gate on this path: with WA off a dry run would half-run, force-activating into a scan WA does not own.
     if (!settings().enabled) {
-        toastr.warning(t`Worlds Apart is disabled — turn it on to run a dry run.`, 'Worlds Apart');
+        toastr.warning(t`WorldsApart is disabled — turn it on to run a dry run.`, 'WorldsApart');
         return '';
     }
 
     if (!chat.length) {
-        toastr.warning(rawChat.length ? t`Every message in this chat is hidden.` : t`No chat to scan.`, 'Worlds Apart');
+        toastr.warning(rawChat.length ? t`Every message in this chat is hidden.` : t`No chat to scan.`, 'WorldsApart');
         return '';
     }
 
-    console.log(`%cWorlds Apart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
+    console.log(`%cWorldsApart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
     // Version and fingerprints stay out of paramSnapshot: a bundle carries them in SHARED_FIELDS, and recording them twice would let the two disagree.
-    console.log(`Worlds Apart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
+    console.log(`WorldsApart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
     const identity = await extensionIdentity();
-    if (identity) console.log(`Worlds Apart: ${identity}`);
+    if (identity) console.log(`WorldsApart: ${identity}`);
 
+    // Before the flags below, which the run it waits on would read.
+    const token = await runs.take();
     runState.verboseRun = Boolean(verbose);
     runState.dryRunInProgress = true;
     // This scan is not ST's, and nothing else clears the flag: GENERATION_ENDED never fires for a dry Generate.
@@ -1587,11 +1863,15 @@ async function dryRun(verbose = false) {
     runState.lastQueryChat = [];
     runState.lastLayoutOrder = [];
 
-    // retrieve() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
+    // similarityActivations() is inside the try: a throw outside the finally leaves verboseRun/dryRunInProgress stuck true.
     try {
-        // The dry run takes the next token: an in-flight generation's continuations stand down rather than interleave.
-        const token = ++runState.scanToken;
-        await selectAndActivate(chat, token);
+        runState.quietScan = false;
+        if (!stop?.aborted) await selectAndActivate(chat, token, stop);
+        settleRun(token);
+        if (stop?.aborted) {
+            console.info('WorldsApart: dry run stopped before its scan');
+            return '';
+        }
 
         await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
@@ -1601,6 +1881,7 @@ async function dryRun(verbose = false) {
         runState.dryRunInProgress = false;
         // An exception before the scan's last loop would otherwise leave the takeover flag armed.
         runState.waOwnsScan = false;
+        endRun(token);
     }
 
     return '';
@@ -1661,6 +1942,7 @@ function whySelected(item, block) {
         Number.isFinite(item.score) ? `vec ${item.score.toFixed(3)}` : null,
         item.textScore ? `text ${item.textScore.toFixed(2)}` : null,
         item.keywordScore ? `keys ${item.keywordScore.toFixed(2)}` : null,
+        item.logWeight ? `weight ×${Math.exp(item.logWeight).toFixed(2)}` : null,
     ].filter(Boolean);
 
     if (parts.length) {
@@ -1712,7 +1994,7 @@ const POSITION_NAMES = ['before char', 'after char', 'AN top', 'AN bottom', '@de
 /** Prints the last scan's selection in prompt order, grouped by `position` first: core assembles each position into its own block. */
 async function reportLayout(verbose = false, countTokens = true) {
     if (!runState.lastPromptOrder.length) {
-        console.log('Worlds Apart: nothing activated.');
+        console.log('WorldsApart: nothing activated.');
         return;
     }
 
@@ -1735,8 +2017,8 @@ async function reportLayout(verbose = false, countTokens = true) {
             waOrder: entry.order,
             ...(verbose ? {
                 cosine: item.score !== undefined ? Number(item.score.toFixed(5)) : null,
-                text: item.textScore ? Number(item.textScore.toFixed(2)) : null,
-                keys: item.keywordScore ? Number(item.keywordScore.toFixed(2)) : null,
+                text: item.textEligible && Number.isFinite(item.textScore) ? Number(item.textScore.toFixed(2)) : null,
+                keys: item.keysEligible === false ? null : (Number.isFinite(item.keywordScore) ? Number(item.keywordScore.toFixed(2)) : null),
                 // Full precision: a harness run is compared against these to show the runtime and the fit agree.
                 properNouns: Number.isFinite(item.properNouns) ? item.properNouns : null,
                 density: Number.isFinite(item.density) ? item.density : null,
@@ -1759,7 +2041,7 @@ async function reportLayout(verbose = false, countTokens = true) {
     rows.sort((a, b) => a._pos - b._pos || a.waOrder - b.waOrder);
     rows.forEach(row => delete row._pos);
 
-    console.log(`%cWorlds Apart · selected — what reaches the prompt, in prompt order (grouped by position, then order): ${rows.length} entries${countTokens ? `, ${total} World Info tokens` : ''}`, 'font-weight: bold');
+    console.log(`%cWorldsApart · selected — what reaches the prompt, in prompt order (grouped by position, then order): ${rows.length} entries${countTokens ? `, ${total} World Info tokens` : ''}`, 'font-weight: bold');
     console.table(rows);
 
     if (runState.lastSkipped.length) {
@@ -1767,7 +2049,7 @@ async function reportLayout(verbose = false, countTokens = true) {
         const tail = runState.lastSkipped.filter(x => x.tail);
 
         if (nearMiss.length) {
-            console.log(`%cWorlds Apart · skipped (fixable) — budget was still available, so an edit or a bigger cap changes the outcome: ${nearMiss.length} entries`, 'font-weight: bold');
+            console.log(`%cWorldsApart · skipped (fixable) — budget was still available, so an edit or a bigger cap changes the outcome: ${nearMiss.length} entries`, 'font-weight: bold');
             console.table(nearMiss.map(({ item, tokens, blockedBy }) => ({
                 blockedBy: blockedBy.map(x => x.cap).join(' + '),
                 tokens,
@@ -1788,7 +2070,7 @@ async function reportLayout(verbose = false, countTokens = true) {
                 ?.blockedBy.find(y => y.cap === 'tokens')?.remaining;
             const toFitAll = remaining === undefined ? null : Math.max(0, sum - remaining);
 
-            console.log(`%cWorlds Apart · cut (exhausted) — ${caps} used up, nothing here fits: ${tail.length} entries, smallest is ${smallest} tokens, ${sum.toLocaleString()} in total${toFitAll === null ? '' : ` (raise the budget by ${toFitAll.toLocaleString()} to fit them all)`}`, 'font-weight: bold');
+            console.log(`%cWorldsApart · cut (exhausted) — ${caps} used up, nothing here fits: ${tail.length} entries, smallest is ${smallest} tokens, ${sum.toLocaleString()} in total${toFitAll === null ? '' : ` (raise the budget by ${toFitAll.toLocaleString()} to fit them all)`}`, 'font-weight: bold');
             console.table(tail.map(({ item, tokens }) => ({
                 tokens,
                 eCredit: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
@@ -1804,7 +2086,7 @@ async function probeQuery(_named, text) {
     const searchText = String(text ?? '').trim();
 
     if (!searchText) {
-        toastr.warning(t`Provide query text: /wa-query your text here`, 'Worlds Apart');
+        toastr.warning(t`Provide query text: /wa-query your text here`, 'WorldsApart');
         return '';
     }
 
@@ -1812,8 +2094,8 @@ async function probeQuery(_named, text) {
 
     if (!scores.size) {
         console.log(retrieved.size
-            ? `Worlds Apart: ${retrieved.size} entr(ies) came back with no cosine for "${searchText.slice(0, 60)}…" — the no-plugin path answered, so there is no table to print`
-            : `Worlds Apart: the query matched no chunk for "${searchText.slice(0, 60)}…"`);
+            ? `WorldsApart: ${retrieved.size} entr(ies) came back with no cosine for "${searchText.slice(0, 60)}…" — the no-plugin path answered, so there is no table to print`
+            : `WorldsApart: the query matched no chunk for "${searchText.slice(0, 60)}…"`);
         return '';
     }
 
@@ -1838,7 +2120,7 @@ function effectiveTokenBudget() {
 
 const SETTINGS_HTML = `
 <style>
-/* Nested WA sub-sections read as subordinate to the top "Worlds Apart" header: indented, lighter,
+/* Nested WA sub-sections read as subordinate to the top "WorldsApart" header: indented, lighter,
    smaller, with a left rule — so they don't look like their own top-level drawers. */
 .worlds-apart-settings .wa-section { margin-left: 12px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); padding-left: 8px; }
 /* Every item under the top header is indented the same as a section is, so top-level and section items read as one level each. */
@@ -1865,7 +2147,7 @@ const SETTINGS_HTML = `
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b data-i18n="Worlds Apart">Worlds Apart</b>
+            <b data-i18n="WorldsApart">WorldsApart</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -1954,7 +2236,7 @@ const SETTINGS_HTML = `
 
                     <div class="wa-row"><label for="wa_relevance_cutoff"><span data-i18n="Relevance cutoff">Relevance cutoff</span> <span class="fa-solid fa-circle-question note-link-span" title="Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none." data-i18n="[title]Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none."></span></label><input id="wa_relevance_cutoff" type="number" class="text_pole" min="0" max="1" step="0.01"></div>
 
-                    <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Retrieved entries in the prompt." data-i18n="[title]Retrieved entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
+                    <div class="wa-row"><label for="wa_max_entries"><span data-i18n="Vector entry cap">Vector entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Vector entries in the prompt." data-i18n="[title]Vector entries in the prompt."></span></label><input id="wa_max_entries" type="number" class="text_pole" min="1" max="100" step="1"></div>
 
                     <div class="wa-row"><label for="wa_max_dynamic"><span data-i18n="Dynamic entry cap">Dynamic entry cap</span> <span class="fa-solid fa-circle-question note-link-span" title="Vector and keyword entries. 0 = unlimited." data-i18n="[title]Vector and keyword entries. 0 = unlimited."></span></label><input id="wa_max_dynamic" type="number" class="text_pole" min="0" max="500" step="1"></div>
 
@@ -2011,7 +2293,7 @@ const SETTINGS_HTML = `
 
 
                     <label class="checkbox_label" for="wa_debug_log">
-                        <input id="wa_debug_log" type="checkbox"><span data-i18n="Log the selection table on every generation">Log the selection table on every generation</span>
+                        <input id="wa_debug_log" type="checkbox"><span data-i18n="Log what WorldsApart does on every generation">Log what WorldsApart does on every generation</span>
                     </label>
 
                     <label for="wa_rater_id"><span data-i18n="Rater id">Rater id</span> <span class="fa-solid fa-circle-question note-link-span" title="A random anonymous ID your grades are signed with." data-i18n="[title]A random anonymous ID your grades are signed with."></span></label>
@@ -2042,12 +2324,12 @@ function populateProfiles(notify = false) {
     $('#wa_llm_profile').val(stillExists ? selected : '');
 
     if (!stillExists) {
-        console.warn(`Worlds Apart: saved LLM profile "${selected}" no longer exists, falling back to the current API`);
-        toastr.warning(t`Saved LLM profile no longer exists.`, 'Worlds Apart');
+        console.warn(`WorldsApart: saved LLM profile "${selected}" no longer exists, falling back to the current API`);
+        toastr.warning(t`Saved LLM profile no longer exists.`, 'WorldsApart');
     }
 
     if (notify) {
-        toastr.info(t`${profiles.length} profile(s) loaded.`, 'Worlds Apart');
+        toastr.info(t`${profiles.length} profile(s) loaded.`, 'WorldsApart');
     }
 }
 
@@ -2078,7 +2360,7 @@ function bind(selector, key, kind) {
 
 
 
-// The Delivery panel: a bottom-left icon expanding into stage 5's delivered set, in prompt order, from
+// The Delivery panel: a bottom-left icon expanding into the delivered set, in prompt order, from
 // runState.lastPromptOrder.
 let deliveryTrigger = null, deliveryPanel = null;
 function ensureDeliveryPanel() {
@@ -2103,12 +2385,13 @@ function ensureDeliveryPanel() {
 .wa-delivery-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wa-delivery-tokens { flex: 0 0 auto; margin-left: auto; opacity: 0.55; font-variant-numeric: tabular-nums; }
 .wa-delivery-budget { padding: 4px 5px; opacity: 0.7; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
-.wa-delivery-empty { opacity: 0.6; padding: 4px; }`;
+.wa-delivery-empty { opacity: 0.6; padding: 4px; }
+.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }`;
     document.head.append(style);
 
     deliveryTrigger = document.createElement('div');
     deliveryTrigger.className = 'wa-delivery-trigger fa-solid fa-fw fa-book-atlas';
-    deliveryTrigger.title = t`Worlds Apart — delivered this turn`;
+    deliveryTrigger.title = t`WorldsApart — Entries delivered in the most recent turn`;
     deliveryTrigger.dataset.count = '0';
     deliveryPanel = document.createElement('div');
     deliveryPanel.className = 'wa-delivery-panel';
@@ -2128,11 +2411,19 @@ function renderDeliveryPanel(layout) {
     lab.innerHTML = '<span class="wa-delivery-glyph fa-solid fa-flask"></span>'
         + `<span class="wa-delivery-title">${escapeHtml(t`Open the Key Lab`)}</span>`;
     lab.addEventListener('click', () => lorebookStudio(chatBook(), { lab: true }));
+    // While a plugin route has fallen back this load; the route and cause are on the console.
+    const warnRow = () => {
+        if (!runState.pluginFailures.size) return [];
+        const w = document.createElement('div');
+        w.className = 'wa-delivery-warning';
+        w.textContent = t`⚠ Plugin incompatible; ran without it.`;
+        return [w];
+    };
     if (!layout.length) {
         const empty = document.createElement('div');
         empty.className = 'wa-delivery-empty';
         empty.textContent = t`Nothing delivered yet`;
-        deliveryPanel.append(empty, lab);
+        deliveryPanel.append(empty, ...warnRow(), lab);
         return;
     }
     for (const row of layout) {
@@ -2163,16 +2454,64 @@ function renderDeliveryPanel(layout) {
         deliveryPanel.append(el);
     }
     if (budget) {
-        const n = runState.lastSkipped.length;
         const missed = runState.lastSkipped.reduce((a, x) => a + (x.tokens ?? 0), 0);
         const foot = document.createElement('div');
         foot.className = 'wa-delivery-budget';
         // `budgeted`, not `inPrompt`: headroom is what the cap still has, and an exempt entry may not charge it.
-        foot.textContent = t`Token budget: ${budget.inPrompt} delivered, ${Math.max(0, budget.maxTokens - budget.budgeted)} left of ${budget.maxTokens}.`;
-        if (n) foot.textContent += ' ' + (n === 1 ? t`${n} entry skipped, ${missed} tokens not delivered.` : t`${n} entries skipped, ${missed} tokens not delivered.`);
+        const num = x => Number(x).toLocaleString();
+        // Headroom is what the cap still has; `over` is delivery past the cap, which exempt entries can do.
+        const remain = Math.max(0, budget.maxTokens - budget.budgeted), over = Math.max(0, budget.inPrompt - budget.maxTokens);
+        const parts = [remain && t`${num(remain)} remain`, missed && t`${num(missed)} cut`, over && t`${num(over)} over`].filter(Boolean);
+        foot.textContent = t`Budget: ${num(budget.inPrompt)}/${num(budget.maxTokens)} tokens` + (parts.length ? ` (${parts.join(', ')})` : '');
         deliveryPanel.append(foot);
     }
-    deliveryPanel.append(lab);
+    deliveryPanel.append(...warnRow(), lab);
+}
+
+/** ST's `clean` hook (1.19 on): asks which of WA's data to remove, and removes that. ST saves settings and reloads once it returns,
+ *  so a settings block left behind is rebuilt from defaults where WA stays installed. */
+export async function clean() {
+    const inputs = [
+        { id: 'wa_clean_packs', label: t`Downloaded language packs`, defaultState: true },
+        { id: 'wa_clean_vectors', label: t`WorldsApart's vector collections, which are rebuilt when next needed`, defaultState: true },
+        { id: 'wa_clean_settings', label: t`Settings: cutoff, caps, language and display choices`, defaultState: false },
+        { id: 'wa_clean_priority', label: t`Lorebook order and priorities for each character`, defaultState: false },
+        { id: 'wa_clean_curation', label: t`Curation for each lorebook: ignored keys and saved views`, defaultState: false },
+        // The loader is the server's, and only an admin's to remove.
+        ...(isAdmin() && await hasPlugin() ? [{ id: 'wa_clean_plugin', label: t`The server plugin's loader, so the plugin stops loading at the next SillyTavern restart`, defaultState: false }] : []),
+    ];
+    const popup = new Popup(`<h3>${escapeHtml(t`What should WorldsApart remove?`)}</h3><div>${escapeHtml(t`Anything left unticked is kept.`)}</div>`,
+        POPUP_TYPE.CONFIRM, '', { okButton: t`Remove`, cancelButton: t`Cancel`, customInputs: inputs });
+    if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) return;
+    const picked = id => Boolean(popup.inputResults?.get(id));
+
+    let failed = false;
+    const attempt = async (what, fn) => { try { await fn(); } catch (error) { failed = true; console.error(`WorldsApart: clean could not remove ${what}`, error); } };
+    const post = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify(body) }); if (!r.ok) throw new Error(`${r.status} ${url}`); return r; };
+
+    if (picked('wa_clean_packs')) {
+        await attempt('language packs', async () => {
+            // The index names what could have been stored; unreachable, the selected language is the one known.
+            const langs = new Set([...Object.keys(await fetchIndex().catch(() => ({}))), settings().language].filter(l => l && l !== 'en'));
+            for (const lang of langs) await removePack(lang);
+        });
+    }
+    if (picked('wa_clean_vectors')) {
+        await attempt('vector collections', async () => {
+            // With the plugin, every WA collection on disk; without, the ones today's lorebooks hash to.
+            const found = await findOrphanCollections();
+            const ids = found ? [...found.unclaimed, ...found.staleConfig, ...found.live].map(c => c.collectionId) : (world_names ?? []).map(n => `wa_${getStringHash(n)}`);
+            for (const collectionId of new Set(ids)) await post('/api/vector/purge', { collectionId });
+        });
+    }
+    // Before the settings go: the route is the plugin's, and still there until the restart.
+    if (picked('wa_clean_plugin')) await attempt('the server plugin loader', () => post('/api/plugins/worlds-apart/uninstall', {}));
+    const drop = { settings: picked('wa_clean_settings'), priority: picked('wa_clean_priority'), curation: picked('wa_clean_curation') };
+    if (drop.settings || drop.priority || drop.curation) {
+        const kept = cleanedSettings(extension_settings.worldsApart, drop);
+        if (kept) extension_settings.worldsApart = kept; else delete extension_settings.worldsApart;
+    }
+    if (failed) toastr.warning(t`WorldsApart could not remove everything you chose. See the browser console.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
 }
 
 let initialized = false;
@@ -2188,8 +2527,8 @@ export async function init() {
     try {
         await initBody();
     } catch (error) {
-        console.error('Worlds Apart: init failed — the extension is partially active', error);
-        toastr.error(t`Worlds Apart failed to initialize — see the browser console.`, 'Worlds Apart');
+        console.error('WorldsApart: init failed — the extension is partially active', error);
+        toastr.error(t`WorldsApart failed to initialize — see the browser console.`, 'WorldsApart');
     }
 }
 
@@ -2207,16 +2546,14 @@ async function initBody() {
     // Not awaited: an unstored pack is a network fetch with no timeout, and ST awaits each extension's activate hook in
     // turn — blocking here holds up every later extension while the interceptor is already live and the scan hooks are
     // not yet registered. The pack applies when it lands; until then `table()` is the English one.
-    setLanguage(settings().language, { fetchPack, store: packStore }).catch(() => {});
-    // The one place wordBoundary crosses into the matcher, which holds it module-level; re-pushed by the select's handler below.
-    matcher.setBoundaryMode(settings().wordBoundary);
+    loadLanguage().catch(() => {});
 
     $('#extensions_settings').append(SETTINGS_HTML);
 
     updateEmbedInfo();   // refresh on drawer open so it tracks Vector Storage changes made mid-session
     $('#wa_embed_info').closest('.inline-drawer').children('.inline-drawer-toggle').on('click', updateEmbedInfo);
 
-    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="Worlds Apart — Lorebook Studio: manage all lorebooks and entries" data-i18n="[title]Worlds Apart — Lorebook Studio: manage all lorebooks and entries"><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
+    $('#extensionsMenu').append('<div id="wa_studio" class="list-group-item flex-container flexGap5" title="WorldsApart Lorebook Studio: Manage lorebooks, entries, and keys." data-i18n="[title]WorldsApart Lorebook Studio: Manage lorebooks, entries, and keys."><div class="fa-solid fa-book-open extensionsMenuExtensionButton"></div><span data-i18n="WA Lorebook Studio">WA Lorebook Studio</span></div>');
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
@@ -2244,11 +2581,13 @@ async function initBody() {
     if (tierMount) tierMount.append(tierEditor = makeTierEditor(getTierCfg, setTierCfg, () => {}, { omit: ['disabled'] }));
     tierState();
     renderPluginSetup();                     // paints "checking…" then the detected/install state
+    document.addEventListener('wa-plugin-fallback', () => renderPluginSetup());   // the first fallback of the load repaints the alert
     waVersion().then(v => { if (v) document.querySelector('#wa_version').textContent = v; });
     Promise.all([hasPlugin(), computeSourceFingerprint()]).then(() => {
         renderPluginSetup();
         // The settings banner only shows once somebody opens settings, and a drifted plugin answers with stale code meanwhile.
-        if (pluginDrifted()) toastr.warning(t`Server plugin is out of date. Redeploy it and restart SillyTavern.`, 'Worlds Apart', { timeOut: 0, extendedTimeOut: 0 });
+        const advice = pluginAdvice();
+        if (advice && !advice.panelOnly) toastr.warning(advice.text, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
     });
     bind('#wa_debug_log', 'debugLog', 'checked');
     document.querySelector('#wa_find_orphans')?.addEventListener('click', async () => {
@@ -2263,9 +2602,9 @@ async function initBody() {
     bind('#wa_language', 'language', 'string');
     const languageState = () => {
         const tb = table();
-        $('#wa_language_state').text(tb.loaded ? t`${tb.label} — ${tb.zipf.size} words` : t`${tb.lang}: pack not loaded — every word reads rare until it is`);
+        $('#wa_language_state').text(tb.loaded ? t`${tb.label} — ${tb.zipf.size} words` : t`${tb.lang}: pack not loaded — no names are found and every word reads rare until it is`);
     };
-    $('#wa_language').on('change', async () => { await setLanguage(settings().language, { fetchPack, store: packStore }); languageState(); });
+    $('#wa_language').on('change', async () => { await loadLanguage(); languageState(); });
     // The index is read only here, when the panel fills its list; a stored pack the index has moved is refreshed then.
     (async () => {
         const index = await refreshIndex({ fetchIndex, fetchPack, store: packStore });
@@ -2279,7 +2618,6 @@ async function initBody() {
     })();
     bind('#wa_drop_chat_tags', 'dropChatTags', 'string');
     bind('#wa_word_boundary', 'wordBoundary', 'string');
-    $('#wa_word_boundary').on('change', () => matcher.setBoundaryMode(settings().wordBoundary));
     bind('#wa_llm_profile', 'llmProfile', 'string');
     bind('#wa_llm_temp', 'llmTemperature', 'string');
     bind('#wa_max_entries', 'maxVectorEntries', 'number');
@@ -2296,15 +2634,18 @@ async function initBody() {
     bind('#wa_world_priority_mode', 'worldPriorityMode', 'string');
     $('#wa_world_priority_mode').on('change', renderWorldPriority);
     const $wp = $('#wa_world_priority_list');
-    const editField = (field, el) => {
-        const l = charPriority();
-        if (!l) return;
-        l[$(el).closest('.wa-world-row').data('i')][field] = Number($(el).val());
+    const editField = (field, el, ev) => {
+        const cfg = charPriority()?.[$(el).closest('.wa-world-row').data('i')];
+        if (!cfg) return;
+        const raw = String($(el).val()).trim(), n = Number(raw);
+        // As bind(): a cleared box is mid-edit, never a zero, and on commit it snaps back to the value in force.
+        if (!raw || !Number.isFinite(n)) { if (ev.type === 'change') $(el).val(cfg[field] ?? 0); return; }
+        cfg[field] = n;
         saveSettingsDebounced();
     };
-    $wp.on('input change', '.wa-world-weight', function () { editField('weight', this); });
-    $wp.on('input change', '.wa-world-offset', function () { editField('offset', this); });
-    $wp.on('input change', '.wa-world-cap', function () { editField('cap', this); });
+    $wp.on('input change', '.wa-world-weight', function (ev) { editField('weight', this, ev); });
+    $wp.on('input change', '.wa-world-offset', function (ev) { editField('offset', this, ev); });
+    $wp.on('input change', '.wa-world-cap', function (ev) { editField('cap', this, ev); });
     // Swap with the adjacent VISIBLE row, not the array neighbour: a filtered-out book between them must not absorb the move.
     const moveWorld = (i, dir) => {
         const scoped = scopedPriority();
@@ -2327,23 +2668,36 @@ async function initBody() {
     $('#wa_review_bundles').on('click', () => superEvalScene());
 
     eventSource.on(event_types.GENERATION_STARTED, (_type, _options, dryRun) => { runState.generationIsDryRun = Boolean(dryRun); });
-    eventSource.on(event_types.GENERATION_ENDED, () => { runState.generationIsDryRun = false; runState.waOwnsScan = false; });
+    eventSource.on(event_types.GENERATION_ENDED, () => {
+        runState.generationIsDryRun = false;
+        runState.waOwnsScan = false;
+        // runs.end, never endRun: the slot is given up and the arming stands, so a scan still to come ranks. Not a /wa-dry's run, which no generation owns.
+        if (!runState.dryRunInProgress && runs.unscanned(runState.armedToken)) runs.end(runState.armedToken);
+    });
+    // A stopped generation is superseded: the interceptor's `abort` cannot be read, so the token carries the stop.
+    // Aborts every interceptor's fetches too: ST shows Stop while interceptors run, and stopGeneration emits this unconditionally.
+    eventSource.on(event_types.GENERATION_STOPPED, () => { runState.scanToken++; endRun(runs.current()); for (const stop of liveStops) stop.abort(); });
 
     eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
 
     // WORLDINFO_ENTRIES_LOADED only fires during a scan, so CHAT_CHANGED refreshes the attached-book set.
     const refreshAttached = () => getSortedEntries().then(showExemptCount).catch(() => {});
     eventSource.on(event_types.CHAT_CHANGED, refreshAttached);
-    // Wrapped, not passed by reference: CHAT_CHANGED emits the chat id, which would land in resetSmartKeys's `scope`.
-    eventSource.on(event_types.CHAT_CHANGED, () => resetSmartKeys());
+    // A new chat is a new vocabulary: the scope's registry and caches go with the old one.
+    eventSource.on(event_types.CHAT_CHANGED, () => { runState.matchScope = null; });
     // The panel survives dry-run scans untouched, so it would carry the previous chat's selection across a switch.
     eventSource.on(event_types.CHAT_CHANGED, () => { runState.lastPromptOrder = []; runState.lastLayoutOrder = []; renderDeliveryPanel([]); });
     refreshAttached();
+    // Before onScanDone, which may read `depth`; onScanDone returns early on paths that still build a prompt.
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, applyReverseDepth);
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
     // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at
     // GENERATION_ENDED, so a between-scans getSortedEntries escapes the blanking.
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, (args) => {
-        if (!args?.state?.next) runState.waOwnsScan = false;
+        if (!isLastLoop(args)) return;
+        // Whichever gate onScanDone returned at: a run whose scan was not ranked still ends with it.
+        if (runState.waOwnsScan && !runState.generationIsDryRun && !runState.inCoreProbe) endRun(runState.armedToken);
+        runState.waOwnsScan = false;
     });
 
     if (settings().enabled) renderDeliveryPanel(runState.lastPromptOrder);
@@ -2360,7 +2714,7 @@ async function initBody() {
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many of WA\u2019s ranked entries to carry beyond the two delivered sets, for grading depth', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
         ],
-        helpString: 'Worlds Apart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Runs /wa-debug first, prints the difference, and downloads an ordinary two-arm capture bundle \u2014 grade it with Review bundles, apply with eval/synthetic-data/apply-review.mjs, then score with eval/versus-score.mjs.',
+        helpString: 'WorldsApart: what WA delivered on this turn against what ST core + Vector Storage would have, at their own budgets. Runs /wa-debug first, prints the difference, and downloads an ordinary two-arm capture bundle \u2014 grade it with Review bundles, apply with eval/synthetic-data/apply-review.mjs, then score with eval/versus-score.mjs.',
         returns: 'nothing',
     });
 
@@ -2368,28 +2722,28 @@ async function initBody() {
         name: 'wa-core',
         callback: () => {
             const c = runState.lastCoreSet;
-            if (!c) { toastr.info(t`No core selection recorded yet — it is captured on ST’s own dry runs, so send or receive a message first.`, 'Worlds Apart'); return ''; }
-            console.log(`%cWorlds Apart \u00b7 ST core's own selection at message ${c.at} \u2014 ${c.entries.length} entries, core budget ${c.budget ?? 'unknown'}`, 'font-weight: bold');
+            if (!c) { toastr.info(t`No core selection recorded yet — it is captured on ST’s own dry runs, so send or receive a message first.`, 'WorldsApart'); return ''; }
+            console.log(`%cWorldsApart \u00b7 ST core's own selection at message ${c.at} \u2014 ${c.entries.length} entries, core budget ${c.budget ?? 'unknown'}`, 'font-weight: bold');
             console.table(c.entries.map(e => ({ uid: e.uid, order: e.order, constant: e.constant, book: e.world, entry: e.title })));
             console.log(`uids for eval/core-compare.mjs --core-uids:\n${c.entries.map(e => e.uid).join(',')}`);
             toastr.success(t`${c.entries.length} entries — see console`, t`ST core selection`);
             return '';
         },
-        helpString: 'Worlds Apart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
+        helpString: 'WorldsApart: what ST core selected on its own, with WA standing down. Captured from ST\u2019s dry runs, where interceptors are skipped and core runs its own budget \u2014 so it is core\u2019s shipped set, keyword route only. Console.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-dry',
-        callback: () => dryRun(false),
-        helpString: 'Worlds Apart: run retrieval and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
+        callback: named => dryRun(false, named?._abortController),
+        helpString: 'WorldsApart: run activation and a World Info scan without generating. Reports the settings used and what got selected, in prompt order. Console.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-debug',
-        callback: () => dryRun(true),
-        helpString: 'Worlds Apart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
+        callback: named => dryRun(true, named?._abortController),
+        helpString: 'WorldsApart: same as /wa-dry plus every intermediate — query text, surviving term weights, per-signal scores, and the full vector-candidate ranking past the cut. Console.',
         returns: 'nothing',
     });
 
@@ -2398,10 +2752,10 @@ async function initBody() {
         callback: gradeScene,
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'sample name, used as the filename', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'scene-<date>' }),
-            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many retrieved entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
+            SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many activated entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in the sample', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
-        helpString: 'Worlds Apart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
+        helpString: 'WorldsApart: grade this scene for the offline evals. Runs /wa-debug, then opens a window listing every activated entry with the query text and per-signal scores, for grading 0-5 (constants and stickies are listed but not graded — relevance never chose them). Saving downloads a self-contained sample: query text, settings snapshot, candidate ranking, grades, and copies of every attached lorebook, so later chat/lorebook/settings edits cannot move the numbers. Drop it in eval/eval-data/ and run eval/graded-scene-grid.mjs --sample.',
         returns: 'nothing',
     });
 
@@ -2414,14 +2768,14 @@ async function initBody() {
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'candidate depth per arm (the cliff is switched off for each run)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
             SlashCommandNamedArgument.fromProps({ name: 'notes', description: 'free-text note stored in every sample written', typeList: [ARGUMENT_TYPE.STRING] }),
         ],
-        helpString: 'Worlds Apart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
+        helpString: 'WorldsApart: grade this scene against SEVERAL configurations at once, for a pool that isn\'t biased toward the current defaults. Runs /wa-debug once per arm (arms change which entries get surfaced — entity filter, retrieval mode, threshold, key suppression, summary queries), unions the entries they surfaced, dedupes, and opens one grading window over the union with a "surfaced by" column. Load earlier rounds\' samples into the file picker and their grades are subtracted, so each round only judges what is new. Saves one sample per arm — each with its own params and candidate rows, all sharing the pooled grades. Drop them in eval/eval-data/, run eval/graded-scene-grid.mjs --sample on each, and add arms until the judged@10 column stops showing gaps.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-super-eval',
         callback: superEvalScene,
-        helpString: 'Worlds Apart: review graded samples/bundles from their FILES, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Pick several and each becomes a section with its own query text; stored grades arrive pre-filled and editable, entry text comes from the embedded books. Save downloads ONE review file for the whole run; apply it with node eval/synthetic-data/apply-review.mjs <file> --write.',
+        helpString: 'WorldsApart: review graded samples/bundles from their FILES, chat-independent — nothing live is read, so scenes captured offline or graded by an LLM judge open without loading their chat. Pick several and each becomes a section with its own query text; stored grades arrive pre-filled and editable, entry text comes from the embedded books. Save downloads ONE review file for the whole run; apply it with node eval/synthetic-data/apply-review.mjs <file> --write.',
         returns: 'nothing',
     });
 
@@ -2429,14 +2783,14 @@ async function initBody() {
         name: 'wa-studio',
         // Wrapped: ST hands callbacks (namedArgs, unnamedArgs), which would land in preferredBook.
         callback: () => lorebookStudio(chatBook()),
-        helpString: 'Worlds Apart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
+        helpString: 'WorldsApart: open Lorebook Studio — a wide two-pane manager listing every lorebook on the left and the selected book\'s entries on the right. Per-entry tools (mode, flags, sticky, ⚡/✨ keyword suggestions, prune-scan colouring, duplicate/delete), a Tool Settings drawer, bulk selection + actions (enable/disable, mode, sticky, trigger %, renumber, delete), and book tools (rename, duplicate, delete, type filter, suggest-all). Also on the extensions (wand) menu.',
         returns: 'nothing',
     });
 
     addWaCommand({
         name: 'wa-query',
         callback: probeQuery,
-        helpString: 'Worlds Apart: score entries against arbitrary text without activating anything. Usage: /wa-query your query text here',
+        helpString: 'WorldsApart: score entries against arbitrary text without activating anything. Usage: /wa-query your query text here',
         returns: 'nothing',
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
@@ -2447,7 +2801,7 @@ async function initBody() {
         ],
     });
 
-    console.log('Worlds Apart: ready');
+    console.log('WorldsApart: ready');
 }
 
 globalThis.worldsApart_intercept = intercept;

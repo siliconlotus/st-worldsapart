@@ -1,10 +1,22 @@
-// layout.mjs — stage 3's product: the layout order. Classifies activated rows into the four blocks the
+// layout.mjs — scoring's product: the layout order. Classifies activated rows into the four blocks the
 // budget walks and orders each. Pure: settings and resolved book names arrive as parameters
-// (eval/layout-check.mjs).
+// (test/layout-check.mjs).
 import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
+import { hasDecorator } from './matcher.mjs';
 
-/** Stage 4's E[credit]; an unscored row sorts below every scored one, then by authored order. */
-export const layoutScore = it => (Number.isFinite(it.eCredit) ? it.eCredit : -1);
+/** A constant: the `constant` flag or `@@activate`, which core activates before any matching, as it does a constant. */
+export const isConstant = entry => Boolean(entry?.constant) || hasDecorator(entry, '@@activate');
+
+/** E[credit] with its odds multiplied by the author's term weights (`logWeight`, matcher `keywordScore`); exactly E[credit] when there are none. */
+export const weightedCredit = it => {
+    const e = it.eCredit, lw = Number(it.logWeight) || 0;
+    // In log-odds, so no weight overflows `exp` into NaN; 0 and 1 are fixed points of the odds.
+    if (!lw || !(e > 0 && e < 1)) return e;
+    return 1 / (1 + Math.exp(-(Math.log(e / (1 - e)) + lw)));
+};
+
+/** An unscored row sorts below every scored one, then by authored order. */
+export const layoutScore = it => (Number.isFinite(it.eCredit) ? weightedCredit(it) : -1);
 
 /**
  * The four blocks the budget walks, each ordered. Classification is by what an entry is: a constant
@@ -23,7 +35,7 @@ export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [
     for (const item of items ?? []) {
         // Durable first: a promoted constant is a constant.
         if (isArmedSticky?.(item.entry)) sticky.push(item);
-        else if (item.entry?.constant) constant.push(item);
+        else if (isConstant(item.entry)) constant.push(item);
         else if (isPromoted?.(item.entry)) promoted.push(item);
         else results.push(item);
     }

@@ -1,15 +1,18 @@
-// fingerprint.mjs — content fingerprint of the deployed server plugin, so a stale /plugins copy is detectable.
+// fingerprint.mjs — content fingerprint of the plugin's source as the server loaded it, so a stale server process is detectable.
 
-/** Every deployed plugin file as [source path relative to plugin/, deployed name] — the single manifest: deploy-plugin.mjs copies these and both fingerprint sides hash them in this order. The matcher's three modules deploy FLAT, which is why they import each other by bare './name'. */
+/** Every file the server loads from the install, relative to plugin/: the browser and the server hash these, in this order. */
 export const PLUGIN_FILES = [
-    ['scoring.mjs', 'scoring.mjs'],
-    ['../extension/automaton.mjs', 'automaton.mjs'],
-    ['../extension/smartkeys.mjs', 'smartkeys.mjs'],
-    ['../extension/matcher.mjs', 'matcher.mjs'],
-    ['vector.mjs', 'vector.mjs'],
-    ['fingerprint.mjs', 'fingerprint.mjs'],
-    ['server.js', 'index.js'],
+    'scoring.mjs',
+    '../extension/automaton.mjs',
+    '../extension/smartkeys.mjs',
+    '../extension/matcher.mjs',
+    'vector.mjs',
+    'fingerprint.mjs',
+    'server.js',
 ];
+
+/** plugin/loader.js's own LOADER_VERSION, which /ping reports: an older deployed loader asks for one redeploy. Keep the two equal. */
+export const LOADER_VERSION = 2;
 
 function hashText(str) {
     let h = 5381;

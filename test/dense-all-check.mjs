@@ -36,7 +36,7 @@ const ALL = write('all.json', [1, 5, 2, 3]);
 const QV = [0.7, 0.7, 0.1];
 const rowsOf = (indexFile, overrides) => {
     // Neither form may come from a default; centroidPopulation is pinned because this book has no STMB markers, so 'memory' would fall back to the whole collection.
-    const P = sceneParams(S, { denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
+    const P = sceneParams(S, { wordBoundary: 'strict', denseAllEntries: false, centroidPopulation: 'vectorized', ...overrides });
     const scene = loadScene(S, { indexFile, params: P });
     const rows = makeCandidateSet({ ...scene, params: P })(2, 0.75, null, QV, 'text of entry', () => ['the spire looms over the quarter']);
     return { scene, byUid: new Map(rows.map(r => [r.uid, r])) };
@@ -46,8 +46,8 @@ const base = rowsOf(ORDINARY, {});
 const dense = rowsOf(ALL, { denseAllEntries: true });
 
 // --- the baseline does not move --------------------------------------------------------------------
-eq(dense.scene.loaded[0].items.length, 2, 'stage 1 keeps only the vectorized chunks of an --all index');
-eq(dense.scene.loaded[0].extra.length, 2, 'the rest are held aside for stage 3');
+eq(dense.scene.loaded[0].items.length, 2, 'the similarity query keeps only the vectorized chunks of an --all index');
+eq(dense.scene.loaded[0].extra.length, 2, 'the rest are held aside for scoring');
 eq([...dense.scene.loaded[0].mean].join(','), [...base.scene.loaded[0].mean].join(','),
     'the corpus mean is the vectorized corpus\'s, unchanged by the extra chunks');
 eq(dense.byUid.get(1).score, base.byUid.get(1).score, 'a vectorized entry\'s cosine is untouched');

@@ -1,5 +1,5 @@
 // entity.mjs — the entity filter: the lorebook's own vocabulary, and the weighted BM25 query terms built from
-// it. Read at stage 3 only (content-lexical): it can reweight what an activated entry scores, never admit one.
+// it. Read at scoring only (content-lexical): it can reweight what an activated entry scores, never admit one.
 
 import { tokenize } from './lexical.mjs';
 import { normalizeOrthography } from './automaton.mjs';
@@ -19,20 +19,14 @@ export function buildGazetteer(entries) {
     return terms;
 }
 
-/** Query terms that are capitalised or in `gazetteer`, capitalised ones weighted `boost`; not applied to summarized queries. */
-export function buildTermWeights(queryText, gazetteer, boost) {
+/** Query terms that are capitalised or in `gazetteer`, capitalised ones weighted `boost`; `capitalised` false where capitals do not mark names. Not applied to summarized queries. */
+export function buildTermWeights(queryText, gazetteer, boost, capitalised = true) {
     // Null-prototype: the keys are chat tokens, and `weights['constructor'] ?? 0` would otherwise read a Function and fold to NaN.
     const weights = Object.create(null);
-    // The split must stay lexical.tokenize's character class, or an accented query term shatters and matches nothing (K9).
-    const query = normalizeOrthography(queryText);
-    const properNouns = properNounsOf(query);
+    const properNouns = capitalised ? properNounsOf(normalizeOrthography(queryText)) : new Set();
 
-    for (const token of query.split(/[^\p{L}\p{N}\p{M}']+/u)) {
-        if (token.length < 2) {
-            continue;
-        }
-
-        const lower = token.toLowerCase();
+    // lexical.tokenize, so a query term is exactly the token the BM25 index holds (K9).
+    for (const lower of tokenize(queryText)) {
         const isProperNoun = properNouns.has(lower);
 
         if (!isProperNoun && !gazetteer.has(lower)) {

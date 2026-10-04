@@ -1,16 +1,18 @@
 {
-    "display_name": "Worlds Apart",
+    "display_name": "WorldsApart",
     "loading_order": 101,
     "requires": [],
     "optional": [],
     "generate_interceptor": "worldsApart_intercept",
     "js": "worldsapart.js",
     "author": "siliconlotus",
-    "version": "1.0.0-alpha.1+build.3",
+    "version": "1.0.0",
+    "minimum_client_version": "1.17.0",
     "auto_update": true,
     "homePage": "https://github.com/siliconlotus/st-worldsapart",
     "hooks": {
-        "activate": "init"
+        "activate": "init",
+        "clean": "clean"
     },
     "i18n": {
         "fr-fr": "i18n/fr-fr.json"

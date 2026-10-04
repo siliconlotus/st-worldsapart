@@ -3,7 +3,8 @@
 import { NAME_PARTICLES } from './relevance.mjs';
 import { table } from './lang.mjs';
 import { countKey, countRegexKey, isLiteral, isRegexKey, keyExcerpts, plainTag as plain, secondaryKeys, segment, swapLiteralHyphens, usableKeys } from './matcher.mjs';
-import { cachedCount, createScanScope, hitLiterals, ORTHO_FAMILIES, parse, primeScan, registerKeys, tokenize, validateSmartKey } from './smartkeys.mjs';
+import { isConstant } from './layout.mjs';
+import { buildAst, cachedCount, createScanScope, expandRegex, hitLiterals, requireScope, ORTHO_FAMILIES, primeScan, registerKeys, validateSmartKey } from './smartkeys.mjs';
 
 
 /** Below this many entries the df-based book-shared flag is skipped; common word still applies. */
@@ -20,20 +21,23 @@ const KEY_BOOK_SHARED_FLAG = 0.75;
 /** Rare-vocabulary Jaccard at which two entries are reported near-duplicates. Advisory only: it colours (K14). */
 export const KEY_DUPE_MIN = 0.35;
 
-export const FUNCTION_WORDS = new Set('a an the and or but if then else for to of in on at by with from as is are was were be been being this that these those it its he she they them his her their you your i we our my me not no do does did has have had will would can could should'.split(' '));
-
-/** A multi-word key containing an English function word, unless it is a constructed proper noun (looksProper, which
- *  allows the titular `the`): `the Spire` is a name where `the door` is not. A single word is never a fragment. */
+/** A multi-word key containing one of the language's function words (the table's, from its pack's `fragmentDetector`), unless it is a
+ *  constructed proper noun (looksProper, which allows the titular `the`): `the Spire` is a name where `the door` is not. A single word
+ *  is never a fragment, and under a pack with no detector nothing is. */
 export function looksLikeFragment(key) {
+    const functionWords = table().functionWords;
+    if (!functionWords.size) return false;
     const raw = String(key ?? '').trim();
     if (looksProper(raw)) return false;
     const words = raw.toLowerCase().match(/[\p{L}][\p{L}'-]*/gu) ?? [];
-    return words.length > 1 && words.some(w => FUNCTION_WORDS.has(w));
+    return words.length > 1 && words.some(w => functionWords.has(w));
 }
 
 /** A capitalised frame with a name-particle interior; a single capitalised word qualifies, and a titular leading `the`
  *  does not break the frame (`the Spire` is a name). `\p{Lu}`, not `[A-Z]`. */
 function looksProper(key) {
+    // A capitalised frame is a name only where the language's pack says capitals mark names.
+    if (table().nameDetector !== 'capitalised') return false;
     const raw = String(key ?? '').trim();
     const tokens = raw.replace(/^the\s+/i, '').split(/\s+/).filter(Boolean);
     if (!tokens.length) return false;
@@ -64,12 +68,15 @@ function pathsOf(node) {
 // A case-sensitive capitalised term can never be the common word: `? ^Mark` never matches `mark`.
 const commonTerm = (n, isLoose) => { const v = String(n.value ?? '').trim(); return Boolean(v) && isLoose(v) && !(n.isCaseSensitive && v !== v.toLowerCase()); };
 
+/** No macros: a probe keeps its tokens, so each chat counts it under that chat's own values. */
+const PROBE_SCOPE = createScanScope();
+
 /** A SmartKey's paths, each as a probe the chat scan can count — `? =mom =my` — with `common` set on a path made entirely
  *  of common words. The whole product: the path that matches most is the one to name, common or not. */
 function smartPaths(raw, isLoose) {
     if (!String(raw ?? '').trim().startsWith('?')) return [];
     let paths;
-    try { paths = pathsOf(parse(tokenize(String(raw)))); } catch { return []; }
+    try { paths = pathsOf(buildAst(String(raw), PROBE_SCOPE)); } catch { return []; }
     return paths.map(p => ({ label: p.map(n => String(n.value).trim()).join(' & '), probe: `? ${p.map(renderTerm).join(' ')}`, common: p.every(n => commonTerm(n, isLoose)) }));
 }
 
@@ -88,18 +95,11 @@ const KEY_CHAT_SEVERE = 0.50;
  *  `chat common`. An assertion; 0.45 rather than a half so a book of few entries does not sit on the line. */
 const KEY_BOOK_COMMON = 0.45;
 
-/**
- * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
- * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
- * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
- * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
- * @returns {{entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
- */
 /** The audit's three severities, by name. The colours they are drawn in belong to the display, and the order to RANK there. */
 export const SEVERE = 'severe', MODERATE = 'moderate', MINOR = 'minor';
 
 /** The order `classify` tests its branches in, so a display can rank verdicts without re-deriving them. */
-export const FLAG_PRIORITY = ['unusable', 'substring', 'chat common', 'book common', 'book shared', 'regex orthography', 'common word', 'fragment', 'short', 'unattested', 'variant only'];
+export const FLAG_PRIORITY = ['unusable', 'warning', 'substring', 'chat common', 'book common', 'book shared', 'regex orthography', 'common word', 'fragment', 'short', 'unattested', 'variant only', 'note'];
 
 /** Each orthographic form a regex key cannot reach: `alt` is the pattern rewritten into it, `label` names it, and
  *  `shape` marks the one that flags without evidence. Exported so a chat scan can count these beside the keys —
@@ -130,7 +130,20 @@ export function orthoAlternates(k) {
  *  message, so probing every key would cost more than the scan. */
 export const substringProbes = k => (k.includes('"') ? [] : [`? ="${k}"`, ...(/\p{Lu}/u.test(k) ? [`? ^"${k}"`] : [])]);
 
-export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain } = {}) {
+/** A literal key counted under its entry's match flags, or null when neither is set or the key holds a `"`. */
+export const flagProbe = (k, cs, ww) => (!(cs || ww) || !isLiteral(k) || k.includes('"') ? null : `? ${ww ? '=' : ''}${cs ? '^' : ''}"${k}"`);
+/** Every flagProbe a key can need; scanned beside it for the keys over the chat-common gate, as substringProbes are. */
+export const flagProbes = k => [flagProbe(k, false, true), flagProbe(k, true, false), flagProbe(k, true, true)].filter(Boolean);
+
+/**
+ * The prune classifier for one loaded lorebook, shared by the Studio audit and eval/keyword-audit.mjs. Live closures:
+ * classifyEntry re-reads each entry's flags. `bookContent` and `bookListed` are counts over `nBook`; `chatRate` is a share.
+ * @param {{messagesWith: Map<string, number>, messages: number}} [chatScan] MESSAGES containing each key (addMessageHits), never occurrences; absent = no chat evidence
+ * @param {Function} [t] the template tag every verdict text goes through; ST passes its i18n `t`, the checks take the plain default
+ * @param {object} scope the match context every verdict is reached under, used as given: pass a fresh one
+ * @returns {{entries, nE, classifyEntry, reasonOf, severityOf, effCase, effWhole, dupes, unusableKeysOf}}
+ */
+export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault = false, wholeWordsDefault = false, matchWindow = 'scan', chatScan, t = plain, translate = s => s, scope } = {}) {
     // undefined: no scan, or a scan that did not cover this key; 0: scanned and silent. chatChecked reads the difference.
     // The unit the chat scan counted, named for a chip: what a rate is a rate of.
     const units = { message: t`messages`, paragraph: t`paragraphs`, window: t`scan windows` }[chatScan?.unit] ?? t`messages`;
@@ -144,7 +157,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
 
     const inScope = e => {
         if (!opts.includeInactive && e.disable) return false;
-        if (e.constant) return opts.scanConstant;
+        if (isConstant(e)) return opts.scanConstant;
         if (e.vectorized) return opts.scanVectorized;
         return opts.scanKeyword;
     };
@@ -162,9 +175,11 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         }
     }
 
-    const allKeys = [...new Set(allEntries.flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
-    // Its OWN scope: sharing the retrieval scope would leave thousands of keys in the live automaton.
-    const scanScope = createScanScope();
+    // Secondaries ride in the same pass: unusableKeysOf reads a gate's attestation off these counts.
+    const keysOf = e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])].map(k => String(k).trim()).filter(Boolean);
+    const allKeys = [...new Set(allEntries.flatMap(keysOf))];
+    // Filled with the whole book: never the runtime's live scope, whose automaton this would swamp.
+    const scanScope = requireScope(scope, 'buildKeyPruneScan');
     registerKeys(allKeys, scanScope);
     const comboId = (cs, ww) => `${cs ? 1 : 0}${ww ? 1 : 0}`;
     const ck = (key, cs, ww) => `${comboId(cs, ww)} ${cs ? key : String(key).toLowerCase()}`;
@@ -177,7 +192,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const combosOf = new Map();
     for (const e of entries) {
         const cs = e.caseSensitive ?? caseSensitiveDefault, ww = e.matchWholeWords ?? wholeWordsDefault;
-        for (const k of (Array.isArray(e.key) ? e.key : []).map(x => String(x).trim()).filter(Boolean)) {
+        for (const k of keysOf(e)) {
             let list = combosOf.get(k);
             if (!list) combosOf.set(k, list = new Map());
             for (const w of ww ? [true, false] : [false]) list.set(comboId(cs, w), { cs, ww: w });
@@ -247,7 +262,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
      *  scope, so the shared automaton is not rebuilt, and the answer is a verdict rather than "0/0". */
     const onDemand = (key, cs, ww) => {
         const r = { df: 0, total: 0, typed: 0 };
-        const own = createScanScope();
+        const own = createScanScope(scanScope);
         for (const segments of contentSegments) {
             primeScan([key], segments, own);
             let n = 0, typed = 0;
@@ -273,7 +288,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             for (const segments of contentSegments) {
                 for (const seg of segments) {
                     const hay = String(seg).normalize('NFC');   // the form keyExcerpts indexes
-                    for (const { at: start, to: end } of keyExcerpts(needle, seg, cs, true, 0, Infinity)) {
+                    for (const { at: start, to: end } of keyExcerpts(needle, seg, cs, true, 0, Infinity, scanScope)) {
                         let embedded = false;
                         for (let j = start - 1; j >= 0 && NUMRUN.test(hay[j]); j--) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
                         if (!embedded) for (let j = end; j < hay.length && NUMRUN.test(hay[j]); j++) if (hay[j] >= '0' && hay[j] <= '9') { embedded = true; break; }
@@ -294,7 +309,7 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             if (needEvidence) {
                 const chat = chatRateOf(a.alt), mine = chatRateOf(k) ?? 0;
                 const where = (chat !== undefined && chat > mine) ? 'chat'
-                    : contents.some(c => countRegexKey(a.alt, c) > countRegexKey(k, c)) ? 'book' : null;
+                    : contents.some(c => countRegexKey(expandRegex(a.alt, scanScope.macros), c) > countRegexKey(expandRegex(k, scanScope.macros), c)) ? 'book' : null;
                 if (where) return { flag: 'regex orthography', bookContent: 0, suggest: a.suggest, where, label: a.label };
                 continue;
             }
@@ -310,26 +325,43 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         const known = named.get(k);
         if (known !== undefined) return known;
         const titled = titledOf(k);
-        // scanScope, as the twin probe and onDemand pass: the module default is the LIVE retrieval scope this pass must not touch.
+        // scanScope, as the twin probe and onDemand pass: the module default is the LIVE runtime scope this pass must not touch.
         const found = Boolean(titled) && contentSegments.some(segments => segments.some(seg => countKey(titled, seg, true, false, scanScope) > 0));
         named.set(k, found);
         return found;
+    };
+
+    /** What every verdict reads of a trimmed key: whether it is a literal, its chat rate, and the book pass's counts. */
+    const evidence = (k, cs, ww) => {
+        // English-common, fragment and short read the key as a literal; a SmartKey or regex is judged on its terms (smartPaths) or skipped.
+        const literal = !k.startsWith('?') && !isRegexKey(k);
+        // The rate under the entry's OWN flags where that probe was scanned: countChatHits counts bare keys, so a
+        // whole-word key must not read as chat-common on the strength of hits its flag refuses.
+        const probe = flagProbe(k, cs, ww);
+        const chatRate = (probe ? chatRateOf(probe) : undefined) ?? chatRateOf(k);
+        const hits = scan(k, cs, ww);
+        return { literal, chatRate, hits, bookContent: hits.df };
+    };
+    /** The dead-key verdict a primary and a live secondary share: nothing in the book, and no chat hit where a chat was scanned. */
+    const unattested = (k, cs, ww) => {
+        const { literal, chatRate, bookContent } = evidence(k, cs, ww);
+        if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
+        return null;
     };
 
     // Tested in FLAG_PRIORITY order; the first hit wins, so moving a branch changes what a key reports.
     const classify = (key, cs, ww, declared = false) => {
         const k = String(key).trim();
         if (!k) return null;
-        // usableKeys, not a validator call, so which codes are fatal here stays a matcher.mjs rule.
-        if (!usableKeys([k]).length) return { flag: 'unusable', code: validateSmartKey(k).find(f => f.severity === 'error')?.code };
-        // English-common, fragment and short read the key as a literal; a SmartKey or regex is judged on its terms (smartPaths) or skipped.
-        const literal = !k.startsWith('?') && !isRegexKey(k);
-        // The rate under the entry's OWN flags where that probe was scanned: countChatHits counts bare keys, so a
-        // whole-word key must not read as chat-common on the strength of hits its flag refuses.
-        const flagProbe = literal && ww !== cs && !k.includes('"') ? `? ${ww ? '=' : '^'}"${k}"` : null;
-        const chatRate = (flagProbe ? chatRateOf(flagProbe) : undefined) ?? chatRateOf(k);
-        const hits = scan(k, cs, ww);
-        const bookContent = hits.df;
+        // usableKeys, not a validator call, so which codes are fatal here stays a matcher.mjs rule; a warn is legal and is its own flag.
+        const alerts = validateSmartKey(k);
+        const err = alerts.find(a => a.severity === 'error');
+        if (!usableKeys([k]).length) return { flag: 'unusable', code: err?.code, alert: err };
+        const warn = alerts.find(a => a.severity === 'warn');
+        if (warn) return { flag: 'warning', code: warn.code, alert: warn };
+        // An info is a note: reported last, only where no evidence flag has anything to say.
+        const info = alerts.find(a => a.severity === 'info');
+        const { literal, chatRate, hits, bookContent } = evidence(k, cs, ww);
 
         // --- evidence about this chat and this book, in the order the more specific diagnosis wins ---------------
         // Gated on breadth, judged on how the breadth was earned: `authoriz` is what substring matching is for, bare `Eve`
@@ -341,7 +373,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
             const caseShare = cased === undefined ? undefined : cased / any;
             const wantWord = !ww && wordShare !== undefined && wordShare <= 1 / 3;
             const wantCase = !cs && caseShare !== undefined && caseShare <= 1 / 3;
-            if (wantWord || wantCase) return { flag: 'substring', bookContent, chatRate, wordShare, caseShare, suggest: `? ${wantWord ? '=' : ''}${wantCase ? '^' : ''}${k}` };
+            // renderTerm quotes a key that would not lex as one term: unquoted, `? =red moon` is `=red AND moon`.
+            if (wantWord || wantCase) return { flag: 'substring', bookContent, chatRate, wordShare, caseShare, wantWord, wantCase, suggest: `? ${renderTerm({ value: k, isExact: wantWord, isCaseSensitive: wantCase })}` };
         }
         // A key that floods the chat, whatever list it is or is not on. Not a `constant` or sticky entry: those are the
         // author declaring the entry ubiquitous, and the flag claims something about the key against this chat, not the wiring.
@@ -374,28 +407,38 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         if (literal && opts.pruneFragment !== false && looksLikeFragment(k) && !(bookContent > 0 && namedInBook(k))) return { flag: 'fragment', bookContent };
         // Nothing to judge without a hit: a dead short key is dead, not "0/0 clean".
         if (literal && k.length < opts.minLength && !ww && opts.pruneShort && hits.total > 0) return { flag: 'short', bookContent, clean: strictClean(k, cs), total: scan(k, cs, false).total, key: k, ww };
-        if (bookContent === 0 && opts.pruneUnattested && !(literal && opts.ignoreProper && looksProper(k)) && !chatRate) return { flag: 'unattested', bookContent, literal, chatChecked: chatRate !== undefined };
+        const dead = unattested(k, cs, ww);
+        if (dead) return dead;
         if (literal) {
             const chatAny = chatScan?.messagesWith?.get(k), chatTyped = chatTypedOf(k);
             // Chat first: what the model writes is the stronger claim about which form a key will meet.
             if (chatAny > 0 && chatTyped === 0) return { flag: 'variant only', bookContent, where: 'chat' };
             if (hits.total > 0 && hits.typed === 0 && !chatTyped) return { flag: 'variant only', bookContent, where: 'book' };
         }
-        return regexOrtho(k, false);
+        return regexOrtho(k, false) ?? (info ? { flag: 'note', code: info.code, alert: info } : null);
     };
-    /** Secondary keys the matcher will not act on, with the validator's message: a set difference against secondaryKeys, so which codes are fatal here stays a matcher.mjs rule. */
+    /** Secondary keys that do nothing, in the entry's order: refused by the matcher (`unusable`, with the validator's message, by set
+     *  difference against secondaryKeys so which codes are fatal stays a matcher.mjs rule) or live and attested nowhere (`unattested`);
+     *  no other verdict is passed on a gate. */
     const unusableKeysOf = (e) => {
-        // `selective: false` switches the whole list off by declaration; nothing there is malformed.
+        // `selective: false` switches the whole list off by declaration; nothing there is malformed or dead.
         if (e?.selective === false) return [];
         const live = new Set(secondaryKeys(e));
-        return (Array.isArray(e?.keysecondary) ? e.keysecondary : [])
-            .filter(k => String(k ?? '').trim() && !live.has(k))
-            .map(k => ({ uid: e?.uid, key: k, ...(validateSmartKey(k).find(f => f.severity === 'error') ?? {}) }));
+        const cs = effCase(e), ww = effWhole(e);
+        const out = [];
+        for (const key of (Array.isArray(e?.keysecondary) ? e.keysecondary : [])) {
+            const k = String(key ?? '').trim();
+            if (!k) continue;
+            if (!live.has(key)) { const err = validateSmartKey(key).find(a => a.severity === 'error'); out.push({ uid: e?.uid, key, flag: 'unusable', code: err?.code, alert: err }); continue; }
+            const dead = unattested(k, cs, ww);
+            if (dead) out.push({ uid: e?.uid, key, ...dead });
+        }
+        return out;
     };
     const classifyEntry = e => {
         if (!inScope(e)) return [];
         const cs = effCase(e), ww = effWhole(e);
-        const declared = Boolean(e.constant) || Number(e.sticky) > 0;
+        const declared = isConstant(e) || Number(e.sticky) > 0;
         const out = [];
         for (const key of (Array.isArray(e.key) ? e.key : [])) {
             if (ignoreSet.has(key)) continue;
@@ -409,6 +452,8 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
     const severityOf = p => {
         if (p.flag === 'unattested') return '';
         if (p.flag === 'unusable') return SEVERE;
+        if (p.flag === 'warning') return MODERATE;
+        if (p.flag === 'note') return MINOR;
         if (p.flag === 'common word') return MODERATE;   // an assertion about the language; only the chat can make it severe, as chat common
         if (p.flag === 'book shared') return p.bookListed / nBook >= opts.bookShared ? SEVERE : MODERATE;
         if (p.flag === 'fragment') return SEVERE;
@@ -428,30 +473,32 @@ export function buildKeyPruneScan(data, opts, ignoreSet, { caseSensitiveDefault 
         // Every text is one template, so a translation can reorder it; a branch per variant rather than a joined fragment.
         if (p.flag === 'unattested') {
             // A SmartKey or a pattern is not absent from the text: it evaluated false everywhere it was run.
-            const text = p.literal ? (p.chatChecked ? t`unattested (book/chat)` : t`unattested (book)`)
+            const label = p.literal ? (p.chatChecked ? t`unattested (book/chat)` : t`unattested (book)`)
                 : (p.chatChecked ? t`never matches (book/chat)` : t`never matches (book)`);
-            return { text, severity };
+            return { label, severity };
         }
-        if (p.flag === 'unusable') return { text: p.code ? t`unusable — ${p.code}` : t`unusable`, severity };
-        if (p.flag === 'common word') return { text: p.term ? t`common word (${p.term})` : t`common word`, severity };
-        if (p.flag === 'book shared') return { text: t`book shared (${pct(p.bookListed / nBook)}%)`, severity };
-        if (p.flag === 'chat common') return { text: p.via ? t`chat common (${pct(p.chatRate)}%, mostly ${p.via})` : t`chat common (${pct(p.chatRate)}%)`, severity };
-        if (p.flag === 'book common') return { text: t`book common (${pct(p.bookContent / nBook)}%)`, severity };
-        if (p.flag === 'fragment') return { text: t`phrase fragment`, severity };
+        // A validator verdict: the alert's label for a chip or a row, its message for the tooltip.
+        if (p.flag === 'unusable') return { label: p.alert ? translate(p.alert.label) : t`unusable`, message: p.alert?.message, severity };
+        if (p.flag === 'warning' || p.flag === 'note') return { label: translate(p.alert.label), message: p.alert.message, severity };
+        if (p.flag === 'common word') return { label: p.term ? t`common word (${p.term})` : t`common word`, severity };
+        if (p.flag === 'book shared') return { label: t`book shared (${pct(p.bookListed / nBook)}%)`, severity };
+        if (p.flag === 'chat common') return { label: p.via ? t`chat common (${pct(p.chatRate)}%, mostly ${p.via})` : t`chat common (${pct(p.chatRate)}%)`, severity };
+        if (p.flag === 'book common') return { label: t`book common (${pct(p.bookContent / nBook)}%)`, severity };
+        if (p.flag === 'fragment') return { label: t`phrase fragment`, severity };
         if (p.flag === 'substring') {
-            const how = [p.wordShare !== undefined && p.suggest.includes('=') ? t`${pct(p.wordShare)}% as a word` : null,
-                p.caseShare !== undefined && p.suggest.includes('^') ? t`${pct(p.caseShare)}% in this case` : null].filter(Boolean).join(', ');
-            return { text: t`matches in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
+            const how = [p.wantWord ? t`${pct(p.wordShare)}% as a word` : null,
+                p.wantCase ? t`${pct(p.caseShare)}% in this case` : null].filter(Boolean).join(', ');
+            return { label: t`matches in ${pct(p.chatRate)}% of ${units}, ${how} — consider ${p.suggest}`, severity };
         }
-        if (p.flag === 'variant only') return { text: p.where === 'chat' ? t`chat uses it only un-hyphenated` : t`book uses it only un-hyphenated`, severity };
+        if (p.flag === 'variant only') return { label: p.where === 'chat' ? t`chat uses it only un-hyphenated` : t`book uses it only un-hyphenated`, severity };
         if (p.flag === 'regex orthography') {
             const form = { 'curly form': t`curly form`, 'straight form': t`straight form`, 'en-dash': t`en-dash` }[p.label] ?? p.label;
             const lead = p.where === 'chat' ? t`chat uses ${form}` : p.where === 'book' ? t`book uses ${form}` : t`will not match ${form}`;
-            return { text: t`${lead}, consider ${p.suggest}`, severity };
+            return { label: t`${lead}, consider ${p.suggest}`, severity };
         }
         // The same suggestion substring makes, measured over the book: hits mostly inside longer words want `=`.
         const ratio = p.total ? p.clean / p.total : 0;
-        return { text: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? =${p.key}` : t`short (${p.clean}/${p.total} exact)`, severity };
+        return { label: ratio <= 1 / 3 && !p.ww ? t`short (${p.clean}/${p.total} exact) — consider ? ${renderTerm({ value: p.key, isExact: true })}` : t`short (${p.clean}/${p.total} exact)`, severity };
     };
     // Near-duplicates: Jaccard over rare vocabulary; an arc and its member scene are skipped. Advisory only.
     const isArc = e => e?.stmbArc === true || /^\s*\[?\s*arc\b/i.test(String(e?.comment ?? ''));
@@ -502,7 +549,7 @@ export const STUDIO_PRUNE_OPTS = { scanKeyword: true, scanVectorized: true, scan
 export function cleanupRows(entry, scan, { showAll = false, ignored = new Set() } = {}) {
     const rows = scan.classifyEntry(entry).map(p => {
         const rc = scan.reasonOf(p);
-        return { term: p.key, why: rc.text, sev: rc.severity, p };
+        return { term: p.key, why: rc.label, message: rc.message, sev: rc.severity, p };
     });
     if (!showAll) return rows;
     const shown = new Set(rows.map(r => r.term));

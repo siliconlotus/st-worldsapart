@@ -33,7 +33,7 @@ import { gradeValue, arg as sharedArg } from './lib/metrics.mjs';
 // One copy of the gazetteer and scorers: scene.mjs.
 import { entryKey } from '../extension/content-lexical.mjs';
 import { resolveModel } from './lib/reindex.mjs';
-import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeKeywordScore, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel } from './lib/scene.mjs';
+import { dcg, embed as embedWith, haystackFor, indexPath, isDurableEntry, loadScene, makeLayoutOrder, makeGradeOf, makeCandidateSet, ndcg, nrm, openSample, sceneParams, inVectorIndex, wiTitle, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 
 const arg = k => sharedArg(process.argv, k);
 if (!arg('--sample')) { console.error('need --sample <sample.json> (write one with /wa-grade)'); process.exit(2); }
@@ -52,7 +52,7 @@ const DEPTH = Number(arg('--depth') ?? S.params?.depth ?? 10);
 const OLLAMA = process.env.OLLAMA_URL ?? 'http://localhost:11434', MODEL = process.env.WA_EMBED_MODEL ?? S.embedModel;
 if (!MODEL) { console.error('sample records no embedModel — set WA_EMBED_MODEL'); process.exit(2); }
 const EM = resolveModel(MODEL);
-const P = sceneParams(S);
+const P = sceneParams(S, boundaryOverride());
 const FREEZE = process.argv.includes('--freeze');
 // --depths rebuilds the query from the chat at each depth; the query text is the frozen artifact.
 const DEPTHS = arg('--depths') ? String(arg('--depths')).split(',').map(Number).filter(d => d > 0) : null;
@@ -65,7 +65,7 @@ if (S.name) console.log(`scene: ${sceneLabel(S)}${S.notes ? ` — ${S.notes}` : 
 const VECTORS = arg('--vectors') ?? 'data/default-user/vectors/ollama';
 // all from the scene's own params: denseAllEntries cannot be scored against a vectorized-only build.
 const INDEX = indexPath(S, { vectors: VECTORS, model: EM.label, index: arg('--index'), all: P.denseAllEntries });
-const TOPK = Number(arg('--topk')) || undefined;   // unset = stage 1's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
+const TOPK = Number(arg('--topk')) || undefined;   // unset = the similarity query's own bound (scene.mjs makeCandidateSet); --topk probes the elbow's window sensitivity.
 
 // Nothing here reads a live book; the sample carries copies of every attached book.
 const scene = loadScene(S, { indexFile: INDEX, indexOpts: { vectors: VECTORS, model: EM.label }, params: P });
@@ -129,7 +129,6 @@ if (FREEZE) {
 // The gazetteer is built in loadScene; only the query-dependent term weights are derived here.
 const termWeights = P.entityFilter ? entity.buildTermWeights(query, gaz, P.boost) : null;
 
-const keywordScore = makeKeywordScore(P);
 // Two embedders: the self-check re-embeds a stored chunk with the doc prefix; prefixing it as a query drops the cosine.
 const embedOpts = { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url };
 const embed = text => embedWith(EM.query + text, embedOpts);
@@ -147,7 +146,6 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
     const score = makeCandidateSet({ loaded, byKey, entries, params: P, topK: TOPK });
     const scoreAll = (k1, b, tw = termWeights, qvec = qv, qtext = query, st = scanText) => score(k1, b, tw, qvec, qtext, st);
     // The pool is what was judged (POOL); an unjudged logged row scores as 0 (G10).
-    // ponytail: the pool is the union of the arms actually run, so a param swept far outside them ranks against a pool that never saw its population.
     const ownJudged = [...OWN].filter(k => POOL.has(k)).length;
     console.log(`pool: ${POOL.size} judged entries; this capture logged ${S.candidates.length} rows, ${ownJudged} of them judged`
         + `${POOL.size > ownJudged ? ` (+${POOL.size - ownJudged} judged under a sibling arm)` : ''}`
@@ -229,7 +227,8 @@ const fmt = n => (n == null ? '·' : (+n).toFixed(3));
             const st = haystackOf(chat, d);
             const tw = P.entityFilter ? entity.buildTermWeights(q, gaz, P.boost) : null;
             const v = await embed(q);
-            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q).map(r => ({ ...r, keywordScore: (e => keywordScore(e, st(e), DEF.k1))(byKey.get(entryKey(r.entry)) ?? { key: [] }) }));
+            // `st` into the candidate set, never re-scored after it: admission, keys and weights all at depth d, recursion included.
+            const rows = scoreAll(DEF.k1, DEF.b, tw, v, q, st);
             const fused = layoutOrder(layoutOf(rows));
             const gVec = layoutOrder(vectorOf(rows)).map(r => gradeOf(r) ?? 0);
             const g = fused.map(r => gradeOf(r) ?? 0);   // unjudged occupies its rank and contributes nothing (makeGradeOf returns null)

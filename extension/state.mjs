@@ -1,5 +1,6 @@
 // state.mjs — the settings seam shared by every WA module: the settings key, the defaults, the settings()
 // accessor and the cross-module runState. ST's store is bound at init, never imported (node-loadable).
+import { BOUNDARY_MODES } from './matcher.mjs';
 
 const MODULE_NAME = 'worldsApart';
 
@@ -11,18 +12,18 @@ export const defaultSettings = {
     llmTemperature: '1', // '' sends none; ignored without a profile, since generateRaw takes no sampling parameters
     minChunkSize: 120, // paragraphs shorter than this are joined with the next one
     meanCentered: true, // passed to the plugin as a parameter; off buys uncentered scores, not the no-plugin path
-    relevanceCutoff: 0.10, // stage-4 E[credit] cutoff for dynamic rows of both tiers; one setting for every model, never the fit's own `cutoff`
-    maxVectorEntries: 20, // stage-5 cap, counted off the `vectorized` flag
+    relevanceCutoff: 0.10, // selection cutoff on the weighted credit for dynamic rows of both tiers; one setting for every model, never the fit's own `cutoff`
+    maxVectorEntries: 20, // delivery cap, counted off the `vectorized` flag
     entityFilter: true, // keep capitalised tokens and lorebook vocabulary in the query
     properNounBoost: 3, // weight multiplier for capitalised query tokens under entityFilter
     stopwordDocFreq: 0.25, // drop query terms found in more than this fraction of chunks; 0 disables
-    messageDepth: 10, // recent messages read, for both the retrieval query and the keyword scan window; per-entry scanDepth overrides
+    messageDepth: 10, // recent messages read, for both the similarity query and the keyword scan window; per-entry scanDepth overrides
     dropChatTags: '', // comma-separated tag names removed, tag and content, from every message WA reads; '' = off
     presentationOrder: 'order-asc', // prompt order, not layout order: any SORT_FNS key (sort.mjs) | 'best-first' | 'best-last'
     presentationTiered: false, // group prompt order into tiers (constant → sticky → …) before the base sort
     dropUnavailable: true, // hide memory entries whose STMB_end postdates the current message (relevance.mjs postDates)
     matchWindow: 'paragraph', // 'scan' | 'message' | 'paragraph' — the unit a key must match within; 'scan' is core's
-    wordBoundary: 'strict', // 'permissive' | 'strict' (also hyphen and apostrophes); read through matcher.mjs setBoundaryMode()
+    wordBoundary: 'strict', // 'permissive' | 'strict' (also hyphen and apostrophes); the match scope's boundary (smartkeys.mjs createScanScope)
     raterId: '', // UUIDv4 a typed grade is signed as, generated on first use
     language: 'en', // which language pack the suggester and audit read (lang.mjs); 'en' is bundled, others fetch once
 
@@ -40,7 +41,7 @@ export const defaultSettings = {
     worldPriorityMode: 'interleaved', // 'interleaved' (one list; weight scales score, offset shifts prompt position) | 'sequential' (strict book tiers)
     /** @type {Record<string, Array<{ world: string, weight: number, offset: number, cap: number }>>} keyed by character/group id; the chat's own book is the sentinel `'chat'` */
     worldPriorityByChar: {},
-    debugLog: false, // console.table the ranking every scan; per-generation token counting when a budget is set
+    debugLog: false, // narrate each turn's run and console.table the ranking; per-generation token counting when a budget is set
 };
 
 /** Settings with no UI; ensureSettings resets them to defaults each init, so a value here is never user-tuned. */
@@ -53,9 +54,22 @@ const INTERNAL_KEYS = [
 /** ST's `extension_settings`, bound by ensureSettings; never import it here (CLAUDE.md, *Pure vs ST-coupled*). */
 let store = null;
 
+/** The settings a user builds up rather than chooses: each character's lorebook order and priorities, and each book's curation. */
+export const PRIORITY_KEYS = ['worldPriorityByChar'];
+export const CURATION_KEYS = ['keywordIgnore', 'studioSortByBook'];
+
+/** What is left of stored settings `s` after a clean, or null when nothing is: `settings` removes every choice that is neither
+ *  priority nor curation, and those two go only when asked for by name. */
+export function cleanedSettings(s, { settings: dropSettings = false, priority = false, curation = false } = {}) {
+    const gone = new Set([...(priority ? PRIORITY_KEYS : []), ...(curation ? CURATION_KEYS : [])]);
+    const built = new Set([...PRIORITY_KEYS, ...CURATION_KEYS]);
+    const kept = Object.fromEntries(Object.entries(s ?? {}).filter(([k]) => !gone.has(k) && !(dropSettings && !built.has(k))));
+    return Object.keys(kept).length ? kept : null;
+}
+
 /** The live WA settings object; throws if read before ensureSettings. */
 export function settings() {
-    if (!store) throw new Error('Worlds Apart: settings() read before ensureSettings() bound ST\'s store');
+    if (!store) throw new Error('WorldsApart: settings() read before ensureSettings() bound ST\'s store');
     return store[MODULE_NAME];
 }
 
@@ -72,15 +86,22 @@ export function ensureSettings(extensionSettings) {
         if (typeof d === 'number') { const n = Number(s[k]); s[k] = Number.isFinite(n) ? n : d; }
         else if (typeof d === 'boolean' && typeof s[k] !== 'boolean') s[k] = d;
     }
+    if (!BOUNDARY_MODES.includes(s.wordBoundary)) {
+        console.warn(`WorldsApart: wordBoundary "${s.wordBoundary}" is not one of ${BOUNDARY_MODES.join(', ')} — reset to ${defaultSettings.wordBoundary}`);
+        s.wordBoundary = defaultSettings.wordBoundary;
+    }
 }
 
 /** Cross-module mutable state. Stays a holder object: an imported `let` cannot be reassigned across modules. */
 export const runState = {
     scanToken: 0,                 // generations increment it at intercept; after every await a continuation compares and bails when superseded
-    armedToken: 0,                // the token selectAndActivate committed for; a SCAN_DONE ranks only while it is still the current one
-    lastScores: new Map(),        // vector scores from the last retrieval, keyed `${world}.${uid}` — core's format, not the US separator
+    armedToken: null,             // the token selectAndActivate committed for; a SCAN_DONE ranks only while it is still the current one, and its last loop disarms
+    quietScan: false,             // the current token's generation is a quiet one: it records no latches and leaves the delivery panel alone
+    lastScores: new Map(),        // cosines from the last similarity query, keyed `${world}.${uid}` — core's format, not the US separator
     lastPromptOrder: [],          // the last scan's prompt order, post-cut
-    lastQuery: '',                // last retrieval query text
+    lastQuery: '',                // last similarity query text
+    lastMacros: {},               // the macro map the last scan ran under, `{{token}}` -> value; a capture records it
+    matchScope: null,             // the runtime's match scope (createScanScope): the scan's macros and wordBoundary, with the caches built under them
     lastQueryChat: [],            // the messages that query was joined from
     scanChat: null,               // the interceptor's chat — core's own scan haystack; SCAN_DONE consumers read this, not the raw chat
     lastScanChat: [],             // scan-eligible messages at capture depth
@@ -99,9 +120,15 @@ export const runState = {
     dryRunInProgress: false,      // true during either slash-command run
     generationIsDryRun: false,    // true while ST's own dry-run generation is in flight
     pluginAvailable: null,        // did the server plugin answer /ping
-    pluginRoot: null,             // absolute ST root from /ping
-    pluginFP: null,               // fingerprint the deployed plugin reports
-    sourceFP: null,               // fingerprint of this extension's source plugin files
+    pluginRoot: null,             // absolute ST root from /ping, which tells only an admin
+    pluginFP: null,               // fingerprint of the plugin files the server loaded, as /ping reports it
+    pluginLoader: null,           // the deployed loader's version; null for a plugin copied before the loader
+    pluginInstall: null,          // the install the server loads, as source.json names it
+    pluginDataRoot: null,         // ST's absolute data root, for a per-user install's deploy command
+    pluginShared: false,          // an install for all users exists under this page's folder name, and ST serves its files
+    sourceFP: null,               // fingerprint of the plugin files as this page serves them
+    pluginFailures: new Set(),    // plugin routes that failed this load, or answered without a field the extension reads
+    noCosineWarned: false,        // has the no-cosine warning been printed this load
     lastLayoutOrder: [],          // the last scan's LAYOUT order, pre-cut — what the caps take a prefix of; the capture's population
     lastInjects: [],              // the Author's Note and depth prompts the scan read, when allowWIScan is on
     lastSources: {},              // the card/persona fields an entry opted into, by source name

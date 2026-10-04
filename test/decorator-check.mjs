@@ -1,7 +1,11 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, partitionLatches, firedUpTo, latchActive, latchSuppressed, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { createScanScope } from '../extension/smartkeys.mjs';
+import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, rekeyLatches, firedUpTo, latchActive, latchSuppressed, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
+
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
 
 const patch = (content, entry = {}, chatLength = 0) => decoratorFields({ key: ['k'], content, ...entry }, { chatLength });
 
@@ -11,10 +15,15 @@ eqDeep(patch('@@depth 7\nx'), { position: WI_POSITION.atDepth, depth: 7 }, '...a
 eqDeep(patch('@@scan_depth 3\nx'), { scanDepth: 3 }, '@@scan_depth sets scanDepth');
 
 // @@reverse_depth counts from the START, so the spec defines it as @@depth <total messages> - N.
-eqDeep(patch('@@reverse_depth 2\nx', {}, 10), { position: WI_POSITION.atDepth, depth: 8 },
+eqDeep(patch('@@reverse_depth 2\nx', {}, 10), { position: WI_POSITION.atDepth, depth: 8, waReverseDepth: 2 },
     '@@reverse_depth 2 in a 10-message chat is depth 8');
-eqDeep(patch('@@reverse_depth 2\nx', {}, 20), { position: WI_POSITION.atDepth, depth: 18 },
+eqDeep(patch('@@reverse_depth 2\nx', {}, 20), { position: WI_POSITION.atDepth, depth: 18, waReverseDepth: 2 },
     '...and the distance from the end grows with the chat, which is what reversed means');
+// Core hashes the patched entry and keys timed effects on the hash, so everything but `depth` must hold still as the chat grows.
+const hashed = n => { const { depth, ...rest } = patch('@@reverse_depth 2\nx', {}, n); return rest; };
+eqDeep(hashed(10), hashed(20), 'the reverse-depth patch minus its depth is the same at every chat length');
+eqDeep(patch('@@depth 3\n@@reverse_depth 2\nx', {}, 10), { position: WI_POSITION.atDepth, depth: 3 },
+    'an earlier @@depth keeps the depth, and nothing marks it as moving');
 eqDeep(patch('@@reverse_depth 30\nx', {}, 10), {}, 'a negative result is out of range and refused');
 eqDeep(patch('@@position before_desc\nx'), { position: WI_POSITION.before }, 'before_desc is before char defs');
 eqDeep(patch('@@position after_desc\nx'), { position: WI_POSITION.after }, 'after_desc is after char defs');
@@ -69,44 +78,32 @@ console.log('ok   refusals: unparseable, out of range, and not implemented');
 // --- @@activate_only_after counts ASSISTANT messages. WA gates activation on it directly; it is not
 // mapped onto core's `delay`, which counts chat length.
 const winA = () => () => ['the villa burned'];
-const after = (n, assistantCount) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_after ${n}\nx` }],
-    winA(), { assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const after = (n, assistantCount) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_after ${n}\nx` }], winA(), { scope: NEUTRAL, assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(after(2, 1), 0, 'one assistant message of two required: not activated');
 eq(after(2, 2), 1, 'the count is reached: activated');
 eq(after(2, 9), 1, 'and stays activated after it');
 eq(after(0, 0), 1, 'zero is no gate at all');
-eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@activate_only_after abc\nx' }],
-    winA(), { assistantCount: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@activate_only_after abc\nx' }], winA(), { scope: NEUTRAL, assistantCount: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'an unparseable count is ignored, so the entry is ungated');
-eq(activationAdds([{ uid: 3, world: 'W', key: ['villa'], content: '@@activate_only_after 5\nx' }],
-    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 3, world: 'W', key: ['villa'], content: '@@activate_only_after 5\nx' }], winA(), { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'no assistantCount in opts at all leaves the gate off, as before');
 console.log('ok   @@activate_only_after gates activation on the assistant message count');
 
 // --- @@is_greeting gates on WHICH greeting is active: message 0's swipe_id, since getFirstMessage builds
 // swipes as [first_mes, ...alternate_greetings] (script.js `getFirstMessage`).
-const greet = (n, greetingIndex) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@is_greeting ${n}\nx` }],
-    winA(), { greetingIndex, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const greet = (n, greetingIndex) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@is_greeting ${n}\nx` }], winA(), { scope: NEUTRAL, greetingIndex, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(greet(0, 0), 1, 'greeting 0 is first_mes, and the entry asks for it');
 eq(greet(1, 0), 0, 'the entry asks for the first alternate, but first_mes is active');
 eq(greet(1, 1), 1, 'the first alternate is active');
 eq(greet(2, 1), 0, 'a different alternate is active');
-eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_greeting 1\nx' }],
-    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_greeting 1\nx' }], winA(), { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'no greetingIndex in opts at all leaves the gate off, as before');
 console.log('ok   @@is_greeting gates on the active greeting index');
 
 // --- @@activate_only_every: no remainder, and it reuses the count @@activate_only_after needs.
-const every = (n, assistantCount) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_every ${n}\nx` }],
-    winA(), { assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const every = (n, assistantCount) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@activate_only_every ${n}\nx` }], winA(), { scope: NEUTRAL, assistantCount, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(every(3, 3), 1, 'three of three: no remainder, activated');
 eq(every(3, 6), 1, 'six of three: likewise');
@@ -115,15 +112,11 @@ eq(every(0, 4), 1, 'a zero divisor is refused, so the entry is ungated');
 console.log('ok   @@activate_only_every gates on the remainder');
 
 // --- @@is_user_icon compares the active persona name, ST's name1.
-const icon = (want, personaName) => activationAdds(
-    [{ uid: 1, world: 'W', key: ['villa'], content: `@@is_user_icon ${want}\nx` }],
-    winA(), { personaName, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false },
-).length;
+const icon = (want, personaName) => activationAdds([{ uid: 1, world: 'W', key: ['villa'], content: `@@is_user_icon ${want}\nx` }], winA(), { scope: NEUTRAL, personaName, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }, ).length;
 
 eq(icon('Mara', 'Mara'), 1, 'the active persona matches');
 eq(icon('Mara', 'Juno'), 0, 'a different persona does not');
-eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_user_icon Mara\nx' }],
-    winA(), { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([{ uid: 2, world: 'W', key: ['villa'], content: '@@is_user_icon Mara\nx' }], winA(), { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'no personaName in opts at all leaves the gate off, as before');
 console.log('ok   @@is_user_icon gates on the active persona name');
 
@@ -131,16 +124,16 @@ console.log('ok   @@is_user_icon gates on the active persona name');
 // the ST half writes at onEntriesLoaded. Without it @@is_greeting would silently never fire.
 const parsed = { uid: 1, world: 'W', key: ['villa'], decorators: [], content: 'The villa',
     waDecorators: ['@@is_greeting 1'] };
-eq(activationAdds([parsed], winA(), { greetingIndex: 1, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
+eq(activationAdds([parsed], winA(), { scope: NEUTRAL, greetingIndex: 1, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 1,
     'a parsed entry gates off waDecorators, its content having been stripped');
-eq(activationAdds([parsed], winA(), { greetingIndex: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 0,
+eq(activationAdds([parsed], winA(), { scope: NEUTRAL, greetingIndex: 0, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).length, 0,
     '...and is gated out when the greeting does not match');
 console.log('ok   the gates read the stash on a parsed entry');
 
 // --- @@additional_keys and @@exclude_keys: alone each maps to keysecondary + selectiveLogic, together
 // ST cannot express both so WA compiles one SmartKey.
-const keys = (content, entry = {}, smartKeys = true) =>
-    decoratorFields({ key: ['villa'], content, ...entry }, { chatLength: 0, smartKeys });
+const keys = (content, entry = {}) =>
+    decoratorFields({ key: ['villa'], content, ...entry }, { chatLength: 0 });
 
 // --- alone, each maps to the core-compatible fields
 eqDeep(keys('@@additional_keys storm,rain\nx'),
@@ -192,7 +185,7 @@ const PAIR = '@@additional_keys storm,rain\n@@exclude_keys dream,fog\nThe villa'
 const gated = (key, text) => {
     const e = { key: [key], content: PAIR };
     Object.assign(e, decoratorFields(e, { chatLength: 0 }));
-    return keywordScore(e, text, e.key, { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).hits.length > 0;
+    return keywordScore(e, text, e.key, { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).hits.length > 0;
 };
 
 for (const k of ['villa', 'the house', 'HP::100', '=weird', 'the "windy" city', 'a||b', 'Xor']) {
@@ -220,7 +213,7 @@ console.log('ok   ? keys splice in, and an unusable exclusion does not take the 
 const US = String.fromCharCode(0x1F);
 const win = () => () => ['the villa burned'];
 const opts = fired => ({ fired, chatLength: 99, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false });
-const adds = (entries, fired) => activationAdds(entries, win(), opts(fired)).map(e => e.uid).join(',');
+const adds = (entries, fired) => activationAdds(entries, win(), { ...opts(fired), scope: NEUTRAL }).map(e => e.uid).join(',');
 // waDecorators, not decorators: decoratorFor reads the stash, never core's own `decorators` field.
 const ent = (uid, waDecorators) => ({ uid, world: 'W', key: ['villa'], waDecorators, content: 'x' });
 
@@ -234,7 +227,7 @@ eq(adds([ent(3, ['@@keep_activate_after_match'])], { [`W${US}3`]: 1 }), '3',
     'a latched-on entry activates');
 
 // It must activate with no keyword hit at all — that is the whole point.
-const noMatch = activationAdds([ent(4, ['@@keep_activate_after_match'])], () => ['nothing here'], opts({ [`W${US}4`]: 1 }));
+const noMatch = activationAdds([ent(4, ['@@keep_activate_after_match'])], () => ['nothing here'], { ...opts({ [`W${US}4`]: 1 }), scope: NEUTRAL });
 eq(noMatch.length, 1, 'a latched-on entry activates with no keyword hit');
 
 eq(adds([ent(5, ['@@dont_activate_after_match', '@@keep_activate_after_match'])], { [`W${US}5`]: 1 }), '5',
@@ -245,7 +238,7 @@ eq(adds([ent(6, ['@@dont_activate_after_match'])], undefined), '6',
 // The delay guard must run above the latch hoist: core drops a matched entry for an unarrived delay
 // before WA's own emit ever reaches it, so the hoist must not exempt a latched-on entry from it.
 const delayed = { ...ent(7, ['@@keep_activate_after_match']), delay: 50 };
-eq(activationAdds([delayed], win(), { ...opts(new Set([`W${US}7`])), chatLength: 10 }).length, 0,
+eq(activationAdds([delayed], win(), { scope: NEUTRAL, ...opts(new Set([`W${US}7`])), chatLength: 10 }).length, 0,
     'a latched-on entry whose delay has not arrived is not emitted');
 console.log('ok   the latch decorators, read from WA\'s own record');
 
@@ -296,16 +289,21 @@ eq(latchSuppressed(dontE(1, ' 5'), REC1, 16), false, '...and lets it back in pas
 eq(latchSuppressed(dontE(1, ' 0'), REC1, 11), false, 'a duration of 0 is over the next turn');
 eq(latchSuppressed(keepE(1), REC1, 10), false, 'the other latch is not this one');
 
-// Deleting a book prunes its latch keys from the open chat's record; the undo puts them back, so the
-// prune has to hand back what it removed rather than only what it kept.
-eqDeep(partitionLatches(REC, ['W']),
-    { kept: { [`X${US}3`]: 25 }, dropped: { [`W${US}1`]: 10, [`W${US}2`]: 40 } },
-    'a deleted book\'s keys are separated from the rest, firing turns intact');
-eqDeep(partitionLatches(REC, ['W', 'X']), { kept: {}, dropped: REC }, 'several books at once');
-eqDeep(partitionLatches({ [`W${US}1`]: 10 }, ['X']), { kept: { [`W${US}1`]: 10 }, dropped: {} },
-    'a book with no latches drops nothing');
-eqDeep(partitionLatches({}, ['W']), { kept: {}, dropped: {} }, 'an empty record');
-eqDeep(partitionLatches(null, ['W']), { kept: {}, dropped: {} }, 'an absent record is not a crash');
+// A latch record follows its entry: a delete drops the keys and hands them back for the undo, a rename or a new uid moves them.
+const dropBooks = names => k => (names.includes(latchBook(k)) ? null : undefined);
+eqDeep(rekeyLatches(REC, dropBooks(['W'])),
+    { fired: { [`X${US}3`]: 25 }, dropped: { [`W${US}1`]: 10, [`W${US}2`]: 40 } },
+    'a deleted book\'s keys are dropped and handed back, firing turns intact');
+eqDeep(rekeyLatches(REC, dropBooks(['W', 'X'])), { fired: {}, dropped: REC }, 'several books at once');
+eq(rekeyLatches({ [`W${US}1`]: 10 }, dropBooks(['X'])), null, 'a book with no latches changes nothing');
+eq(rekeyLatches({}, dropBooks(['W'])), null, 'an empty record');
+eq(rekeyLatches(null, dropBooks(['W'])), null, 'an absent record is not a crash');
+eqDeep(rekeyLatches(REC, k => (latchBook(k) === 'W' ? `V${k.slice(1)}` : undefined)),
+    { fired: { [`X${US}3`]: 25, [`V${US}1`]: 10, [`V${US}2`]: 40 }, dropped: {} }, 'a renamed book\'s keys move with it');
+eqDeep(rekeyLatches(REC, k => ({ [`W${US}1`]: `W${US}2`, [`W${US}2`]: `W${US}1` })[k]),
+    { fired: { [`X${US}3`]: 25, [`W${US}2`]: 10, [`W${US}1`]: 40 }, dropped: {} }, 'two entries that swap uids swap records');
+eqDeep(rekeyLatches(REC, k => (k === `W${US}1` ? `W${US}2` : undefined)),
+    { fired: { [`X${US}3`]: 25, [`W${US}2`]: 10 }, dropped: { [`W${US}2`]: 40 } }, 'a moved record displaces a stale one at its target');
 
 // Offline scene re-derivation cannot model the gates that read the chat's shape — an assistant/user split,
 // message 0's swipe_id, the persona, the latch record — because a capture stores the chat as one joined
@@ -333,3 +331,5 @@ eq(hasLatch(ent(10, ['@@dont_activate_after_match', '@@keep_activate_after_match
 eq(hasLatch(ent(11, [])), false, 'no decorators carries no latch');
 eq(hasLatch(ent(12, ['@@activate'])), false, 'an unrelated decorator carries no latch');
 console.log('ok   hasLatch');
+eqDeep(rekeyLatches({ a: 1, b: 2 }, () => 'c'), { fired: { c: 1 }, dropped: { b: 2 } },
+    'two moved onto one target: the first keeps it and the second is dropped, where an undo can find it');

@@ -1,19 +1,22 @@
 // WA's own matcher semantics, which core has no opinion about: SmartKeys, scoring units, the saturation curve, key refusals, excerpts.
 // A claim that cites core as the authority belongs in core-matcher-check.mjs.
 import { countKey, dropTags, keyExcerpts, segment, keyHits, keySpans, mergeSpans, splitKeys, textSegments, keywordScore as rankKeywordScore, markExcerptText, repeatCurveOf, secondaryKeys, usableKeys, usedMatchSources, withMatchSources, WI_LOGIC } from '../extension/matcher.mjs';
-import { keyVariants, validateSmartKey } from '../extension/smartkeys.mjs';
+import { createScanScope, keyVariants, validateSmartKey } from '../extension/smartkeys.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
+
 // keywordScore with the production defaults injected; k1 is 2 here, and passing a cfg to this wrapper does nothing.
-const keywordScore = (e, t, k) => rankKeywordScore(e, t, k, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
-const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
+const keywordScore = (e, t, k, o = {}) => rankKeywordScore(e, t, k, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false, ...o });
+const scored = (e, t, k) => keywordScore(e, t, k, { scope: NEUTRAL }).score > 0;
 
 // --- secondary keys gate the SCORE, not only activation
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
     const e = logic => ({ key: ['cosmonaut'], keysecondary: ['apollo', 'soyuz'], selectiveLogic: logic });
     const T = { none: 'the cosmonaut waited', one: 'the cosmonaut boarded apollo', all: 'cosmonaut apollo soyuz' };
-    const on = (logic, t) => keywordScore(e(logic), T[t], undefined, cfg).score > 0;
+    const on = (logic, t) => keywordScore(e(logic), T[t], undefined, { ...cfg, scope: NEUTRAL }).score > 0;
     //                       none   one    all
     const table = { 0: [false, true,  true ],   // AND_ANY
                     1: [true,  true,  false],   // NOT_ALL
@@ -24,15 +27,15 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
         ['none', 'one', 'all'].forEach((t, i) =>
             eq(on(Number(logic), t), want[i], `${names[logic]}: ${t} secondary present`));
     }
-    eq(keywordScore({ key: ['cosmonaut'] }, T.none, undefined, cfg).score > 0, true, 'no secondary keys: ungated');
-    eq(keywordScore(e(0), T.none, undefined, cfg).hits.length, 0, 'a gated entry reports no hits either');
+    eq(keywordScore({ key: ['cosmonaut'] }, T.none, undefined, { ...cfg, scope: NEUTRAL }).score > 0, true, 'no secondary keys: ungated');
+    eq(keywordScore(e(0), T.none, undefined, { ...cfg, scope: NEUTRAL }).hits.length, 0, 'a gated entry reports no hits either');
 }
 
 // --- secondary keys are validated like primaries, minus `negation-only`; AND_ALL here, so this is the POSITION rule
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
     const on = (sec, text, logic = 0) =>
-        keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, cfg).score > 0;
+        keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, { ...cfg, scope: NEUTRAL }).score > 0;
 
     eq(on(['? -gagarin'], 'the cosmonaut launched', 3), true, 'negation-only secondary: matches when the negated term is absent');
     eq(on(['? -gagarin'], 'cosmonaut gagarin waved', 3), false, '...and gates when it is present');
@@ -40,8 +43,7 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
     eq(on(['? -gagarin', 'astronaut'], 'cosmonaut astronaut', 3), true, '...and passes when both conditions hold');
     eq(usableKeys(['? -gagarin']).length, 0, 'the same key stays fatal as a PRIMARY');
 
-    const both = (text) => keywordScore(
-        { key: ['astronaut'], keysecondary: ['cosmonaut', '? -gagarin'], selectiveLogic: 3 }, text, undefined, cfg).score > 0;
+    const both = (text) => keywordScore({ key: ['astronaut'], keysecondary: ['cosmonaut', '? -gagarin'], selectiveLogic: 3 }, text, undefined, { ...cfg, scope: NEUTRAL }).score > 0;
     eq(both('the astronaut met the cosmonaut'), true, 'AND_ALL: positive secondary present, negated one absent');
     eq(both('astronaut cosmonaut gagarin'), false, '...the negation still excludes');
     eq(both('the astronaut waited alone'), false, '...and the positive secondary is still required');
@@ -57,7 +59,7 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
 {
     const cfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
     const on = (sec, logic, text) =>
-        keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, cfg).score > 0;
+        keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, { ...cfg, scope: NEUTRAL }).score > 0;
     const ABSENT = 'the cosmonaut waited', PRESENT = 'cosmonaut gagarin waved';
 
     eq(secondaryKeys({ keysecondary: ['? -gagarin'], selectiveLogic: 0 }).length, 0, 'AND_ANY drops a negation-only secondary');
@@ -79,20 +81,20 @@ const scored = (e, t, k) => keywordScore(e, t, k).score > 0;
 
     const explicit = '? cosmonaut && (apollo || -gagarin)';
     eq(validateSmartKey(explicit).length, 0, 'the explicit route validates clean');
-    eq(countKey(explicit, 'the cosmonaut waited', false, false) > 0, true, '...and reproduces the branch AND_ANY no longer offers');
-    eq(countKey(explicit, 'cosmonaut gagarin', false, false) > 0, false, '...negation and all');
+    eq(countKey(explicit, 'the cosmonaut waited', false, false, NEUTRAL) > 0, true, '...and reproduces the branch AND_ANY no longer offers');
+    eq(countKey(explicit, 'cosmonaut gagarin', false, false, NEUTRAL) > 0, false, '...negation and all');
 }
 
 eq(scored({ key: ['zzz'] }, 'alpha beta', ['alpha']), true, 'keywordScore honors explicit keys over entry.key');
 eq(scored({ key: ['alpha'] }, 'alpha beta', ['zzz']), false, 'explicit keys with no hit score zero even when entry.key would match');
 eq(scored({ key: ['alpha'] }, 'alpha beta'), true, 'defaults to entry.key when no list passed');
 eq(scored({ key: ['alpha'] }, 'alpha beta', []), false, 'empty key list (blanked 🔗, option off) scores zero');
-eq(keywordScore({ key: ['? -zebra', 'cosmonaut'] }, 'the cosmonaut waited').hits.map(h => h.key).join(','),
+eq(keywordScore({ key: ['? -zebra', 'cosmonaut'] }, 'the cosmonaut waited', undefined, { scope: NEUTRAL }).hits.map(h => h.key).join(','),
     'cosmonaut', 'a validator-error key is dropped from scoring, the valid one is not');
 eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed only on error keys scores zero');
 // --- scoring units (smartkeys.mjs `evaluate`): AND adds, OR pools into one saturation, a weight multiplies its unit
 {
-    const sc = (key, text) => Number(keywordScore({ key: [key] }, text).score.toFixed(3));
+    const sc = (key, text) => Number(keywordScore({ key: [key] }, text, undefined, { scope: NEUTRAL }).score.toFixed(3));
     const curve = n => Number(repeatCurveOf(n, 2).toFixed(3));
 
     eq(sc('? moon', 'moon'), 1, 'a matched expression is worth 1');
@@ -115,11 +117,33 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(sc('? moon AND rocket::0', 'moon rocket'), 1, 'a zero-weight conjunct gates without scoring');
     eq(sc('? (moon OR rocket::0)', 'moon rocket'), 1, '...and does not drag its group\'s mean down');
 
-    // negation-only is fatal in a primary, so the all-zero-weight key is the reachable case
-    eq(sc('? moon::0', 'moon'), 1, 'an all-zero-weight key that matches still counts as one');
+    // The author's weights as an odds multiplier (keywordScore `logWeight`): intent, so neither counts nor the curve reach it.
+    const odds = (keys, text, scope = NEUTRAL) => Number(Math.exp(keywordScore({ key: keys }, text, keys, { scope }).logWeight).toFixed(6));
+    eq(odds(['? (Picard OR Janeway::2) Borg'], 'Janeway fought the Borg'), 2, 'a matched ::2 multiplies the odds by exactly 2');
+    eq(odds(['? (Picard OR Janeway::2) Borg'], 'Picard fought the Borg'), 1, '...and the unweighted alternative leaves them alone');
+    eq(odds(['? (Picard OR Janeway::2) Borg'], 'Picard, Picard, Picard and Janeway fought the Borg'), 2, '...nor dilutes the weighted one it pools with');
+    eq(odds(['? Janeway::2 Borg::3'], 'Janeway fought the Borg'), 6, 'weights on conjuncts multiply');
+    eq(odds(['? (sunglass OR ray-ban::5)::5'], 'new ray-bans'), 25, '...as a group weight does with its member');
+    eq(odds(['? (Picard::0.5 OR Janeway) Borg'], 'Picard fought the Borg'), 0.5, 'a weight below 1 lowers them');
+    eq(odds(['? saturn OR (mercury AND planet::0)'], 'the planet mercury'), 1, '::0 is a gate, so it says nothing about relevance');
+    eq(odds(['? Janeway::2 Borg', '? Janeway::0.5 cube'], 'Janeway at the Borg cube'), 2, 'keys are alternatives: the strongest matched one, not a product');
+    eq(odds(['? moon mission', 'moon'], 'the moon mission'), 1, 'an unweighted key is exactly neutral');
+    eq(odds(['? (Janeway Borg cube)::2'], 'Janeway at the Borg cube'), 2, 'a group weight counts once, however many conjuncts it holds');
+    eq(odds(['? (Janeway::2 Borg::3) OR Picard'], 'Janeway fought the Borg'), 6, 'an OR takes its matched alternative whole, conjuncts multiplied');
+    eq(odds(['? (Janeway::2 Borg::3) OR Picard::4'], 'Janeway and Picard fought the Borg'), 6, '...the strongest one when both match');
+    eq(odds(['? Janeway (Borg)::0'], 'Janeway fought the Borg'), 1, 'a ::0 group is a gate too');
+    eq(odds(['? {{user}}~0::2 astronaut'], 'Sally the astronaut', createScanScope({ macros: { '{{user}}': 'Sally' } })), 2, 'a one-word macro keeps its weight beside ~N');
+    eq(odds(['? {{user}}::2 astronaut'], 'Neil Armstrong the astronaut', createScanScope({ macros: { '{{user}}': 'Neil Armstrong' } })), 2, '...and a many-word one weighs once, not per word');
+    eq(odds(['? (Janeway::2)~3 Borg'], 'Janeway fought the Borg'), 2, '...as a literal lone term does');
+    eq(sc('? (moon::2)~3', 'moon'), 2 * sc('? (moon)~3', 'moon'), '...which its score reads too');
 
-    const gated = (logic, sec, text) => Number(keywordScore(
-        { key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text).score.toFixed(3));
+    // negation-only is fatal in a primary, so the all-zero-weight key is the reachable case
+    eq(sc('? moon::0', 'moon'), 0, 'an all-zero-weight key that matches scores nothing');
+    eq(sc('? (moon)::0', 'moon'), 0, '...a zero-weight group as well');
+    eq(sc('? (moon rocket)::0', 'moon rocket'), 0, '...however many terms it gates on');
+    eq(keywordScore({ key: ['? moon::0'] }, 'moon', ['? moon::0'], { scope: NEUTRAL }).hits.length, 1, '...and still hits, which is what activates it');
+
+    const gated = (logic, sec, text) => Number(keywordScore({ key: ['cosmonaut'], keysecondary: sec, selectiveLogic: logic }, text, undefined, { scope: NEUTRAL }).score.toFixed(3));
     const T = 'cosmonaut apollo soyuz';
     eq(gated(3, ['apollo'], T), sc('? cosmonaut AND apollo', T), 'AND_ALL agrees with the hand-written form');
     eq(gated(3, ['apollo', 'soyuz'], T), sc('? cosmonaut AND apollo AND soyuz', T), '...with two secondaries');
@@ -127,7 +151,7 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(gated(2, ['gagarin'], T), sc('? cosmonaut AND NOT gagarin', T), 'NOT_ANY agrees, as it always did');
     eq(gated(2, ['gagarin'], T), 1, '...at the primary alone, because a NOT yields no unit');
 
-    eq(Number(keywordScore({ key: ['? (glasses OR spectacles)'] }, ['glasses', 'spectacles']).score.toFixed(3)),
+    eq(Number(keywordScore({ key: ['? (glasses OR spectacles)'] }, ['glasses', 'spectacles'], undefined, { scope: NEUTRAL }).score.toFixed(3)),
         curve(2), 'a unit saturates once across the whole window');
 }
 
@@ -137,7 +161,7 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     /** The primary's hit through the shipped path — `count` is occurrences, `score` is contribution. */
     const hit = (primary, sec, logic, text) => {
         const e = { key: [primary], keysecondary: sec, selectiveLogic: logic };
-        return keywordScore(e, text, e.key).hits.find(h => h.key === primary);
+        return keywordScore(e, text, e.key, { scope: NEUTRAL }).hits.find(h => h.key === primary);
     };
     const count = (...a) => hit(...a)?.count ?? 0;
     const keyScore = (...a) => hit(...a)?.score ?? 0;
@@ -197,17 +221,17 @@ eq(scored({ key: ['? -zebra'] }, 'the cosmonaut waited'), false, 'an entry keyed
     eq(repeatCurveOf(5, 1.2), repeatCurveOf(5, 1.2, 'presence-log'), 'the default curve is the shipped curve');
 }
 
-eq(countKey('? -zebra', 'the cosmonaut waited', false, false), 1,
+eq(countKey('? -zebra', 'the cosmonaut waited', false, false, NEUTRAL), 1,
     'countKey itself is unfiltered — it answers what the expression does, and the filter is the caller\'s');
 
 // --- a key the grammar refuses counts 0 wherever it is matched; the depth ceiling is parse's, not the stack's (~2200 groups on it)
-eq(countKey(`?${'('.repeat(101)}x`, 'x'), 0, 'a key nesting past the ceiling counts 0, not a throw');
-eq(countKey(`?${'!'.repeat(101)}x`, 'x'), 0, 'negations past the ceiling likewise');
-eq(countKey(`?${'('.repeat(100)}x`, 'x'), 1, 'the ceiling itself parses and matches');
+eq(countKey(`?${'('.repeat(101)}x`, 'x', undefined, undefined, NEUTRAL), 0, 'a key nesting past the ceiling counts 0, not a throw');
+eq(countKey(`?${'!'.repeat(101)}x`, 'x', undefined, undefined, NEUTRAL), 0, 'negations past the ceiling likewise');
+eq(countKey(`?${'('.repeat(100)}x`, 'x', undefined, undefined, NEUTRAL), 1, 'the ceiling itself parses and matches');
 
 
 // --- keyExcerpts: the first place a key matched, marked «so»; must agree with countKey on WHERE
-const keyExcerpt = (key, text, cs, ww, context = 28) => markExcerptText(keyExcerpts(key, text, cs, ww, context, 1)[0]);
+const keyExcerpt = (key, text, cs, ww, context = 28) => markExcerptText(keyExcerpts(key, text, cs, ww, context, 1, NEUTRAL)[0]);
 eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, false),
     'the curtains were «thread»bare by then', 'substring: excerpt shows the containing word');
 eq(keyExcerpt('thread', 'the curtains were threadbare by then', false, true),
@@ -225,12 +249,12 @@ eq(keyExcerpt('knots', 'Cafe\u0301 and Nai\u0308ve. He knots the rope', false, f
 eq(keyExcerpt('flushing', "it. He doesn't need to. He's flushing dark all down his chest, and it keeps going.", false, true, 30),
     "it. He doesn't need to. He's «flushing» dark all down his chest, and…",
     'a window opens and closes on a word boundary, never mid-word');
-const own = keyExcerpts('rut', 'she said «no rut» today', false, false)[0];
+const own = keyExcerpts('rut', 'she said «no rut» today', false, false, 28, 20, NEUTRAL)[0];
 eq(own.text.slice(own.start, own.end), 'rut', 'offsets select the match even when the source has guillemets');
-eq(countKey('/café/', 'the cafe\u0301 rope', false, false), 1, 'a regex matches decomposed text after NFC');
-eq(countKey('/—/', 'a — b', false, false), 1, 'orthography is still NOT folded: a pattern can match a real em-dash');
-eq(countKey("/Cap'n/", 'Cap\u2019n', false, false), 0, "and a straight-quote pattern still misses a curly one");
-eq(countKey("/Cap['\u2019]n/", 'Cap\u2019n', false, false), 1, 'which the author widens with a class, as before');
+eq(countKey('/café/', 'the cafe\u0301 rope', false, false, NEUTRAL), 1, 'a regex matches decomposed text after NFC');
+eq(countKey('/—/', 'a — b', false, false, NEUTRAL), 1, 'orthography is still NOT folded: a pattern can match a real em-dash');
+eq(countKey("/Cap'n/", 'Cap\u2019n', false, false, NEUTRAL), 0, "and a straight-quote pattern still misses a curly one");
+eq(countKey("/Cap['\u2019]n/", 'Cap\u2019n', false, false, NEUTRAL), 1, 'which the author widens with a class, as before');
 eq(keyExcerpt('/café/', 'He knots the cafe\u0301 rope', false, false),
     'He knots the «café» rope', 'the excerpt marks the composed form it searched');
 eq(keyExcerpt('/knot(s|ting)?/', 'She paused — then again — and sighed… He knots the rope', false, false),
@@ -245,13 +269,13 @@ console.log('ok   keyExcerpt: localises what countKey counted, folded-haystack d
 
 // --- a compound SmartKey excerpts one leaf per credited unit, in TEXT order, each carrying its own occurrence count
 const space = 'the Russian cosmonaut Yuri Gagarin flew; the American astronaut Neil Armstrong walked. Gagarin again.';
-const leaves = k => keyExcerpts(k, space, false, true).map(e => `${e.negated ? '-' : ''}${e.term}:${e.n}`);
+const leaves = k => keyExcerpts(k, space, false, true, 28, 20, NEUTRAL).map(e => `${e.negated ? '-' : ''}${e.term}:${e.n}`);
 eq(leaves('? (armstrong gagarin)').join(' '), 'gagarin:2 armstrong:1', 'AND: both leaves, ordered by position, not by the AST');
 eq(leaves('? (apple | gagarin | coconut)').join(' '), 'gagarin:2', 'OR: only the side that hit, and the pooled n is that side\'s own');
 eq(leaves('? (gagarin -banana)').join(' '), 'gagarin:2 -banana:0', 'NOT: a negative that never matches is named at 0');
 eq(leaves('? (gagarin banana)').join(' '), 'gagarin:2', 'a key whose verdict is false still shows the branch that hit — the group is tuned against that');
 eq(leaves('? (apple | banana)').join(' '), '', 'a key nothing in it hit shows nothing');
-eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12)[0]),
+eq(markExcerptText(keyExcerpts('? (armstrong gagarin)', space, false, true, 12, 20, NEUTRAL)[0]),
     '…Yuri «Gagarin» flew; the…', 'a leaf excerpt is the ordinary one, at the caller\'s context width');
 eq(leaves('? (/Gagar\\w+/ armstrong)').join(' '), '/Gagar\\w+/:2 armstrong:1', 'a regex leaf reports the pattern as its term, and is case-sensitive without /i');
 console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, with per-leaf counts');
@@ -259,7 +283,7 @@ console.log('ok   keyExcerpt: compound SmartKeys excerpt every credited leaf, wi
 
 // keyHits as one string: `key:count | leaf n, leaf n | ...`, one field per window, `!` prefixing an unmatched one.
 const digest = (k, text, opts = {}) => {
-    const [r] = keyHits([k], text, opts.cs ?? false, opts.ww ?? true, opts);
+    const [r] = keyHits([k], text, opts.cs ?? false, opts.ww ?? true, { ...opts, scope: NEUTRAL });
     if (r.message) return `${r.key} !! ${r.message}`;
     return [`${r.key}:${r.count}`, ...r.segments.map(sg => `${sg.matched ? '' : '!'}${sg.leaves.map(l => `${l.negated ? '-' : ''}${l.term} ${l.n}`).join(', ')}`)].join(' | ');
 };
@@ -269,20 +293,20 @@ eq(digest('? cosmonaut -astronaut', space), '? cosmonaut -astronaut:0 | !cosmona
     'the veto is named with its count in the segment it matched in, so a key reading 0 says what stopped it');
 eq(digest('? cosmonaut -astronuat', space), '? cosmonaut -astronuat:1 | cosmonaut 1, -astronuat 0',
     'a negative that never matches reads 0 — a misspelt one is invisible otherwise');
-eq(keyHits(['? cosmonaut -astronuat'], space, false, true)[0].segments[0].excerpts.length, 1,
+eq(keyHits(['? cosmonaut -astronuat'], space, false, true, { scope: NEUTRAL })[0].segments[0].excerpts.length, 1,
     'only a branch that matched has a place to show');
-eq(keySpans(['? cosmonaut -astronaut'], space, false, true).map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '),
+eq(keySpans(['? cosmonaut -astronaut'], space, false, true, { scope: NEUTRAL }).map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '),
     'cosmonaut astronaut!', 'the veto is marked too, flagged so a caller can draw it as what stopped the key');
 // A window with no positive branch is skipped, however its negatives read.
 const windows = 'His breath is fast and heavy.\n\nHe looks at you slowly, closing his eyes.\n\nHis breath hitches before slowly leveling out. Catch my breath.';
 eq(digest('? breath -slow', windows, { matchWindow: 'paragraph' }),
     '? breath -slow:1 | breath 1, -slow 0 | !breath 2, -slow 1',
     'the middle window holds only the negative, so it is skipped; the counts are that window\'s own');
-eq(keySpans(['? breath -slow'], windows, false, true, { matchWindow: 'paragraph' }).map(sp => sp.negated ? `-${sp.term}` : sp.term).join(' '),
+eq(keySpans(['? breath -slow'], windows, false, true, { scope: NEUTRAL, matchWindow: 'paragraph' }).map(sp => sp.negated ? `-${sp.term}` : sp.term).join(' '),
     'breath breath -slow breath', 'and nothing in it is marked, where both breaths of the failing window are');
 
 const breaths = 'He drew a breath.\n\nA slow breath, held.\n\nAnother breath.';
-eq(keySpans(['? breath -slow'], breaths, false, true, { matchWindow: 'paragraph' })
+eq(keySpans(['? breath -slow'], breaths, false, true, { scope: NEUTRAL, matchWindow: 'paragraph' })
     .map(sp => `${sp.term}${sp.negated ? '!' : ''}`).join(' '), 'breath slow! breath breath',
     'a branch that hit is marked wherever it hit, including the segment the veto took');
 eq(digest('breath', breaths, { matchWindow: 'paragraph', gate: { keys: ['slow'], logic: WI_LOGIC.NOT_ANY } }),
@@ -294,24 +318,24 @@ console.log('ok   keyHits: every branch per segment, negated ones counted, and n
 // --- gate: a secondary condition in core's own terms, matching exactly where the entry's key does
 {
     const texts = ['apple on a tablet', 'apple alone', 'banana and computer', 'nothing here', 'apple computer tablet'];
-    const opts = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    const opts = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false, scope: NEUTRAL };
     const keys = ['apple', 'banana'], sec = ['computer', 'tablet'];
     for (const logic of [WI_LOGIC.AND_ANY, WI_LOGIC.AND_ALL, WI_LOGIC.NOT_ANY, WI_LOGIC.NOT_ALL]) {
         const entry = { key: keys, keysecondary: sec, selective: true, selectiveLogic: logic };
         for (const text of texts) {
             const matched = new Set(rankKeywordScore(entry, text, entry.key, opts).hits.map(h => h.key));
-            const gated = keyHits(keys, text, false, false, { gate: { keys: sec, logic } });
+            const gated = keyHits(keys, text, false, false, { scope: NEUTRAL, gate: { keys: sec, logic } });
             eq(gated.map(r => r.count > 0).join(), keys.map(k => matched.has(k)).join(),
                 `logic ${logic} on "${text}": the gate matches exactly where the entry's own secondary keys do`);
         }
     }
     const gate = { keys: sec, logic: WI_LOGIC.AND_ANY };
-    eq(keyHits(['apple'], 'apple apple computer', false, false, { gate })[0].count, 2,
+    eq(keyHits(['apple'], 'apple apple computer', false, false, { scope: NEUTRAL, gate })[0].count, 2,
         'the number under a gate is the key\'s own occurrences, not the gate\'s weight');
     eq(digest('apple', 'apple alone', { ww: false, gate }), 'apple:0 | !apple 1, computer 0, tablet 0',
         'a key the gate refused counts 0, and still shows every branch of the condition');
-    eq(keyHits(['apple'], 'apple on a tablet', false, false, {}).length, 1, 'no gate, no condition');
-    eq(keySpans(['apple'], 'apple alone. apple and a tablet', false, false, { gate, matchWindow: 'scan' })
+    eq(keyHits(['apple'], 'apple on a tablet', false, false, { scope: NEUTRAL }).length, 1, 'no gate, no condition');
+    eq(keySpans(['apple'], 'apple alone. apple and a tablet', false, false, { scope: NEUTRAL, gate, matchWindow: 'scan' })
         .map(sp => sp.term).join(' '), 'apple apple tablet',
         'every occurrence of every branch is marked, the gate\'s terms included');
     console.log('ok   gate: a secondary condition on every key, counted as the key and verdicted as the entry');
@@ -327,12 +351,17 @@ eq(splitKeys('? "hot, tub", cat').join(' | '), '? "hot, tub" | cat', 'and so doe
 eq(splitKeys('and/or, cat').join(' | '), 'and/or | cat', 'a slash mid-token is an ordinary character, not a regex opening');
 eq(splitKeys('/unclosed,cat').join(' | '), '/unclosed | cat', 'a regex that never closes is split back up rather than left holding the comma');
 eq(splitKeys('a,,b\n\n').join(' | '), 'a | b', 'empty tokens are dropped, not kept as blanks');
+eq(splitKeys('Elara, 6" sword, Bob').join(' | '), 'Elara | 6" sword | Bob', 'a quote mark inside a term is text, not a phrase opening');
+eq(splitKeys('l«x, y').join(' | '), 'l«x | y', '...of any family');
+eq(splitKeys('? =^"a, b", c').join(' | '), '? =^"a, b" | c', 'a SmartKey phrase after its flags still opens');
+eq(splitKeys('? x&"a, b", c').join(' | '), '? x&"a, b" | c', '...and after an operator');
+eq(splitKeys('? 6" tall, c').join(' | '), '? 6" tall | c', '...but not inside a SmartKey term');
 eq(splitKeys('').length, 0, 'nothing in, nothing out');
 console.log('ok   splitKeys: comma and newline separate; regexes and quoted terms keep their commas');
 
 
 // --- keyHits: one entry per key, whatever the key is
-const rows = keyHits(['gagarin', '? (armstrong gagarin)', '? -banana', 'nobody'], space, false, true);
+const rows = keyHits(['gagarin', '? (armstrong gagarin)', '? -banana', 'nobody'], space, false, true, { scope: NEUTRAL });
 eq(rows.map(r => r.key).join(' | '), 'gagarin | ? (armstrong gagarin) | ? -banana | nobody', 'one entry per key, in the order given');
 eq(rows[0].count, 2, 'a plain key reports its occurrences');
 eq(rows[0].segments[0].excerpts.length, 2, 'a single-branch key carries every occurrence: no window can filter it');
@@ -342,7 +371,7 @@ eq(rows[2].count, undefined, 'a negation-only SmartKey can never match...');
 eq(typeof rows[2].message, 'string', '...so it carries a message instead of a count');
 eq(rows[3].count, 0, 'a key that simply did not match is a zero, not an error');
 eq(rows[3].segments.length, 0, 'and has no segment to report');
-eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true).map(r => r.key).join(','), 'gagarin,armstrong',
+eq(keyHits(['gagarin', '', '  armstrong  '], space, false, true, { scope: NEUTRAL }).map(r => r.key).join(','), 'gagarin,armstrong',
     'blanks are dropped and keys trimmed; splitting the caller\'s text into keys is the caller\'s business');
 console.log('ok   keyHits: one entry per key, its segments, and a message for a key that cannot fire');
 
@@ -378,13 +407,13 @@ eq(digest('? cosmonaut -astronaut', paras, { matchWindow: 'scan' }), '? cosmonau
 eq(digest('? cosmonaut -astronaut', paras, { matchWindow: 'paragraph' }),
     '? cosmonaut -astronaut:1 | !cosmonaut 1, -astronaut 1 | cosmonaut 1, -astronaut 0',
     'by paragraph the veto takes the first and the second stands');
-eq(keySpans(['? cosmonaut -astronaut'], paras, false, true, { matchWindow: 'paragraph' }).map(sp => sp.start).join(),
+eq(keySpans(['? cosmonaut -astronaut'], paras, false, true, { scope: NEUTRAL, matchWindow: 'paragraph' }).map(sp => sp.start).join(),
     '8,48,79', 'a span is offset onto the whole text, not the segment it was found in');
 console.log('ok   textSegments: --- cuts messages, blank lines cut paragraphs, offsets survive both');
 
 
 // --- keySpans: where to mark the haystack itself — source offsets, in order, never overlapping
-const spans = keySpans(['gagarin', '? (armstrong gagarin)', 'neil armstrong'], space, false, true);
+const spans = keySpans(['gagarin', '? (armstrong gagarin)', 'neil armstrong'], space, false, true, { scope: NEUTRAL });
 eq(spans.map(sp => `${sp.key}@${sp.start}`).join(' '), 'gagarin@27 neil armstrong@64 gagarin@87',
     'overlapping matches become one span, at the extent of the one that starts first');
 eq(spans[0].keys.map(k => k.key).join(' + '), 'gagarin + ? (armstrong gagarin)',
@@ -392,7 +421,7 @@ eq(spans[0].keys.map(k => k.key).join(' + '), 'gagarin + ? (armstrong gagarin)',
 eq(spans[1].keys.map(k => k.term ?? k.key).join(' + '), 'neil armstrong + armstrong',
     'a compound listed there names its leaf, not the whole key');
 eq(space.slice(spans[1].start, spans[1].end), 'Neil Armstrong', 'the offsets index the text itself, not an excerpt');
-eq(keySpans(['? (armstrong gagarin)'], space, false, true).map(sp => `${sp.term}@${sp.start}`).join(' '),
+eq(keySpans(['? (armstrong gagarin)'], space, false, true, { scope: NEUTRAL }).map(sp => `${sp.term}@${sp.start}`).join(' '),
     'gagarin@27 armstrong@69 gagarin@87', 'a compound names the leaf that produced each span, at every occurrence');
 eq(mergeSpans([{ start: 5, end: 9, key: 'b' }, { start: 0, end: 7, key: 'a' }]).map(sp => `${sp.key}@${sp.start}-${sp.end}`).join(),
     'a@0-7', 'mergeSpans folds an overlap into the span that starts first, whatever order they arrive in');
@@ -432,9 +461,9 @@ console.log('ok   keySpans: source offsets for marking the haystack, ordered and
     const MES = 'She waited.\n<internal_states>\nLocation: Big Sur\nPresent: Kyle, Mara\n</internal_states>\n<div style="border:1px solid">Kyle: are you there?</div>\nShe did not answer.';
     const out = dropTags(MES, 'internal_states');
 
-    eq(countKey('Big Sur', MES, false, false), 1, 'the tracker matches the key before the strip');
-    eq(countKey('Big Sur', out, false, false), 0, 'and not after — the content went with the tag');
-    eq(countKey('Kyle', out, false, false), 1, 'the div survives: an unnamed tag is scene text, not bookkeeping');
+    eq(countKey('Big Sur', MES, false, false, NEUTRAL), 1, 'the tracker matches the key before the strip');
+    eq(countKey('Big Sur', out, false, false, NEUTRAL), 0, 'and not after — the content went with the tag');
+    eq(countKey('Kyle', out, false, false, NEUTRAL), 1, 'the div survives: an unnamed tag is scene text, not bookkeeping');
     eq(out.includes('She waited.') && out.includes('She did not answer.'), true, 'prose either side is untouched');
 
     eq(dropTags(MES, ''), MES, 'empty spec is off, not a no-tag strip');
@@ -463,7 +492,7 @@ eq(digest('? (copper pipe)~1', 'copper far far pipe', { ww: false }), '? (copper
     'both leaves hit, the window is marked unmatched: the leaves say what is there, the flag says it is too far apart');
 eq(digest('? (copper pipe)~1', 'copper hot pipe', { ww: false }), '? (copper pipe)~1:1 | copper 1, pipe 1',
     'within reach, the count is the cluster');
-eq(keyExcerpts('? (copper pipe)~1', 'copper hot pipe', false, false).map(e => `${e.term}:${e.n}`).join(' '), 'copper:1 pipe:1',
+eq(keyExcerpts('? (copper pipe)~1', 'copper hot pipe', false, false, 28, 20, NEUTRAL).map(e => `${e.term}:${e.n}`).join(' '), 'copper:1 pipe:1',
     'a matched proximity group excerpts its leaves');
 console.log('ok   proximity: witness spans report leaves, the verdict is the cluster');
 
@@ -473,9 +502,9 @@ console.log('ok   proximity: witness spans report leaves, the verdict is the clu
     eq(keyVariants('-gate').join('|'), '-gate', 'a leading hyphen interns no variant');
     eq(keyVariants('gate-').join('|'), 'gate-', 'nor a trailing one');
     eq(keyVariants('-a-b-').join('|'), '-a-b-', 'edges win over the interior hyphens');
-    eq(countKey('-gate', 'a gate in the wall', false, false), 0, 'so the suffix key does not match a bare gate');
-    eq(countKey('-gate', 'the -gate suffix', false, false), 1, '...and still matches what it says');
-    eq(countKey('sci-fi', 'a sci fi novel', false, false), 1, 'the interior expansion is untouched');
+    eq(countKey('-gate', 'a gate in the wall', false, false, NEUTRAL), 0, 'so the suffix key does not match a bare gate');
+    eq(countKey('-gate', 'the -gate suffix', false, false, NEUTRAL), 1, '...and still matches what it says');
+    eq(countKey('sci-fi', 'a sci fi novel', false, false, NEUTRAL), 1, 'the interior expansion is untouched');
 }
 console.log('ok   keyVariants: only an interior hyphen opens to a space');
 
@@ -487,18 +516,29 @@ console.log('ok   keyVariants: only an interior hyphen opens to a space');
     eq(codes(`/${DE}/`), 'warn:regex-decomposed', 'a decomposed pattern is flagged');
     eq(codes(`/${CO}/`), '', '...and a composed one is not');
     eq(codes(`? /${DE}/ hat`), 'warn:regex-decomposed', 'a decomposed REGEX TERM is flagged too');
-    eq(countKey(`/${DE}/`, `my friend ${CO} and`, false, false), 0, 'the flag is earned: it matches nothing');
-    eq(countKey(`/${DE}/`, `my friend ${DE} and`, false, false), 0, '...not even decomposed text, which is composed first');
+    eq(countKey(`/${DE}/`, `my friend ${CO} and`, false, false, NEUTRAL), 0, 'the flag is earned: it matches nothing');
+    eq(countKey(`/${DE}/`, `my friend ${DE} and`, false, false, NEUTRAL), 0, '...not even decomposed text, which is composed first');
 
     // A literal key NFCs BOTH sides, so the same spelling is fine and must not be flagged.
     eq(codes(`? "${DE}"`), '', 'a decomposed literal term is not flagged');
-    eq(countKey(`? ="${DE}"`, `my friend ${CO} and`, false, false), 1, '...because it matches composed text');
+    eq(countKey(`? ="${DE}"`, `my friend ${CO} and`, false, false, NEUTRAL), 1, '...because it matches composed text');
 
     // warn, not error: the decomposed run can sit in an optional group the rest of the pattern survives.
-    eq(countKey(`/(?:é)?cat/`, 'a cat', false, false), 1, 'an optional decomposed group still matches');
+    eq(countKey(`/(?:é)?cat/`, 'a cat', false, false, NEUTRAL), 1, 'an optional decomposed group still matches');
     eq(codes(`/(?:é)?cat/`), 'warn:regex-decomposed', '...so it is a warn and not an error');
 
     // An uncompilable pattern reports THAT, and returns before the composition question.
     eq(codes(`/${DE}(/`), 'error:regex-invalid', 'a pattern that cannot compile reports only that');
 }
 console.log('ok   regex-decomposed: a pattern the haystack composes out of reach is warned');
+{
+    // A compound key's leaves report where the TERM itself sits, never what its value reads as when re-parsed as a key.
+    const S = createScanScope();
+    const [row] = keyHits(['? "/re/" fire'], 'there is fire and /re/', false, false, { scope: S });
+    const leaf = row.segments[0].leaves.find(l => l.term === '/re/');
+    eq(leaf?.n, 1, 'a quoted /re/ counts its literal occurrences, not the pattern re');
+    const ex = row.segments[0].excerpts.find(e => e.term === '/re/');
+    eq(ex && 'there is fire and /re/'.slice(ex.at, ex.to), '/re/', '...and its excerpt marks the literal');
+    const [q] = keyHits(['? "?x" fire'], 'fire, then ?x and x', false, false, { scope: S });
+    eq(q.segments[0].leaves.find(l => l.term === '?x')?.n, 1, 'a quoted ?x counts the text ?x, not a SmartKey for x');
+}

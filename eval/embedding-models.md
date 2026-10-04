@@ -11,7 +11,7 @@ profile for a chat model is not a valid vectorization source.
 WA's server plugin is what returns a cosine similarity score. On the no-plugin path ST's own endpoint
 returns hashes and metadata only, so WA scores with a fit over `text`, `properNouns` and `density`,
 every model behaves identically, and that fit holds up on its own (E1). With the plugin the model's
-cosine reaches the ranker. The Qwen family is clearly ahead of the no-plugin fit; bge-m3 and jina each
+cosine reaches the ranker. The Qwen family is clearly ahead of the no-plugin fit (E2); bge-m3 and jina each
 lose to it on most book folds, with the margin coming mostly from one book plus the smallest fold (E3).
 
 ## What to use
@@ -19,11 +19,11 @@ lose to it on most book folds, with the margin coming mostly from one book plus 
 | | when |
 |---|---|
 | **Qwen3-Embedding-8B** | Best on every book fold (E2). Needs an engine that can serve it fast — see *Speed*. |
-| **qwen3-embedding:4b** | Most of 8B's lead at 2560 dimensions instead of 4096. The pick if 8B does not fit. |
-| **qwen3-embedding:0.6b** | Closest of the small models, at a fraction of the parameters. |
-| **embeddinggemma** | Not separable from 0.6b here, and the smallest index at 768 dimensions. |
-| **mxbai-embed-large** | Beaten by everything newer, and its 512-token context truncates a scan window — see *Context length*. |
-| **bge-m3** | Fine, and beaten by everything newer. |
+| **qwen3-embedding:4b** | Most of 8B's lead at 2560 dimensions instead of 4096 (E2). The pick if 8B does not fit. |
+| **qwen3-embedding:0.6b** | Closest of the small models, at a fraction of the parameters (E2). |
+| **embeddinggemma** | Not separable from 0.6b here (E2), and the smallest index at 768 dimensions. |
+| **mxbai-embed-large** | Beaten by everything newer (E2), and its 512-token context truncates a scan window — see *Context length*. |
+| **bge-m3** | Fine, and beaten by everything newer (E2). |
 | **jina-embeddings-v2-base-en** | **ST's stock default, and last here (E2).** Runs on the CPU and adds seconds to every retrieving turn (E10) — see *Speed*. Switch off it. |
 
 Set the model's task instruction? No — WA does it, from `relevance.mjs` `PREFIXES`, on the query only,
@@ -41,7 +41,7 @@ ships a fit of its own beside it.
 The sweep on the shipped model is in the register (E5): lowering the cutoff buys recall at the cost of
 precision, every delivered memory entry costs on the order of a couple thousand tokens, and precision
 never reaches much above half at any cutoff for any model. The sweep is over the memory tier alone;
-reference entries and constants sit on top of every figure. The usable range is 0.05 to about 0.35; past there the dial loses
+reference entries and constants sit on top of every figure. The usable range is 0.05 to about 0.30; past there the dial loses
 both. The default sits at the recall-favouring end deliberately, F2 weighting recall; a user who wants
 the other end says so with this knob.
 

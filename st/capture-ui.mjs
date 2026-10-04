@@ -1,7 +1,7 @@
 // capture-ui.mjs — the capture commands: /wa-grade, /wa-super-grade, /wa-super-eval and /wa-versus. The popups
 // around grading.mjs; drives the pipeline through `host` and is called back by nothing in it.
 
-import { getContext, extension_settings } from '../../../../extensions.js';
+import { getContext, extension_settings, extensionTypes } from '../../../../extensions.js';
 import { loadWorldInfo, world_info_budget, world_info_budget_cap, world_info_case_sensitive, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_max_recursion_steps, world_info_recursive } from '../../../../world-info.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { escapeHtml, getCharaFilename, getStringHash, download, uuidv4 } from '../../../../utils.js';
@@ -13,7 +13,8 @@ import * as matcher from '../extension/matcher.mjs';
 import { entryFoldHtml, keyHitsHtml, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { entryKey } from '../extension/content-lexical.mjs';
 import { gradeOrder } from '../extension/sort.mjs';
-import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, keyByUid, mergeGrades, openBundle, rowKey, sampleFile, sceneDiff, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
+import { isConstant, layoutScore } from '../extension/layout.mjs';
+import { GRADE_ANCHORS, GRADE_SCALE, armNames, buildSample, bundleSamples, captureParams, gradeValue, isDurable, isGrade, keyByUid, mergeGrades, openBundle, reviewRows, rowKey, sampleFile, sceneDiff, sceneSpan, searchedBook, splitGraded, toCandidate, unionArms } from '../extension/grading.mjs';
 
 /** The pipeline entry points the capture flows drive, injected once at registration.
  * @typedef {{chatBook: Function, coreSelection: Function, dryRun: Function, effectiveTokenBudget: Function, paramSnapshot: Function, scopedPriority: Function, vectorRequestBody: Function}} CaptureHost */
@@ -47,15 +48,8 @@ const stParams = () => ({
     maxRecursionSteps: world_info_max_recursion_steps,
 });
 
-/** The message span this capture covers, as chat file record indices (+1 for the jsonl header); read off the query window, since `last - depth` differs when the span holds an empty or hidden message. */
-function sceneRange() {
-    const win = runState.lastQueryChat ?? [];
-    if (!win.length) {
-        const last = Math.max(0, (getContext().chat?.length ?? 1) - 1) + 1;
-        return { start: last, end: last };
-    }
-    return { start: win[0].i + 1, end: win[win.length - 1].i + 1 };
-}
+/** The message span this capture covers, as ST message indices; read off the query window, since `last - depth` differs when the span holds an empty or hidden message. */
+const sceneRange = () => sceneSpan(getContext().chat, runState.lastQueryChat);
 
 /** WA's declared version, out of its own manifest; empty when unreadable, cached for the page. */
 let waVersionCache = null;
@@ -82,14 +76,14 @@ export async function extensionIdentity() {
         const r = await fetch('/api/extensions/version', {
             method: 'POST',
             headers: getRequestHeaders(),
-            // Global extensions are served from public/scripts/extensions/third-party; a per-user install is not.
-            body: JSON.stringify({ extensionName: dir, global: path.includes('/scripts/extensions/third-party/') }),
+            // Both global and per-user installs are served under /scripts/extensions/third-party/, so the URL cannot tell them apart.
+            body: JSON.stringify({ extensionName: dir, global: extensionTypes[`third-party/${dir}`] === 'global' }),
         });
         const d = r.ok ? await r.json() : null;
         if (d?.currentCommitHash) {
-            // `isUpToDate` is also true when the checkout has no remotes, so it means "no update found".
+            // `isUpToDate` is false when HEAD and origin differ either way (ST logs HEAD...origin), and true with no remotes.
             identityCache = `${d.currentBranchName || '?'}@${String(d.currentCommitHash).slice(0, 7)} on disk`
-                + (d.isUpToDate ? '' : ` \u2014 behind origin/${d.currentBranchName}`);
+                + (d.isUpToDate ? '' : ` \u2014 differs from origin/${d.currentBranchName}`);
         }
     } catch { /* offline, or not a git checkout: identity unknown is normal */ }
     return identityCache;
@@ -151,6 +145,9 @@ async function loadBooks() {
 /** Resolves an entry out of an embedded book map — how the grading tables find text for a row. */
 const entryResolver = books => (world, uid) => books[world]?.[uid];   // keyByUid keys by uid, and a property read coerces a numeric one
 
+/** Whether the slash command's Stop ended the run: the dry run returned before its scan, so there is nothing to report. */
+const stopped = named => Boolean(named?._abortController?.signal?.aborted);
+
 /**
  * The provenance stamps every capture writes; `primaryBook` comes off the ranking per arm, the chat's bound book as the keyword-only fallback.
  * @param {object} books loadBooks() output, passed in so /wa-super-grade stamps N arms off one load
@@ -181,11 +178,15 @@ async function sceneCommon(rows, books) {
 function sceneGateInputs() {
     const ctx = getContext();
     const chat = ctx.chat ?? [];
+    // Core's scan clock, hidden messages out: the latch record and the delay gate are counted on it.
+    const chatLength = chat.filter(m => m && !m.is_system).length;
     return {
         assistantCount: chat.filter(m => m && !m.is_user && !m.is_system).length,
         greetingIndex: chat[0]?.swipe_id ?? 0,
         personaName: name1 ?? '',
-        firedLatches: matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, chat.length),
+        macros: { ...runState.lastMacros },
+        chatLength,
+        firedLatches: matcher.firedUpTo(ctx.chatMetadata?.[matcher.WA_METADATA_KEY]?.fired, chatLength),
     };
 }
 
@@ -194,13 +195,14 @@ export async function versusCore(named) {
     const wanted = Math.max(1, Number(named?.candidates ?? 30));
     runState.gradeCutoff = { maxVectorEntries: wanted };
     try {
-        await host.dryRun(true);
+        await host.dryRun(true, named?._abortController);
     } finally {
         runState.gradeCutoff = null;
     }
+    if (stopped(named)) return;
 
     const population = runState.lastLayoutOrder;
-    if (!runState.lastCandidates?.length || !population?.length) { toastr.info(t`Nothing ranked — the scan activated no entries.`, 'Worlds Apart'); return; }
+    if (!runState.lastCandidates?.length || !population?.length) { toastr.info(t`Nothing ranked — the scan activated no entries.`, 'WorldsApart'); return; }
 
     const { entries: coreEntries, viaVectors, vectorsRan } = await host.coreSelection();
 
@@ -213,13 +215,14 @@ export async function versusCore(named) {
     [...byKey.values()].forEach((x, i) => { x.tokens = tokens[i]; });
 
     const union = [...byKey.entries()].filter(([k]) => coreKeys.has(k) || waKeys.has(k))
-        .sort((a, b) => (b[1].eCredit ?? -1) - (a[1].eCredit ?? -1));
+        .sort((a, b) => layoutScore(b[1]) - layoutScore(a[1]));
     const row = ([k, x]) => ({
         uid: x.entry.uid, entry: String(x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`).slice(0, 44),
         book: x.entry.world,
         in: coreKeys.has(k) && waKeys.has(k) ? 'both' : coreKeys.has(k) ? 'core' : 'WA',
         tokens: x.tokens, order: x.entry.waOriginalOrder ?? x.entry.order ?? 0,
         eCredit: Number.isFinite(x.eCredit) ? Number(x.eCredit.toFixed(4)) : null,
+        weight: x.logWeight ? Number(Math.exp(x.logWeight).toFixed(2)) : 1,
         cosine: Number.isFinite(x.score) ? Number(x.score.toFixed(4)) : null,
         text: Number.isFinite(x.textScore) ? Number(x.textScore.toFixed(3)) : null,
         keys: Number(x.keywordScore) ? Number(x.keywordScore.toFixed(2)) : null,
@@ -229,7 +232,7 @@ export async function versusCore(named) {
     const spend = keys => [...byKey.entries()].filter(([k]) => keys.has(k)).reduce((sum, [, x]) => sum + (x.tokens || 0), 0);
     const both = [...coreKeys].filter(k => waKeys.has(k)).length;
 
-    console.log(`%cWorlds Apart \u00b7 WA vs ST core, message ${(getContext().chat ?? []).length}`, 'font-weight: bold');
+    console.log(`%cWorldsApart \u00b7 WA vs ST core, message ${(getContext().chat ?? []).length}`, 'font-weight: bold');
     console.log(`  core: ${coreKeys.size} entries, ${spend(coreKeys)} tokens (its own budget: world_info_budget ${world_info_budget}%${Number(world_info_budget_cap) > 0 ? `, cap ${world_info_budget_cap}` : ''})`);
     console.log(`  WA:   ${waKeys.size} entries, ${spend(waKeys)} tokens (budget ${host.effectiveTokenBudget()})`);
     console.log(`  shared ${both}, core only ${coreKeys.size - both}, WA only ${waKeys.size - both}`);
@@ -252,7 +255,7 @@ export async function versusCore(named) {
         scanChat: runState.lastScanChat,
         injects: runState.lastInjects,
         sources: runState.lastSources,
-        depth: settings().messageDepth,
+        depth: settings().messageDepth || world_info_depth,
         matchWindow: settings().matchWindow,
         includeNames: world_info_include_names,
         rows: union.map(([k, x]) => ({ ...row([k, x]), core: coreKeys.has(k), wa: waKeys.has(k), content: x.entry.content })),
@@ -281,7 +284,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
                 book: x.entry.world,
                 uid: x.entry.uid,
                 title: x.entry.comment || x.entry.key?.[0] || `uid ${x.entry.uid}`,
-                block: x.entry.constant ? 'constant' : 'dynamic',
+                block: isConstant(x.entry) ? 'constant' : 'dynamic',
                 tokens: x.tokens,
             }),
             index: i,
@@ -296,7 +299,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
         scanChat: runState.lastScanChat,
         injects: runState.lastInjects,
         sources: matcher.usedMatchSources(runState.lastSources, Object.values(books).flatMap(b => Object.values(b))),
-        depth: settings().messageDepth,
+        depth: settings().messageDepth || world_info_depth,
         ...await sceneCommon(waRows, books),
         snapshot: host.paramSnapshot(),
         grades: [],
@@ -329,7 +332,7 @@ async function versusBundle(union, coreKeys, waKeys, viaVectors) {
     const bundle = await bundleSamples(arms, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
-    toastr.info(t`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'Worlds Apart', { timeOut: 8000 });
+    toastr.info(t`Saved ${filename} — open it with Review bundles to grade these ${union.length} rows.`, 'WorldsApart', { timeOut: 8000 });
 }
 
 /** Default sample name: chat slug + the message the scene ends on — distinct across scenes, stable on a re-grade. */
@@ -372,13 +375,24 @@ const fillZerosButton = root => ({
     tooltip: t`Every untouched row becomes a graded 0. Leave a row blank to record it as UNGRADED instead.`,
     action: () => {
         const { filled, undo } = fillReadZeros(root);
-        if (!filled) { toastr.info(t`No blank rows to fill.`, 'Worlds Apart'); return; }
-        toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'Worlds Apart', {
+        if (!filled) { toastr.info(t`No blank rows to fill.`, 'WorldsApart'); return; }
+        toastr.success(t`Filled ${filled} blank row(s) with 0. Click to undo.`, 'WorldsApart', {
             timeOut: 10000, extendedTimeOut: 10000,
-            onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'Worlds Apart'); },
+            onclick: () => { const n = undo(); toastr.info(t`Reverted ${n} row(s) to ungraded.`, 'WorldsApart'); },
         });
     },
 });
+
+/** The grading popups' `onClosing` over `root`: a save with a typed grade off the scale stays open on the first such row. */
+const gradesOnScale = root => popup => {
+    if (popup.result !== POPUP_RESULT.AFFIRMATIVE) return true;
+    const bad = [...root.querySelectorAll('.wa-grade')].filter(input => String(input.value).trim() !== '' && !isGrade(Number(input.value)));
+    if (!bad.length) return true;
+    bad[0].scrollIntoView({ block: 'center' });
+    bad[0].focus();
+    toastr.warning(t`Grades must be a whole number between 0 and ${GRADE_SCALE}, not ${String(bad[0].value).trim()}.`, 'WorldsApart');
+    return false;
+};
 
 function fillReadZeros(root) {
     const idOf = input => input.dataset.key ?? input.dataset.i;
@@ -420,21 +434,22 @@ export async function gradeScene(named) {
     let rows = [];
     let entries = [];
     try {
-        await host.dryRun(true);
+        await host.dryRun(true, named?._abortController);
         rows = runState.lastCandidates ?? [];
         entries = runState.lastCandidateEntries ?? [];
     } finally {
         runState.gradeCutoff = null;
     }
+    if (stopped(named)) return '';
 
     if (!rows.length) {
-        toastr.warning(t`Nothing was activated — nothing to grade.`, 'Worlds Apart');
+        toastr.warning(t`Nothing was activated — nothing to grade.`, 'WorldsApart');
         return '';
     }
 
     // An empty lastQuery means no query text could be built at all; keyword-only scenes pass, their query frozen.
     if (!runState.lastQuery) {
-        toastr.warning(t`No query text could be built from this chat — the sample would have nothing to score offline.`, 'Worlds Apart');
+        toastr.warning(t`No query text could be built from this chat — the sample would have nothing to score offline.`, 'WorldsApart');
         return '';
     }
 
@@ -444,17 +459,17 @@ export async function gradeScene(named) {
     const scaffold = rows.length - gradeable.length;
 
     const wrap = document.createElement('div');
-    const counts = [t`${gradeable.length} retrieved entries`];
+    const counts = [t`${gradeable.length} activated entries`];
     if (scaffold) counts.push(t`${scaffold} constant or sticky row(s) listed, not graded`);
     wrap.innerHTML = `<h3 style="margin:0 0 0.25em;">${esc(t`Grade this scene`)}</h3>`
         + `<small style="display:block;opacity:0.7;margin-bottom:0.5em;">${esc(gradeAnchorLine())} ${esc(counts.join('; '))}. ${esc(t`Blank means ungraded, not 0.`)}</small>`
-        + `<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">${esc(t`Query text — what retrieval actually matched on`)} `
+        + `<details style="margin-bottom:0.75em;"><summary style="cursor:pointer;">${esc(t`Query text — what the similarity query actually matched on`)} `
         + `${esc(t`(${runState.lastQuery.length} chars, depth ${settings().messageDepth})`)}</summary>`
         + `<pre style="white-space:pre-wrap;max-height:14em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(runState.lastQuery)}</pre></details>`
         + '<table style="width:100%;border-collapse:collapse;font-size:0.9em;text-align:left;"><thead><tr style="text-align:left;">'
         + `<th style="width:4em;">${esc(t`Grade`)}</th><th>${esc(t`Entry`)}</th><th style="width:4em;">${esc(t`fused`)}</th><th style="width:4em;">${esc(t`cos`)}</th><th style="width:4em;">${esc(t`text`)}</th><th style="width:4em;">${esc(t`keys`)}</th></tr></thead><tbody>`
-        // Block + score order (gradeOrder); `i` stays the capture index, which every data-i indexes.
-        + gradeOrder(rows, r => -(r.score ?? -Infinity)).map(({ row, i }) => {
+        // Block + layout order (gradeOrder, the capture index); `i` stays the capture index, which every data-i indexes.
+        + gradeOrder(rows, r => r.index ?? Infinity).map(({ row, i }) => {
             const scaff = isDurable(row);
             const cell = scaff
                 ? `<span style="opacity:0.5;font-size:0.85em;">${esc(row.block === 'constant' ? t`const` : t`sticky`)}</span>`
@@ -471,7 +486,7 @@ export async function gradeScene(named) {
 
     wireFolds(wrap, i => entries[i]);
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(wrap)], okButton: t`Save sample`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(wrap)], onClosing: gradesOnScale(wrap), okButton: t`Save sample`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     const result = await popup.show();
 
     if (result !== POPUP_RESULT.AFFIRMATIVE) {
@@ -495,7 +510,7 @@ export async function gradeScene(named) {
         scanChat: runState.lastScanChat,
         injects: runState.lastInjects,
         sources: matcher.usedMatchSources(runState.lastSources, Object.values(books).flatMap(b => Object.values(b))),
-        depth: settings().messageDepth,
+        depth: settings().messageDepth || world_info_depth,
         ...await sceneCommon(rows, books),
         params: captureParams(settings(), stParams()),
         snapshot: host.paramSnapshot(),
@@ -514,8 +529,8 @@ export async function gradeScene(named) {
     const { filename, content } = sampleFile(bundle);
     download(content, filename, 'application/json');
     const graded = grades.filter(g => gradeValue(g) > 0).length;
-    toastr.success(t`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'Worlds Apart', { timeOut: 8000 });
-    console.log(`Worlds Apart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) embedded`, sample);
+    toastr.success(t`Saved ${filename} — ${graded} of ${grades.length} graded above 0. Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample`, 'WorldsApart', { timeOut: 8000 });
+    console.log(`WorldsApart: sample "${sample.name}" — ${grades.length} graded rows, ${Object.keys(books).length} book(s) embedded`, sample);
 
     return '';
 }
@@ -536,7 +551,7 @@ export const POOL_ARMS = {
  * @param {number} wanted Candidate depth
  * captureParams and paramSnapshot must be read inside the window. ponytail: the override is live across awaits, so a generation firing mid-capture would use the arm's settings.
  */
-async function captureArm(overrides, wanted) {
+async function captureArm(overrides, wanted, command = null) {
     const s = settings();
     const saved = {};
     for (const k of Object.keys(overrides)) saved[k] = s[k];
@@ -544,7 +559,7 @@ async function captureArm(overrides, wanted) {
     runState.gradeCutoff = { maxVectorEntries: wanted };
 
     try {
-        await host.dryRun(true);
+        await host.dryRun(true, command);
         return {
             rows: runState.lastCandidates ?? [],
             entries: runState.lastCandidateEntries ?? [],
@@ -553,7 +568,7 @@ async function captureArm(overrides, wanted) {
             scanChat: runState.lastScanChat,
             injects: runState.lastInjects,
             sources: runState.lastSources,
-            depth: s.messageDepth,
+            depth: s.messageDepth || world_info_depth,
             params: captureParams(s, stParams()),
             snapshot: host.paramSnapshot(),
             live: { maxVectorEntries: s.maxVectorEntries },   // this arm's own cap, which the grading depth overrode
@@ -619,14 +634,14 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
             byQ.set(cap.query, hit);
         }
         return [...byQ.entries()].map(([text, arms]) => {
-            const label = byQ.size === 1 ? t`Query text — what retrieval actually matched on` : t`Query text (${arms.join(', ')})`;
+            const label = byQ.size === 1 ? t`Query text — what the similarity query actually matched on` : t`Query text (${arms.join(', ')})`;
             const si = sceneRef(text, sc.name ?? sc.file ?? t`Scene text`);
             return `<details style="margin-bottom:0.4em;"><summary style="cursor:pointer;">${esc(label)} `
                 + `${esc(t`(${text.length} chars, depth ${caps[0]?.depth ?? '?'})`)} `
                 + `<i class="fa-solid fa-up-right-and-down-left-from-center wa-scene-pop" data-i="${si}" title="${esc(t`Open the whole scene text`)}" style="opacity:0.55;margin-left:0.35em;cursor:pointer;"></i></summary>`
                 + `<pre style="white-space:pre-wrap;max-height:32em;overflow:auto;font-size:0.85em;opacity:0.85;border:1px solid var(--SmartThemeBorderColor);padding:0.5em;margin-top:0.5em;">${esc(text)}</pre></details>`;
         }).join('')
-            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${esc(t`${byQ.size} arms retrieved against different text. Grade relevance to the scene, not to any one query.`)}</small>` : '');
+            + (byQ.size > 1 ? `<small style="display:block;opacity:0.6;margin-bottom:0.5em;">${esc(t`${byQ.size} arms ran the similarity query against different text. Grade relevance to the scene, not to any one query.`)}</small>` : '');
     };
     const queryBlocks = multi ? '' : queryBlocksFor(secs[0]);
 
@@ -676,7 +691,7 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                 const pkey = rowKey(row);
                 const key = `${si}${String.fromCharCode(31)}${pkey}`;
                 const done = priorOf.has(pkey);
-                // Prior rows are inputs pre-filled with the earlier grade; an edit re-emits the row and mergeGrades is last-wins. A dirty edit stays dirty across repaints.
+                // Prior rows are inputs pre-filled with the earlier grade; an edit appends a human verdict, which outranks the earlier ones when read (gradeValue). A dirty edit stays dirty across repaints.
                 const cell = isDurable(row)
                     ? `<span style="opacity:0.5;font-size:0.85em;">${esc(row.block === 'constant' ? t`const` : t`sticky`)}</span>`
                     : `<input type="number" class="wa-grade text_pole" data-key="${esc(key)}" data-i="${i}" min="0" max="4" step="1" ${typed.has(key) ? 'data-dirty="1" ' : ''}value="${esc(typed.get(key) ?? (done ? priorOf.get(pkey) : ''))}" placeholder="—" title="${esc(GRADE_ANCHORS.map((a, g) => `${g}: ${a}`).join('\n'))}" style="width:4em;padding:2px 4px;">`;
@@ -727,17 +742,17 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
                     // Scene guard: prior grades pool by rowKey (book + uid), so a bundle from another scene would attach its verdicts to this one (G9). Any arm, since arms can differ in `query`; skipped, not thrown.
                     const off = captures.map(c => sceneDiff(c, priorSample)).sort((x, y) => x.length - y.length)[0] ?? ['query'];
                     if (off.length) {
-                        toastr.warning(t`${file.name} was graded against a different scene (${off.join(', ')} differ) — ignored, or its verdicts would be attached to this one`, 'Worlds Apart', { timeOut: 8000 });
+                        toastr.warning(t`${file.name} was graded against a different scene (${off.join(', ')} differ) — ignored, or its verdicts would be attached to this one`, 'WorldsApart', { timeOut: 8000 });
                         continue;
                     }
                     loaded.push(...(priorSample.entries ?? []));
                 } else {
-                    toastr.warning(t`${file.name} has neither graded scenes nor "pending" — ignored`, 'Worlds Apart');
+                    toastr.warning(t`${file.name} has neither graded scenes nor "pending" — ignored`, 'WorldsApart');
                     continue;
                 }
                 names.push(file.name);
             } catch {
-                toastr.warning(t`Could not parse ${file.name} — ignored`, 'Worlds Apart');
+                toastr.warning(t`Could not parse ${file.name} — ignored`, 'WorldsApart');
             }
         }
         prior = mergeGrades(prior, loaded, { user: raterId(), now: today() });
@@ -746,13 +761,13 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
         const priorTxt = added ? `${gradeTxt} ${added === 1 ? t`1 entry requested offline.` : t`${added} entries requested offline.`}` : gradeTxt;
         const loadedTxt = names.length === 1 ? t`1 file: ${priorTxt}` : t`${names.length} files: ${priorTxt}`;
         head.querySelector('.wa-sg-loaded').textContent = names.length ? loadedTxt : t`no usable files — nothing loaded`;
-        toastr.info(priorTxt, 'Worlds Apart', { timeOut: 3000 });
+        toastr.info(priorTxt, 'WorldsApart', { timeOut: 3000 });
         paint();
     });
 
     paint();
 
-    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(body)], okButton, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
+    const popup = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { customButtons: [fillZerosButton(body)], onClosing: gradesOnScale(body), okButton, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: true });
     if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) {
         return null;
     }
@@ -764,18 +779,17 @@ async function superGradePopup({ captures, union, entryOf, subtitle = '', okButt
             const { sec, row } = flat[Number(input.dataset.i)];
             return { sec, g: { title: row.title, grade: Number(input.value), book: row.book, uid: row.uid } };
         });
-    const who = { user: raterId(), now: today() };
-    // Per section: mergeGrades keys on world+uid, and a shared merge would land one scene's verdict on another's row.
+    // Per section, bare `grade` rows: apply-review is the merge for a review file, and mergeGrades would lift the grade out of reach.
     if (multi) {
         return {
             sections: secs.map((sc, si) => ({
                 file: sc.file ?? sc.name,
-                grades: mergeGrades(sc.prior ?? [], edited.filter(e => e.sec === si).map(e => e.g), who),
+                grades: edited.filter(e => e.sec === si).map(e => e.g),
             })),
             edited: edited.length,
         };
     }
-    return { grades: mergeGrades(prior, edited.map(e => e.g), who) };
+    return { grades: mergeGrades(prior, edited.map(e => e.g), { user: raterId(), now: today() }) };
 }
 
 /**
@@ -790,21 +804,22 @@ export async function superGradeScene(named) {
         : Object.keys(POOL_ARMS);
     const unknown = picked.filter(a => !POOL_ARMS[a]);
     if (unknown.length) {
-        toastr.warning(t`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'Worlds Apart');
+        toastr.warning(t`Unknown arm(s): ${unknown.join(', ')}. Known: ${Object.keys(POOL_ARMS).join(', ')}`, 'WorldsApart');
         return '';
     }
 
     const captures = [];
     for (const [n, arm] of picked.entries()) {
-        toastr.info(t`Arm ${n + 1}/${picked.length}: ${arm}`, 'Worlds Apart', { timeOut: 2500 });
-        // Sequential, not Promise.all: the arms share one live settings object and one retrieval pipeline.
-        const cap = await captureArm(POOL_ARMS[arm], wanted);
+        toastr.info(t`Arm ${n + 1}/${picked.length}: ${arm}`, 'WorldsApart', { timeOut: 2500 });
+        // Sequential, not Promise.all: the arms share one live settings object and one pipeline.
+        const cap = await captureArm(POOL_ARMS[arm], wanted, named?._abortController);
+        if (stopped(named)) return '';
         if (!cap.rows.length) {
-            console.warn(`Worlds Apart: arm "${arm}" activated nothing — skipped`);
+            console.warn(`WorldsApart: arm "${arm}" activated nothing — skipped`);
             continue;
         }
         if (!cap.query) {
-            console.warn(`Worlds Apart: arm "${arm}" retrieved nothing (no query to freeze) — skipped`);
+            console.warn(`WorldsApart: arm "${arm}" built no query to freeze — skipped`);
             continue;
         }
         // Converted here so everything downstream reads a candidate; /wa-debug's row keeps its flat signals.
@@ -812,14 +827,14 @@ export async function superGradeScene(named) {
     }
 
     if (!captures.length) {
-        toastr.warning(t`No arm activated anything — nothing to grade.`, 'Worlds Apart');
+        toastr.warning(t`No arm activated anything — nothing to grade.`, 'WorldsApart');
         return '';
     }
 
     const union = unionArms(captures);
     // On the gradeable subset: unionArms keeps durable rows, so an all-constant scene has a non-empty union.
     if (!union.rows.some(r => !isDurable(r))) {
-        toastr.warning(t`Every activated row was constant or a persisting sticky — relevance chose nothing to grade.`, 'Worlds Apart');
+        toastr.warning(t`Every activated row was constant or a persisting sticky — relevance chose nothing to grade.`, 'WorldsApart');
         return '';
     }
 
@@ -864,13 +879,13 @@ export async function superGradeScene(named) {
     const bundle = await bundleSamples(built, { ...sceneRange(), user: raterId(), captureId: uuidv4() });
     const { filename, content } = sampleFile({ ...bundle, name: base });
     download(content, filename, 'application/json');
-    console.log(`Worlds Apart: ${built.length}-arm bundle -> ${filename}`, bundle);
+    console.log(`WorldsApart: ${built.length}-arm bundle -> ${filename}`, bundle);
 
     const above = grades.filter(g => gradeValue(g) > 0).length;
     toastr.success(
         t`Saved ${filename} — ${built.length} arms in one file, ${union.rows.length} rows this round, ${grades.length} pooled, ${above} above 0.`
         + ' ' + t`Move it to eval/eval-data/ and run graded-scene-grid.mjs --sample (add --arm to pick one); watch judged@10.`,
-        'Worlds Apart', { timeOut: 12000 },
+        'WorldsApart', { timeOut: 12000 },
     );
     return '';
 }
@@ -891,7 +906,7 @@ const pickJsonFiles = ({ multiple = false } = {}) => new Promise(resolve => {
     // ponytail: focus heuristic, 2s; a dialog that opens without taking focus reads as blocked.
     timer = setTimeout(() => {
         if (!document.hasFocus()) return;
-        toastr.warning(t`The browser blocked the file picker — run it again now that the chat is open.`, 'Worlds Apart');
+        toastr.warning(t`The browser blocked the file picker — run it again now that the chat is open.`, 'WorldsApart');
         resolve([]);
     }, 2000);
 });
@@ -909,7 +924,7 @@ export async function superEvalScene() {
         try {
             parsed = JSON.parse(await file.text());
         } catch {
-            toastr.warning(t`Could not parse ${file.name} — skipped`, 'Worlds Apart');
+            toastr.warning(t`Could not parse ${file.name} — skipped`, 'WorldsApart');
             continue;
         }
         for (const m of (Array.isArray(parsed) ? parsed : [parsed])) bundles.push({ name: m?.file ?? file.name, manifest: m });
@@ -920,7 +935,7 @@ export async function superEvalScene() {
         const names = armNames(manifest);
         const arms = (names.length ? names : [null]).map(n => { try { return openBundle(manifest, n); } catch { return null; } }).filter(Boolean);
         if (!arms.length || !arms[0].candidates?.length || !Array.isArray(arms[0].entries)) {
-            toastr.warning(t`${fileName} is not a graded scene — skipped`, 'Worlds Apart');
+            toastr.warning(t`${fileName} is not a graded scene — skipped`, 'WorldsApart');
             continue;
         }
         const entryOf = entryResolver(manifest.books ?? {});
@@ -933,13 +948,13 @@ export async function superEvalScene() {
         }));
         const union = unionArms(captures);
         if (!union.rows.some(r => !isDurable(r))) {
-            toastr.warning(t`${fileName} has no gradeable rows — skipped`, 'Worlds Apart');
+            toastr.warning(t`${fileName} has no gradeable rows — skipped`, 'WorldsApart');
             continue;
         }
         secs.push({ file: fileName, name: manifest.name ?? fileName, manifest, captures, union, entryOf, prior: arms[0].entries });
     }
     if (!secs.length) {
-        toastr.warning(t`No usable graded bundles in that selection.`, 'Worlds Apart');
+        toastr.warning(t`No usable graded bundles in that selection.`, 'WorldsApart');
         return '';
     }
     const manifest = secs[0].manifest;
@@ -963,7 +978,6 @@ export async function superEvalScene() {
     // `captureId` is what apply-review resolves on (a basename can be renamed); the judge's prior verdicts ride along for the reviewer and apply-review strips them.
     const reviewed = done.sections.map((sec, si) => {
         const src = openBundle(secs[si].manifest);
-        const priorOf = new Map((src.entries ?? []).map(g => [rowKey(g), g]));
         return {
             captureId: secs[si].manifest?.captureId,
             file: sec.file,
@@ -972,16 +986,7 @@ export async function superEvalScene() {
             generatedFrom: src.generatedFrom,
             query: src.query ?? '',
             scanChat: src.scanChat ?? [],
-            grades: sec.grades.map(g => {
-                const p = priorOf.get(rowKey(g)) ?? {};
-                const entry = secs[si].entryOf(g.book, g.uid);
-                return {
-                    ...g,
-                    ...(p.grades?.length ? { grades: p.grades } : {}),
-                    // `entryText` is for the reviewer; apply-review strips it, the bundle's books being where entry text lives.
-                    ...(entry?.content ? { entryText: String(entry.content) } : {}),
-                };
-            }),
+            grades: reviewRows(sec.grades, src.entries, g => secs[si].entryOf(g.book, g.uid)?.content),
         };
     });
     const all = reviewed.flatMap(r => r.grades);
@@ -1000,6 +1005,6 @@ export async function superEvalScene() {
     const pairs = both.map(g => [Number(g.grade), gradeValue({ grades: g.grades.filter(v => v.kind === 'llm') })]);
     const exact = pairs.filter(([h, j]) => h === j).length, near = pairs.filter(([h, j]) => Math.abs(h - j) <= 1).length;
     const irr = pairs.length ? ' ' + t`LLM agreement: ${exact}/${pairs.length} exact, ${near}/${pairs.length} within 1.` : '';
-    toastr.success(t`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).` + irr + ' ' + t`Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'Worlds Apart', { timeOut: 15000 });
+    toastr.success(t`Saved ${filename} — ${done.edited} row(s) edited across ${reviewed.length} scene(s), ${rel} relevant (>=3).` + irr + ' ' + t`Apply with: node eval/synthetic-data/apply-review.mjs --write`, 'WorldsApart', { timeOut: 15000 });
     return '';
 }

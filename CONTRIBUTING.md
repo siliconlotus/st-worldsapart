@@ -20,9 +20,10 @@ git push origin 1.0.0
 ```
 
 CI holds a counterless version as committed, so the release PR carries it plain however long the cut
-sits; the next squash-merge into `staging` restarts the counter from the new number as
+sits; once `release` carries it, the next squash-merge into `staging` restarts the counter as
 `X.Y.Z+build.1`. The pre-push hook refuses a direct `release` push whose version is not plain, or
-whose tip is not the commit the tag names. It runs only where `git config core.hooksPath hooks` has
+whose tip is not the commit the tag names, and a direct `staging` push whose version has no counter,
+so the cut commit lands by web edit or PR. It runs only where `git config core.hooksPath hooks` has
 been run, and a merge button bypasses it — the tag is made by hand.
 
 ## Before you open it
@@ -50,9 +51,9 @@ same PR. Design discussion belongs in an issue; a doc carries the outcome, not t
 strings use the `t` tag, one whole sentence per template so a translator can reorder it.
 `test/i18n-check.mjs` fails otherwise. Console output and slash-command help are not translated.
 
-**If you touch `plugin/`, or `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`,** run
-`node deploy-plugin.mjs` and restart SillyTavern — those deploy into the server plugin, and without a
-redeploy you are testing the old copy. The settings panel says so when they have drifted.
+**If you touch `plugin/`, or `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`,** restart SillyTavern — the
+server plugin loads them from your checkout at startup, and until a restart you are testing the old code. The
+settings panel says so when they have drifted. Run `node deploy-plugin.mjs` once, so the plugin loads your checkout.
 
 ## Sending graded scenes
 

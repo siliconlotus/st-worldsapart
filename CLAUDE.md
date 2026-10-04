@@ -89,34 +89,34 @@ temperature, so they can confirm a finding transfers but cannot be where it is f
 
 ## Four stages, and the three orderings
 
-The stages are `docs/matching-architecture.md`'s: **1. Retrieval** (`retrieve`, cosine only, no admission test),
-**2. Activation** (`selectAndActivate`, one force-activate; core's `activated` map is the result),
-**3. Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
-per-tier model, whose `E[credit]` is the layout order), **4. Selection** (`relevanceCut`, the dynamic
-block only, both tiers at one cutoff for every model), **5. Delivery** (`applyBudget`, every cap a
+The stages are `docs/matching-architecture.md`'s: **Activation** (`selectAndActivate`: two routes in parallel, by similarity
+(`similarityActivations`, cosine only, no admission test) and by key, then one force-activate; core's `activated` map is the result),
+**Scoring** (`onScanDone`: text, keys, `properNouns`, `density` and the cosine into the fitted
+per-tier model; `E[credit]` with its odds scaled by the author's term weights, `weightedCredit`, is the layout order), **Selection** (`relevanceCut`, the dynamic
+block only, both tiers at one cutoff for every model), **Delivery** (`applyBudget`, every cap a
 prefix of the layout order). Say which stage a claim is about.
 
-**WA is a selection system, not a ranking system.** What ships is the set that survives stage 4, chosen
-by a threshold on each row alone; rank decides what overflows at stage 5, never what belongs. So the
+**WA is a selection system, not a ranking system.** What ships is the set that survives selection, chosen
+by a threshold on each row alone; rank decides what overflows at delivery, never what belongs. So the
 validity score is F2 over the delivered set, set-based and asymmetric — recall at grade >= 3, precision
 crediting a 2 at half (`metrics.mjs` `gradeCredit`) — with no window imposed on it. nDCG and any score
 read at a window the system is not asked to choose (`@R`) are diagnostics on the ordering, never
 evidence that the system works.
 
-**Three orderings, and only one is a ranking.** The retrieval ranking decides what is activated; the
+**Three orderings, and only one is a ranking.** The similarity ranking decides what is activated; the
 layout order is what the caps and budget take a prefix of (`runState.lastLayoutOrder`); the prompt
 order is the user's sort over the survivors (`runState.lastPromptOrder`). A change to the layout score
-can never surface an entry retrieval did not return, so no scoring change is a recall lever, only a
+can never surface an entry the similarity query did not return, so no scoring change is a recall lever, only a
 precision one.
 
 **Three populations, and they cross-cut.** `memory` is STMB-marked and `reference` is everything else —
-the tier an entry belongs to. `durable` is `constant` plus sticky: in the prompt by intent rather than
+the tier an entry belongs to. `durable` is constant — the `constant` flag or `@@activate`, `layout.mjs` `isConstant` — plus sticky: in the prompt by intent rather than
 because relevance chose it — how a row got there, not what kind of thing it is. Sticky is read at two
 moments: the runtime reads the armed effect and hoists it past the cut, while the eval side reads a
 capture row's `block`, which a dry run never sets to sticky, so a sticky entry is durable at runtime
 once armed and is graded like any other activation.
 
-`eval/lib/scene.mjs` models stages 1 and 3; the keyword loop in `makeCandidateSet` is stage 2 and may only
+`eval/lib/scene.mjs` models the similarity query and scoring; the keyword loop in `makeCandidateSet` is activation by key and may only
 admit what core could have activated — not disabled entries, not a `delayUntilRecursion` one on the
 initial pass, not an `excludeRecursion` one on a later one. It runs to a fixpoint when the scene records
 `recursive`; a scene that does not record it is read as recursion off.
@@ -139,7 +139,7 @@ matched expression is worth goes in the second.
 Every module under `extension/` and `plugin/` is ST-free and node-importable, so the evals exercise the
 shipped code. The ST-coupled files are `st/` plus `worldsapart.js`, which is the ST half proper and sits
 at the root because `manifest.json` names it; `plugin/server.js` is coupled to ST's SERVER half
-(`../../src/`) instead, on a path that resolves from the deploy location, so it is not node-importable
+instead, loading ST's `src/` through `fromST()` from the root the loader passes it, so it is not node-importable
 either. `test/st-half.mjs` declares both lists; `st-boundary-check.mjs` fails when anything else reaches
 past the repo root, and when a pure module imports the ST half. Settings and ST globals are injected by
 the caller, never imported; `state.mjs` binds ST's store rather than importing it, so the harness can
@@ -174,25 +174,30 @@ Where a check needs something from the ST-coupled half, the fix is to move that 
 first, as `planUidReindex` was moved into `keyedit.mjs` for `bulk-reorder-check.mjs`. A check that reads
 shipped code as text rather than importing it is not testing the shipped code, and it fails silently.
 
-## Composite keys use US (``), never NUL
+## Composite keys use US (U+001F), never NUL
 
-Cache keys and row ids that join fields into one string (the `rowId` helpers in `studio.mjs` and
-`keyword-tools.mjs`) separate with Unit Separator. NUL makes git treat the file as binary and truncates
-lines in BSD `awk`; a printable delimiter can collide with content.
+Cache keys and row ids that join fields into one string (`studio.mjs`'s `rowId`, `grading.mjs`'s `rowKey`)
+separate with Unit Separator. NUL makes git treat the file as binary and truncates lines in BSD `awk`; a
+printable delimiter can collide with content, so U+241F is not it either.
 
 Defects in ST core itself go in `upstream-st.md`, in the SillyTavern root — not in this repo.
 
-## Plugin changes need a redeploy
+## Plugin changes need a restart
 
-Editing anything in `plugin/` requires `node deploy-plugin.mjs` and an ST restart. `/plugins/worlds-apart/`
-is a generated copy; the settings panel shows a drift banner until the fingerprints match, and the
-deploy prints the fingerprint.
+ST's `/plugins/worlds-apart/` holds only the loader: `plugin/loader.js` as `index.js`, and `source.json` naming the
+install `deploy-plugin.mjs` ran from. The loader imports that install's `plugin/server.js` at every ST start, or the shared install of the same folder name
+when the recorded one is gone, which is where ST's "move to global" puts a per-user copy; so editing
+anything in `plugin/`, or `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`, which the server imports from
+`../extension/`, takes an ST restart and no deploy. The settings panel shows a drift banner while the server runs other
+files than the browser serves.
 
-**`PLUGIN_FILES` is the whole contents, not just what gets copied.** The deploy removes any top-level
-file the manifest no longer names, so retiring a plugin module is one edit to `fingerprint.mjs`.
-Directories are left alone.
+**A deploy is needed once per install, and again when `loader.js` changes.** Bump `LOADER_VERSION` in both `loader.js`
+and `fingerprint.mjs` with any change to the loader: `/ping` reports the deployed one, an older one asks for the deploy,
+and `fingerprint-check.mjs` fails when the two differ. The loader is deployed alone, so it may import `node:*` only.
 
-**The matcher deploys into the plugin, so editing `matcher.mjs`, `smartkeys.mjs` or `automaton.mjs`
-needs a redeploy too.** The manifest names them with `../extension/` paths and copies them FLAT beside
-`index.js`: they may import each other only by bare `./name`, and nothing else in `extension/`.
-`test/plugin-deploy-check.mjs` is what fails when that breaks — the server would otherwise fail at load.
+**`PLUGIN_FILES` is what both sides hash.** List every file the server loads from the install; one left out can change
+without the banner noticing.
+
+**`server.js` reaches ST through `fromST()` and ST's packages through `stPackage()`**, from the root the loader passes
+on its URL: it is not in `plugins/`, so a relative `../../src` path would point nowhere. `st-boundary-check.mjs` reads
+the `fromST` calls as the server's ST imports.

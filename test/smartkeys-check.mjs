@@ -1,11 +1,14 @@
 // Verifies the SmartKeys boolean-query engine against the spec's acceptance table,
 // plus the lexer edge cases the spec calls out (internal hyphens, weights, flags).
-import { countChatHits, countKey, keywordScore, repeatCurveOf, setBoundaryMode, isRegexKey } from '../extension/matcher.mjs';
-import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys } from '../extension/smartkeys.mjs';
+import { countChatHits, countKey, keywordScore, repeatCurveOf, isRegexKey, splitKeys } from '../extension/matcher.mjs';
+import { tokenize, parse, evaluate, buildAutomaton, scanAutomaton, validateSmartKey, fold, resetSmartKeys, createScanScope, registerKeys, KEY_ALERTS, KeyAlert, ORTHO_FAMILIES, macroTokens, macroMap, chatUser, usableMessages } from '../extension/smartkeys.mjs';
 import { buildKeyPruneScan, pathProbes } from '../extension/keyword-audit.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
-const matches = (key, text) => countKey(key, text, false, false) > 0;
+/** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
+const NEUTRAL = createScanScope();
+
+const matches = (key, text, scope = NEUTRAL) => countKey(key, text, false, false, scope) > 0;
 
 // Spec acceptance table.
 eq(matches('moon mission', 'Astronaut on a mission to the moon.'), false, 'legacy key: not contiguous, no match');
@@ -28,15 +31,45 @@ eq(matches('? cat && dog', 'cat dog'), true, '&& alias');
 eq(matches('? "moon mission"', 'the moon mission began'), true, 'quoted phrase, contiguous');
 eq(matches('? "moon mission"', 'mission to the moon'), false, 'quoted phrase, not contiguous');
 
+// Any quotation mark quotes: the paired marks the fold collapses onto `"` are `"` to the lexer too; primes are text.
+{
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    eq(matches('? «moon mission»', 'the moon mission began'), true, 'guillemets quote a phrase as straight quotes do');
+    eq(matches('? «moon mission»', 'mission to the moon'), false, '...and keep its order');
+    eq(matches('? “moon mission”', 'the moon mission began'), true, 'curly double quotes too');
+    eq(matches('? „moon mission“', 'the moon mission began'), true, '...and the low-high pair');
+    eq(matches('? »moon mission«', 'the moon mission began'), true, '...and inward guillemets: a family closes in either direction');
+    eq(matches('? „moon mission”', 'the moon mission began'), true, '...and the Polish low-high-right pair, low and curly being one family');
+    eq(matches('? ^«Navy SEAL»', 'navy seal'), false, 'flags sit in front of any mark');
+    eq(codes('? «moon'), 'error:stray-quote', 'an unclosed guillemet is the stray-quote error');
+    eq(matches('? /«x»/', 'he said «x»'), true, 'a pattern keeps its guillemets, being fold-exempt');
+    eq(matches('? 5″ screen', 'a 5″ screen'), true, 'a prime is not a quotation mark: it stays text and matches as text');
+    eq(splitKeys('? «a, b», c').join('|'), '? «a, b»|c', 'a guillemet phrase keeps its comma through the key splitter');
+    // CJK quotation and title marks quote too; the fold keeps them out of the text (K10), so a plain key with them stays literal.
+    eq(matches('? 「moon mission」', 'the moon mission began'), true, 'corner brackets quote a phrase');
+    eq(matches('? 『moon mission』', 'the moon mission began'), true, '...white corner brackets');
+    eq(matches('? 《moon mission》', 'mission to the moon'), false, '...double angle brackets, keeping order');
+    eq(matches('? 〈moon mission〉', 'the moon mission began'), true, '...and single angle brackets');
+    eq(codes('? 「moon'), 'error:stray-quote', 'an unclosed corner bracket is the stray-quote error');
+    eq(matches('「月」', '月'), false, 'a plain key keeps its brackets as text');
+    eq(matches('「月」', '「月」'), true, '...and matches the bracketed span');
+    eq(matches('? "「月」"', '「月」'), true, 'a SmartKey asks for the brackets by quoting them');
+    eq(matches('? «a "b" c»', 'say a "b" c now'), true, 'a phrase closes on its own family, so another family\'s mark is content');
+    eq(matches('? "《月亮代表我的心》"', '歌名是《月亮代表我的心》'), true, '...which is how a title keeps its marks: the user page\'s example');
+    eq(matches('? "a"b"', 'a"b'), false, 'a mark inside its own family closes the phrase; there is no escape within a family');
+    eq(splitKeys('? "「a, b」", c').join('|'), '? "「a, b」"|c', '...through the key splitter too');
+    eq([...'“”„‟«»'].every(c => ORTHO_FAMILIES.find(f => f.ascii === '"').variants.includes(c)), true, 'every non-CJK mark the lexer takes is one the fold collapses');
+}
+
 // Lexer edge cases the spec requires.
 eq(matches('? sci-fi', 'a sci-fi novel'), true, 'internal hyphen stays in the term');
 eq(matches('? sci-fi', 'a fantasy novel'), false, 'sci-fi does not degrade to sci AND NOT fi (would match here)');
 eq(matches('? sci-fi', 'a sci fi novel'), true, 'a term\'s hyphen expands to a space inside a SmartKey too');
 eq(matches('? c-3po', 'c-3po beeped'), true, 'digits and hyphens in terms');
-eq(countKey('? fire::2.5', 'fire everywhere', false, false), 2.5, '::weight scales the matched score');
+eq(countKey('? fire::2.5', 'fire everywhere', false, false, NEUTRAL), 2.5, '::weight scales the matched score');
 // --- group weights ----------------------------------------------------------------------------------
 {
-    const at = (k, t) => countKey(k, t, false, false);
+    const at = (k, t) => countKey(k, t, false, false, NEUTRAL);
     eq(at('? (copper pipe)::3', 'a copper pipe burst'), 3 * at('? copper pipe', 'a copper pipe burst'),
         'a group weight multiplies the whole conjunction, each of its things alike');
     eq(at('? (everest OR kailash)::2', 'the everest route'), 2,
@@ -49,17 +82,15 @@ eq(countKey('? fire::2.5', 'fire everywhere', false, false), 2.5, '::weight scal
     eq(codes('? =2'), '', 'a whole-word number is an ordinary term');
     eq(codes('? "^2"'), '', '...and quoting says the punctuation was meant');
 }
-eq(countKey('? fire::0.5', 'fire everywhere', false, false), 0.5, 'sub-1 ::weight down-weights (not clamped to 1)');
-eq(countKey('? "hot tub"::2 party', 'hot tub party', false, false), 3, 'weight after quoted phrase, summed by AND');
+eq(countKey('? fire::0.5', 'fire everywhere', false, false, NEUTRAL), 0.5, 'sub-1 ::weight down-weights (not clamped to 1)');
+eq(countKey('? "hot tub"::2 party', 'hot tub party', false, false, NEUTRAL), 3, 'weight after quoted phrase, summed by AND');
 eq(matches('? meeting "10:30"', 'the meeting is at 10:30'), true, 'literal colon via quoting');
 eq(matches('? "10:30"', 'at 10 30 sharp'), false, 'quoted colon term is literal, not split');
 eq(matches('? =c++', 'some c++ code'), true, '= boundary handles punctuation-edged terms (no \\b)');
 eq(matches('? =cat', 'the category'), false, '= boundary still rejects substrings');
-setBoundaryMode('permissive');
-eq(matches('? =Joe', "that is Joe's coat"), true, 'permissive: = treats an apostrophe as a boundary');
-setBoundaryMode('strict');
-eq(matches('? =Joe', "that is Joe's coat"), false, 'strict: = treats it as inside the word, like a plain key');
-eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same answer the plain key gives');
+eq(matches('? =Joe', "that is Joe's coat", createScanScope({ boundary: 'permissive' })), true, 'permissive: = treats an apostrophe as a boundary');
+eq(matches('? =Joe', "that is Joe's coat", createScanScope({ boundary: 'strict' })), false, 'strict: = treats it as inside the word, like a plain key');
+eq(countKey('Joe', "that is Joe's coat", false, true, NEUTRAL), 0, '...which is the same answer the plain key gives');
 // --- regex TERMS ------------------------------------------------------------------------------------
 {
     const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
@@ -71,22 +102,39 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
     eq(matches('? -/drill/ fire', 'a fire drill started'), false, '...and the negation bites');
     eq(matches('? and/or', 'an and/or clause'), true, 'a slash mid-token is ordinary text');
     eq(matches('? 3/4', 'in 3/4 time'), true, '...including a fraction');
-    eq(countKey('? /a/ /b/', 'a and b', false, false), 3, 'two patterns stay two, and both count');
+    eq(countKey('? /a/ /b/', 'a and b', false, false, NEUTRAL), 3, 'two patterns stay two, and both count');
     eq(matches('? /[/]/ x', 'the /x path'), true, 'the delimiter does not close inside a character class');
     eq(matches('? /a\\/b/', 'an a/b split'), true, '\\/ writes a literal slash');
     eq(matches('? /fire/i', 'FIRE everywhere'), true, '/i is how insensitivity is written');
     eq(matches('? /fire/', 'FIRE everywhere'), false, '...because a pattern is case-sensitive by default');
-    eq(countKey('? /fire/::3', 'fire and fire', false, false), 6, 'weight x occurrences, same as a TERM');
-    eq(countKey('? /fire/^3', 'fire and fire', false, false), 6, '...and the Lucene ^N alias works too');
+    eq(countKey('? /fire/::3', 'fire and fire', false, false, NEUTRAL), 6, 'weight x occurrences, same as a TERM');
+    eq(countKey('? /fire/^3', 'fire and fire', false, false, NEUTRAL), 6, '...and the Lucene ^N alias works too');
     eq(matches("? /Cap'n/", 'Cap\u2019n Joe'), false, 'a regex term is fold-exempt, like a whole-key regex');
     eq(matches("? Cap'n", 'Cap\u2019n Joe'), true, '...where a plain term in the same key is not');
     eq(codes('? /re/'), '', 'a lone regex is not no-terms');
     eq(codes('? /re/ -drill'), '', 'a regex is a positive contributor, so this is not negation-only');
     eq(codes('? /(/'), 'error:regex-invalid', 'a well-formed pattern new RegExp refuses is an error');
+    eq(codes('? =/re/'), 'warn:flag-on-pattern', 'a flag in front of a pattern makes a literal nobody means');
+    // Every finding carries a display name of at most four words beside its sentence; one sample per code.
+    const SAMPLES = ['? ()', '? NOT water', '? fire ::3', '? (a b)~2 ~3', '? "a b"~2', '? "moon', '? /(/', '? ?', '? (a', '? a::0',
+        '? /a/b/', '? /e\u0301/', '? =/re/', `? ${'('.repeat(101)}x${')'.repeat(101)}`, '/(/', '/a/b/', '? x?', '? a -b?', '? a -(b c?)'];
+    const seen = new Set();
+    for (const k of SAMPLES) for (const f of validateSmartKey(k)) {
+        seen.add(f.code);
+        eq(f instanceof KeyAlert && ['error', 'warn', 'info'].includes(f.severity) && typeof f.message === 'string' && f.message.length > 0, true, `${f.code} is a KeyAlert with a severity and a message`);
+        eq(typeof f.label === 'string' && f.label.length > 0 && f.label.split(/\s+/).length <= 4, true, `${f.code} carries a label of at most four words`);
+    }
+    eq([...seen].sort().join(','), Object.keys(KEY_ALERTS).sort().join(','), 'the registry holds exactly the codes the validator emits, and every one is sampled here');
+    let threw = false; try { new KeyAlert('no-such-code', 'x'); } catch { threw = true; }
+    eq(threw, true, 'an unregistered code cannot become an alert');
+    eq(validateSmartKey('? =/re/')[0].label, 'Literal regex', 'the flagged-pattern label');
+    eq(codes('? ^/re/'), 'warn:flag-on-pattern', '...the case flag too');
+    eq(codes('? ="/re/"'), '', 'quoted, the literal is deliberate');
+    eq(codes('? =/re'), '', 'not a pattern shape, so a flagged literal is what it says');
     eq(codes('? /re'), '', 'an unterminated pattern is simply not a pattern');
     eq(codes('? //g'), '', '...and neither is an empty one');
-    eq(countKey('? /re', 'anything /re', false, false), 1, '...it matches the characters, as the bare key does');
-    eq(countKey('/re', 'anything /re', false, false), 1, '...which is the bare key it now agrees with');
+    eq(countKey('? /re', 'anything /re', false, false, NEUTRAL), 1, '...it matches the characters, as the bare key does');
+    eq(countKey('/re', 'anything /re', false, false, NEUTRAL), 1, '...which is the bare key it now agrees with');
     eq(codes('? /[^"]+/'), '', 'punctuation-term and stray-quote do not read a pattern');
     const tok = k => tokenize(k)
         .map(t => t.type === 'REGEX' ? `re:${t.value}` : t.type === 'TERM' ? `term:${t.value}` : t.type).join(' ');
@@ -96,30 +144,32 @@ eq(countKey('Joe', "that is Joe's coat", false, true), 0, '...which is the same 
         eq(tok('? ' + k), plainReads(k), `a term reads as the whole key does: ${k}`);
     }
     eq(tok('? /re/is night'), 're:/re/is term:night', 'flags followed by a space are still taken');
+    eq(tok('? /x/v night'), 're:/x/v term:night', 'every flag REGEX_KEY_RE takes of a whole key is taken of a term');
+    eq(tok('? /x/d night'), 're:/x/d term:night', '...d as well as v, the two core lacks');
     eq(tok('? /re/::2'), 're:/re/', '...as is a weight straight after the close');
     eq(tok('? /re/gi)'), 're:/re/gi RPAREN', '...and a closing paren is a boundary too');
     eq(tok('? (/a/|/b/) x'), 'LPAREN re:/a/ OR re:/b/ RPAREN term:x', 'grouping around patterns still lexes');
     eq(tok('? /[/]/ x'), 're:/[/]/ term:x', 'a space recovers the abutting form');
     eq(matches('? /\\/x/', 'the /x path'), true, '...and adjacency belongs inside the pattern');
-    eq(codes('? /(home/user|~/user)/file/'), 'warn:regex-core-refuses', 'a term reaches the core-refusal warning');
+    eq(codes('? /(home/user|~/user)/file/'), 'info:regex-core-refuses', 'a term reaches the core-refusal warning');
     eq(codes('? /(home\\/user|~\\/user)\\/file/'), '', '...and escaping the delimiters clears it');
-    eq(countKey('? /home/user/file', '/home/user/file', false, false), 1, 'a path is one literal term');
+    eq(countKey('? /home/user/file', '/home/user/file', false, false, NEUTRAL), 1, 'a path is one literal term');
     eq(matches('? /home/user/file', 'the home user file'), false, '...so the bare-word reading is gone');
 
-    eq(codes('/and/or/'), 'warn:regex-core-refuses', 'a bare regex core will refuse is flagged');
-    eq(codes('/24/7/'), 'warn:regex-core-refuses', '...whatever the pattern is; the slash is the fault');
+    eq(codes('/and/or/'), 'info:regex-core-refuses', 'a bare regex core will refuse is flagged');
+    eq(codes('/24/7/'), 'info:regex-core-refuses', '...whatever the pattern is; the slash is the fault');
     eq(codes('/and\\/or/'), '', '...and escaping the inner slash clears it, because core then reads it');
     eq(codes('/fire/'), '', 'a pattern with no inner slash was never in question');
     eq(codes('fire'), '', 'a plain key still gets no opinion at all');
-    eq(codes('? /and/or/'), 'warn:regex-core-refuses', 'a term reaches it too, on the same string');
+    eq(codes('? /and/or/'), 'info:regex-core-refuses', 'a term reaches it too, on the same string');
     eq(codes('? /and\\/or/'), '', '...and clears the same way');
-    eq(countKey('? "/and/or/"', 'the config at /and/or/ is set', false, false), 1, '? "…" is the literal hatch');
-    eq(countKey('"/and/or/"', 'the config at /and/or/ is set', false, false), 0, '...and a bare "…" is not one');
+    eq(countKey('? "/and/or/"', 'the config at /and/or/ is set', false, false, NEUTRAL), 1, '? "…" is the literal hatch');
+    eq(countKey('"/and/or/"', 'the config at /and/or/ is set', false, false, NEUTRAL), 0, '...and a bare "…" is not one');
     const msg = k => validateSmartKey(k)[0].message;
     eq(msg('/a\\/b/c/').includes('use ? "/a\\/b/c/".'), true, 'the hatch quotes the term as typed, not JSON-escaped');
-    eq(countKey('? "/a\\/b/c/"', 'path /a\\/b/c/ here', false, false), 1, '...and that hatch matches the literal');
+    eq(countKey('? "/a\\/b/c/"', 'path /a\\/b/c/ here', false, false, NEUTRAL), 1, '...and that hatch matches the literal');
     eq(msg('/say "hi"/there/').includes('use ?'), false, 'no hatch is offered when quoting cannot work');
-    eq(countKey('/and/or/', 'take and/or leave', false, false), 1, 'the matcher still runs it as a pattern');
+    eq(countKey('/and/or/', 'take and/or leave', false, false, NEUTRAL), 1, 'the matcher still runs it as a pattern');
 }
 console.log('ok   regex terms: leftmost close, flags then weight, negatable, fold-exempt, validated');
 
@@ -145,19 +195,19 @@ eq(matches('? hers she', 'the ushers she saw'), true, 'unflagged substring terms
 {
     const text = 'cat cats scatter, the Jubilees arrived at the hot tub';
     const entry = { key: ['cat', 'Jubilee', 'hot tub', 'nope'] };
-    const { score, hits: h } = keywordScore(entry, text, entry.key, { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
+    const { score, hits: h } = keywordScore(entry, text, entry.key, { scope: NEUTRAL, k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false });
     eq(h.map(x => `${x.key}:${x.count}`).join(' '), 'cat:3 Jubilee:1 hot tub:1', 'primed counts equal naive substring counts');
     // Expectation built through the shared curve, not an inlined formula, or a curve change reports as an Aho-Corasick fault.
     eq(score.toFixed(3), (repeatCurveOf(3, 2) + repeatCurveOf(1, 2) + repeatCurveOf(1, 2)).toFixed(3),
         'saturation unchanged by the fast path');
-    eq(countKey('cat', text, false, true), 1, 'primed candidate, whole-word verify: standalone "cat" only');
-    eq(countKey('jubilee', text, true, false), 0, 'primed candidate, case-sensitive verify rejects');
-    eq(countKey('nope', text, true, true), 0, 'primed miss is authoritative under any flags');
+    eq(countKey('cat', text, false, true, NEUTRAL), 1, 'primed candidate, whole-word verify: standalone "cat" only');
+    eq(countKey('jubilee', text, true, false, NEUTRAL), 0, 'primed candidate, case-sensitive verify rejects');
+    eq(countKey('nope', text, true, true, NEUTRAL), 0, 'primed miss is authoritative under any flags');
 }
 
-eq(countKey('? (fire::3 XOR flood::3) OR water::0.5', 'fire and flood near the water', false, false), 0.5, 'failed XOR branch leaks no boost through OR');
-eq(countKey('? (fire::3 alpha) OR water::0.5', 'fire and water', false, false), 0.5, 'half-matched AND leaks no boost through OR');
-eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still yields the matched side\'s weight');
+eq(countKey('? (fire::3 XOR flood::3) OR water::0.5', 'fire and flood near the water', false, false, NEUTRAL), 0.5, 'failed XOR branch leaks no boost through OR');
+eq(countKey('? (fire::3 alpha) OR water::0.5', 'fire and water', false, false, NEUTRAL), 0.5, 'half-matched AND leaks no boost through OR');
+eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false, NEUTRAL), 3, 'XOR still yields the matched side\'s weight');
 
 {
     const T = v => ({ type: 'TERM', value: v, isExact: false, isCaseSensitive: false, weight: 1, acIndex: [0] });
@@ -169,7 +219,7 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
 {
     const data = { entries: { 0: { uid: 0, key: ['? moon mission', '? -apollo'], content: 'nothing relevant' } } };
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, pruneCommon: true, pruneShort: true, ignoreProper: false, minLength: 4 };
-    const { classifyEntry } = buildKeyPruneScan(data, opts, new Set());
+    const { classifyEntry } = buildKeyPruneScan(data, opts, new Set(), { scope: createScanScope() });
     eq(classifyEntry(data.entries[0]).map(f => f.flag).join(','), 'unattested,unusable', 'a dead query is flagged; a negation-only one is flagged unusable, not dead');
 }
 
@@ -180,16 +230,16 @@ eq(countKey('? fire::3 XOR flood', 'a fire burns', false, false), 3, 'XOR still 
     entries[1].key = ['/\\n/', '/zzznope/', '/by the door/i', 'x'];
     const opts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true,
         pruneUnattested: true, pruneCommon: true, pruneShort: true, pruneShared: true, ignoreProper: false, bookShared: 0.5, minLength: 4 };
-    const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set());
+    const { classifyEntry, reasonOf } = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope() });
     const flags = new Map(classifyEntry(entries[1]).map(f => [String(f.key), f]));
     eq(flags.get('/\\n/')?.flag, 'book common', 'a pattern that matches on every entry is book common while no chat is scanned for it');
     {
         const quiet = { messagesWith: new Map(entries[1].key.map(k => [k, 0])), messages: 50 };
-        const withChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: quiet });
+        const withChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), chatScan: quiet });
         eq(withChat.classifyEntry(entries[1]).some(f => String(f.key) === '/\\n/'), false, '...and with a chat that does not bear it out, nothing: ubiquity in entry text is a fact about the story');
     }
     eq(flags.get('/zzznope/')?.flag, 'unattested', '...and one that matches nowhere is flagged dead');
-    eq(reasonOf(flags.get('/zzznope/')).text, 'never matches (book)', '...worded as evaluating false, not as absent text');
+    eq(reasonOf(flags.get('/zzznope/')).label, 'never matches (book)', '...worded as evaluating false, not as absent text');
     eq(flags.has('/by the door/i'), false, 'a pattern that matches in exactly one entry draws nothing');
     eq(flags.get('/zzznope/')?.flag !== 'short', true, 'short-key never reads a pattern');
     eq(flags.get('x')?.flag, 'unattested', '...while a genuine literal is judged on its characters as before');
@@ -210,8 +260,8 @@ eq(evaluate(ast, 'a c').matched, true, 'evaluates the injected AND');
     eq(matches('? fire -', T), true, 'trailing negation keeps the left side');
     eq(matches('? +fire +zebra', T), false, 'a required term that is absent still fails');
     eq(matches('? +fire -water', T), false, 'negation still applies alongside a required-marker');
-    eq(countKey('? fire | water', T, false, false), 2, 'OR sums its matched branches (see the recurrence block)');
-    eq(countKey('? fire water', T, false, false), 2, 'genuine implicit AND is untouched');
+    eq(countKey('? fire | water', T, false, false, NEUTRAL), 2, 'OR sums its matched branches (see the recurrence block)');
+    eq(countKey('? fire water', T, false, false, NEUTRAL), 2, 'genuine implicit AND is untouched');
 }
 console.log('ok   malformed operator positions degrade to no-ops, not dead keys');
 
@@ -291,8 +341,8 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     // A chat scanned that bears none of these out: with chat evidence, ubiquity in entry text draws nothing on its own,
     // which is what lets the English-list verdicts below be observed. Without one, `book common` stands in (further down).
     const quiet = { messagesWith: new Map(Object.values(entries).flatMap(e => e.key).map(k => [k, 0])), messages: 50 };
-    const sc = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false, chatScan: quiet });
-    const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).text}` : ''; };
+    const sc = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), caseSensitiveDefault: false, wholeWordsDefault: false, chatScan: quiet });
+    const verdict = uid => { const f = sc.classifyEntry(entries[uid])[0]; return f ? `${f.flag}|${sc.reasonOf(f).label}` : ''; };
 
     eq(verdict(2), 'unattested|never matches (book/chat)', 'a query that evaluates false everywhere is flagged dead');
     eq(verdict(1), verdict(3), 'a SmartKey and the equivalent plain key get the same verdict');
@@ -300,9 +350,9 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     eq(verdict(4), 'unattested|never matches (book/chat)', 'a common word the chat does not bear out is not common word: the chat has answered, and what remains is that it is dead');
 
     // The common list is the no-chat fallback, so its verdicts are observed without one.
-    const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { caseSensitiveDefault: false, wholeWordsDefault: false });
+    const noChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), caseSensitiveDefault: false, wholeWordsDefault: false });
     const flagOf = uid => noChat.classifyEntry(entries[uid])[0]?.flag;
-    const textOf = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).text : ''; };
+    const textOf = uid => { const f = noChat.classifyEntry(entries[uid])[0]; return f ? noChat.reasonOf(f).label : ''; };
     eq(textOf(1), 'book common (100%)', 'without a chat the book\'s own prose stands in: a key in every entry is book common');
     eq(textOf(1), textOf(3), '...for the SmartKey and the plain key alike');
     eq(textOf(4), 'common word (the)', 'a query reducing to a common word earns the English-common flag while no chat is scanned');
@@ -321,16 +371,16 @@ console.log('ok   nesting ceiling: 100 groups or negations, refused past that');
     eq(probes.includes('? =mother =my') && probes.includes('? parent Parsons'), true, '...each carrying its terms\' own flags');
     eq(textOf(9), 'common word (mom & my)', 'no chat: the first common path, joined with &');
     const msgs = ['my mother said', 'my mother again', 'oh my mother', 'my mom once', 'nothing here'];
-    const chat = countChatHits([entries[9].key[0], ...probes], msgs);
-    const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
-    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).text, 'chat common (80%, mostly mother & my)',
+    const chat = countChatHits([entries[9].key[0], ...probes], msgs, { scope: createScanScope() });
+    const scChat = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), chatScan: { messagesWith: chat.messagesWith, messages: chat.messages } });
+    eq(scChat.reasonOf(scChat.classifyEntry(entries[9])[0]).label, 'chat common (80%, mostly mother & my)',
         'over the share it is chat common, naming the path that matches most — the chat\'s question, not the list\'s');
     eq(scChat.severityOf(scChat.classifyEntry(entries[9])[0]), 'severe', '...and severe by degree at 80%, whatever the path');
     // The breadth earned by a legitimate path: named as such, which is what clears the English-list concern.
     const legit = ['my mom once', 'the parent Parsons', 'parent Parsons again', 'Parsons the parent', 'Nick and his parent'];
-    const chat2 = countChatHits([entries[9].key[0], ...probes], legit);
-    const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
-    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).text, 'chat common (100%, mostly parent & Parsons)',
+    const chat2 = countChatHits([entries[9].key[0], ...probes], legit, { scope: createScanScope() });
+    const sc2 = buildKeyPruneScan({ entries }, opts, new Set(), { scope: createScanScope(), chatScan: { messagesWith: chat2.messagesWith, messages: chat2.messages } });
+    eq(sc2.reasonOf(sc2.classifyEntry(entries[9])[0]).label, 'chat common (100%, mostly parent & Parsons)',
         'a legitimate path matching most is what the chip names');
 }
 console.log('ok   SmartKeys are audited on df, exempt only from the literal-string heuristics');
@@ -365,8 +415,8 @@ console.log('ok   quoting marks a punctuation term as deliberate');
     eq(tokenize(q)[0].value, artist, '...and survives the lexer byte for byte');
     eq(fold(artist), artist, 'the fold is a no-op with no case and no orthographic variants to change');
     eq(validateSmartKey(q).length, 0, 'quoted, it validates clean');
-    eq(countKey(q, `now playing ${artist} — new one`, false, false) > 0, true, 'and matches its own text');
-    eq(countKey(q, 'nothing relevant here at all', false, false) > 0, false, 'and nothing else');
+    eq(countKey(q, `now playing ${artist} — new one`, false, false, NEUTRAL) > 0, true, 'and matches its own text');
+    eq(countKey(q, 'nothing relevant here at all', false, false, NEUTRAL) > 0, false, 'and nothing else');
     // Unquoted the ) becomes a paren token and the symbol runs become punctuation terms.
     eq(tokenize(`? ${artist}`).filter(t => /PAREN/.test(t.type)).length, 1, 'unquoted, the ) is syntax');
 }
@@ -374,18 +424,18 @@ console.log('ok   pathological literals round-trip when quoted');
 
 {
     const T = 'a fire in the hot tub at 10:30';
-    const same = (a, b, label) => eq(countKey(a, T, false, false), countKey(b, T, false, false), label);
+    const same = (a, b, label) => eq(countKey(a, T, false, false, NEUTRAL), countKey(b, T, false, false, NEUTRAL), label);
     same('? fire', '? "fire"', 'quoting a single term changes nothing');
     same('? =fire', '? ="fire"', '...with the exact flag');
     same('? ^Fire', '? ^"Fire"', '...with the case flag');
     same('? fire::2', '? "fire"::2', '...with a weight');
-    eq(countKey('? hot tub', T, false, false) !== countKey('? "hot tub"', T, false, false), true,
+    eq(countKey('? hot tub', T, false, false, NEUTRAL) !== countKey('? "hot tub"', T, false, false, NEUTRAL), true,
         'but quoting across a space is a different query: conjunction vs phrase');
 }
 console.log('ok   quoting a single term is free; quoting across a space is not');
 
 {
-    const c = (q, t) => { resetSmartKeys(); return countKey(q, t, false, false); };
+    const c = (q, t) => { resetSmartKeys(NEUTRAL); return countKey(q, t, false, false, NEUTRAL); };
     const grp = '? (glasses | spectacles)';
     eq(c(grp, 'glasses'), 1, 'one mention of one spelling');
     eq(c(grp, 'glasses glasses glasses'), 3, 'recurrence counts — this used to stay at 1');
@@ -412,9 +462,9 @@ console.log('ok   quoting a single term is free; quoting across a space is not')
         ['? fire -water', '? -water fire', 'fire and water'],
     ];
     for (const [a, b, text] of pairs) {
-        eq(countKey(a, text), countKey(b, text), `order does not change the count: ${a}  /  ${b}`);
+        eq(countKey(a, text, undefined, undefined, NEUTRAL), countKey(b, text, undefined, undefined, NEUTRAL), `order does not change the count: ${a}  /  ${b}`);
     }
-    eq(countKey('? zebra /P[o]rsche/', 'Arthur and the Porsche'), 0, 'a failed left operand yields no match');
+    eq(countKey('? zebra /P[o]rsche/', 'Arthur and the Porsche', undefined, undefined, NEUTRAL), 0, 'a failed left operand yields no match');
 }
 console.log('ok   AND short-circuits without changing what it counts');
 
@@ -440,17 +490,17 @@ console.log('ok   unsupported Lucene syntax is named rather than silently dead')
     eq(T('? =^HOK^3'), 'HOK@3=^', 'prefix flags and a postfix boost compose without ambiguity');
     eq(T('? ^HOK'), 'HOK@1^', 'a bare prefix ^ is still only the case flag');
     eq(T('? fire^abc'), 'fire^abc@1', 'delimiter followed by non-digits stays part of the term');
-    eq(countKey('? fire^2', 'fire fire', false, false), 4, '...and it reaches the score, x occurrences');
+    eq(countKey('? fire^2', 'fire fire', false, false, NEUTRAL), 4, '...and it reaches the score, x occurrences');
 }
 console.log('ok   ^N is accepted as a boost alias');
 
 {
     const t = 'Cap’n Joe drank at the CAFÉ — the café was warm.';
-    eq(countKey("Cap'n", t, false, true), 1, 'baseline: a plain whole-word key folds the apostrophe');
-    eq(countKey("? =Cap'n", t, false, false), 1, '=flagged SmartKey term folds it too');
-    eq(countKey("? ^Cap'n", t, false, false), 1, '...and so does ^flagged');
-    eq(countKey('? ^CAFÉ', t, false, false), 1, '^ still discriminates case after folding');
-    eq(countKey('? =café', t, false, false), 2, '= counts every occurrence, either case');
+    eq(countKey("Cap'n", t, false, true, NEUTRAL), 1, 'baseline: a plain whole-word key folds the apostrophe');
+    eq(countKey("? =Cap'n", t, false, false, NEUTRAL), 1, '=flagged SmartKey term folds it too');
+    eq(countKey("? ^Cap'n", t, false, false, NEUTRAL), 1, '...and so does ^flagged');
+    eq(countKey('? ^CAFÉ', t, false, false, NEUTRAL), 1, '^ still discriminates case after folding');
+    eq(countKey('? =café', t, false, false, NEUTRAL), 2, '= counts every occurrence, either case');
 }
 console.log('ok   flagged terms verify against the folded haystack, like countKey');
 
@@ -458,7 +508,7 @@ console.log('ok   flagged terms verify against the folded haystack, like countKe
     // Two texts, because agreeing on 0 is not agreement.
     const texts = ['the moon mission left; fire and water fell as rain', 'fire, and apollo, and snow'];
     const same = (group, why) => {
-        const got = texts.map(t => group.map(k => countKey(k, t, false, false)));
+        const got = texts.map(t => group.map(k => countKey(k, t, false, false, NEUTRAL)));
         const ok = got.every(row => row.every(v => v === row[0])) && got.some(row => row[0] > 0);
         eq(ok ? 1 : 0, 1, `${why}: ${group.join('  ==  ')} -> ${got.map(r => r.join('/')).join(' | ')}`);
     };
@@ -474,26 +524,26 @@ console.log('ok   the documented shorthands are exact rewrites');
 {
     const t = 'Apollo mission ended. apollo mission again. apollo  mission spaced.';
     for (const ww of [false, true]) {
-        eq(countKey('? "apollo mission"', t, false, ww), countKey('apollo mission', t, false, ww),
+        eq(countKey('? "apollo mission"', t, false, ww, NEUTRAL), countKey('apollo mission', t, false, ww, NEUTRAL),
             `a plain phrase key equals a quoted term (wholeWords=${ww})`);
     }
-    eq(countKey('? apollo mission', t, false, false), 6, 'unquoted, it is two terms and counts each');
-    eq(countKey('? ^"apollo mission"', t, true, false), countKey('apollo mission', t, true, false),
+    eq(countKey('? apollo mission', t, false, false, NEUTRAL), 6, 'unquoted, it is two terms and counts each');
+    eq(countKey('? ^"apollo mission"', t, true, false, NEUTRAL), countKey('apollo mission', t, true, false, NEUTRAL),
         '^ is how a SmartKey asks for the case-sensitivity the checkbox gives a plain key');
 }
 console.log('ok   a plain multi-word key is a quoted phrase');
 
 {
     const msg = 'The astronauts of the Apollo mission';
-    eq(countKey('apollo astronauts', msg, false, false), 0, 'the plain key wants the words adjacent, in order');
-    eq(countKey('? "apollo astronauts"', msg, false, false), 0, '...and the quoted term is the same key');
-    eq(countKey('? apollo astronauts', msg, false, false) > 0, true, 'unquoted, order and distance stop mattering');
+    eq(countKey('apollo astronauts', msg, false, false, NEUTRAL), 0, 'the plain key wants the words adjacent, in order');
+    eq(countKey('? "apollo astronauts"', msg, false, false, NEUTRAL), 0, '...and the quoted term is the same key');
+    eq(countKey('? apollo astronauts', msg, false, false, NEUTRAL) > 0, true, 'unquoted, order and distance stop mattering');
 }
 console.log('ok   the docs/smartkeys.md worked example holds');
 
 // --- proximity: `(…)~N` holds a group to a window — its things within N words of each other, in any order
 {
-    const c = (q, t) => { resetSmartKeys(); return countKey(q, t, false, false); };
+    const c = (q, t) => { resetSmartKeys(NEUTRAL); return countKey(q, t, false, false, NEUTRAL); };
     const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
     eq(c('? (copper pipe)~1', 'a copper hot pipe burst'), 1, 'one word between is within ~1');
     eq(c('? (copper pipe)~0', 'a copper hot pipe burst'), 0, '...and not within ~0, which is adjacency');
@@ -544,14 +594,16 @@ console.log('ok   the docs/smartkeys.md worked example holds');
     eq(c('? (=cat (dog | wolf))~1', 'the category and wolf'), 0, '...so = still refuses the substring');
     eq(c('? (fire pipe)~0', 'firetruck pipe'), 1, 'a span is widened to its word before slack is counted: a substring hit is as near as its word');
     eq(c('? (fire -drill)~0', 'firetruck drill'), 0, '...and the pad is measured from the word too');
-    setBoundaryMode('strict');
-    eq(c('? (copper pipe)~1', 'copper well-known pipe'), 1, 'slack counts words off the boundary class: strict reads well-known as one');
-    setBoundaryMode('permissive');
-    eq(c('? (copper pipe)~1', 'copper well-known pipe'), 0, '...and permissive as two');
-    setBoundaryMode('strict');
+    eq(countKey('? (copper pipe)~1', 'copper well-known pipe', false, false, createScanScope({ boundary: 'strict' })), 1, 'slack counts words off the boundary class: strict reads well-known as one');
+    eq(countKey('? (copper pipe)~1', 'copper well-known pipe', false, false, createScanScope({ boundary: 'permissive' })), 0, '...and permissive as two');
+    eq(countKey("? (=Joe coat)~1", "Joe's coat", false, false, createScanScope({ boundary: 'strict' })), 0, 'a whole-word leaf inside a group reads its scope\'s boundary: strict keeps the apostrophe in the word');
+    eq(countKey("? (=Joe coat)~1", "Joe's coat", false, false, createScanScope({ boundary: 'permissive' })), 1, '...and permissive ends the word at it');
+    let threw = false;
+    try { evaluate({ type: 'TERM', value: 'joe', isExact: true, weight: 1 }, 'joe'); } catch { threw = true; }
+    eq(threw, true, 'a whole-word node carrying no boundary mode throws rather than matching as strict');
     const cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
-    eq(keywordScore({ key: ['? (copper pipe)~1'] }, 'copper pipe', undefined, cfg).score, 1, 'a proximity group scores as one thing');
-    eq(keywordScore({ key: ['? copper pipe'] }, 'copper pipe', undefined, cfg).score, 2, '...where the conjunction is two');
+    eq(keywordScore({ key: ['? (copper pipe)~1'] }, 'copper pipe', undefined, { ...cfg, scope: NEUTRAL }).score, 1, 'a proximity group scores as one thing');
+    eq(keywordScore({ key: ['? copper pipe'] }, 'copper pipe', undefined, { ...cfg, scope: NEUTRAL }).score, 2, '...where the conjunction is two');
     eq(codes('? (copper pipe)~3'), '', 'a proximity group validates clean');
     eq(codes('? "copper pipe"~3'), 'error:proximity-on-phrase', '~N after a phrase is refused: a phrase already carries order');
     eq(codes('? (copper pipe)~'), 'warn:punctuation-term', 'the digits are required; a bare ~ is text');
@@ -569,3 +621,170 @@ console.log('ok   the docs/smartkeys.md worked example holds');
     eq(codes('? (a b)~3 "~5"'), '', '...and quoting it after a group says the text was meant');
 }
 console.log('ok   proximity: (…)~N clusters a group within N words, vetoes over the padded window');
+
+// --- macros: a key's `{{token}}`s expand to DATA at every leaf, under the scope's map ---------------------------------
+{
+    let M = createScanScope({ macros: { '{{user}}': 'Nick Parsons', '{{char}}': 'Dr. (Doc) Brown', '{{alias}}': 'Nick OR Parsons', '{{empty}}': '' } });
+    const matches = (key, text) => countKey(key, text, false, false, M) > 0;
+    eq(matches('? {{user}} sword', 'Parsons handed Nick the sword'), true, 'an unquoted macro is its words as terms: any order, any distance');
+    eq(matches('? {{user}} sword', 'Nick drew a sword'), false, '...all of them');
+    eq(countKey('? {{user}}', 'Nick Parsons', false, false, M), 2, '...each a term, so the name scores its word count');
+    eq(matches('? "{{user}}" sword', 'Nick Parsons drew a sword'), true, 'quoted, the name is one phrase');
+    eq(matches('? "{{user}}" sword', 'Parsons handed Nick the sword'), false, '...in order');
+    eq(matches('? {{char}}', '(Doc) Brown and Dr. arrived'), true, 'a name with syntax characters is data: its words, never a group');
+    eq(matches('? {{alias}}', 'Parsons'), false, '...and an operator word in a name is a word, not an operator');
+    eq(matches('? {{alias}}', 'Nick OR Parsons'), true);
+    eq(matches('? ={{user}}', 'Nicky Parsons'), false, 'the flag reaches every word');
+    eq(matches('? ={{user}}', 'Nick Parsons'), true);
+    eq(matches('? ^{{user}}[1]', 'nick here'), false, '...and so does the case flag, on a picked word too');
+    eq(matches('? ^{{user}}[1]', 'Nick here'), true);
+    eq(matches("? {{user}}'s sword", "Parsons's sword, for Nick"), true, 'a suffix rides on the last word');
+    eq(matches('? ({{user}})~0', 'Parsons, Nick'), true, 'inside a proximity group the words are its conjuncts');
+    eq(matches('? ({{user}})~0', 'Nick and Parsons'), false);
+    // The expansion is a group, so a macro term takes the modifiers a group takes, in either order.
+    eq(matches('? {{user}}~0 sword', 'Parsons, Nick, has a sword'), true, '`~N` on a macro term is the group\'s');
+    eq(matches('? {{user}}~0 sword', 'Nick has a Parsons sword'), false);
+    const s = (k, x) => countKey(k, x, false, false, M);
+    eq(s('? {{user}}::2 sword', 'Nick Parsons sword'), s('? (Nick Parsons)::2 sword', 'Nick Parsons sword'), 'a weight on a macro term is the group\'s');
+    eq(s('? {{user}}~0::2', 'Parsons Nick'), s('? (Nick Parsons)~0::2', 'Parsons Nick'), '...with `~N` first');
+    eq(s('? {{user}}::2~0', 'Parsons Nick'), s('? (Nick Parsons)~0::2', 'Parsons Nick'), '...or the weight first');
+    eq(s('? {{user}}::0 sword', 'Nick Parsons sword'), 1, '...and ::0 gates the group');
+    eq(matches('? {{user}} OR "Warrior of Light"', 'the Warrior of Light'), true, 'the group sits in the tree, so OR binds outside it');
+    eq(matches('? {{user}} OR "Warrior of Light"', 'Parsons met Nick'), true);
+    eq(matches('? {{user}} OR "Warrior of Light"', 'Nick met the Warrior'), false, '...and neither side matches on half of itself');
+    // `{{token}}[N]` is the Nth word of the value, counting from one, negative from the end; out of range is empty.
+    eq(matches('? {{user}}[1]', 'Nick alone'), true, '[1] is the first word');
+    eq(matches('? {{user}}[1]', 'Parsons alone'), false);
+    eq(matches('? {{user}}[2]', 'Parsons alone'), true, '[2] the second');
+    eq(matches('? {{user}}[-1]', 'Parsons alone'), true, '[-1] the last');
+    eq(matches('? ({{user}} OR {{user}}[-1])', 'Parsons met someone'), true, 'the surname alone, or the whole name as a group');
+    eq(matches('? ({{user}} OR {{user}}[-1])', 'Nick met someone'), false);
+    eq(matches('? {{user}}[3] sword', 'a sword'), true, 'out of range is empty, so the leaf drops');
+    eq(matches('? {{user}}[0] sword', 'a sword'), true, '...and there is no word zero');
+    eq(matches("? {{user}}[1]'s sword", "Nick's sword"), true, 'a suffix rides on the picked word');
+    eq(matches('? "{{user}}[1] the great"', 'Nick the great'), true, 'the pick works inside a phrase');
+    eq(matches('{{user}}[-1]', 'mr parsons'), true, '...and in a plain key');
+    eq(matches('/^{{user}}[1]$/', 'Nick'), true, '...and in a pattern, escaped');
+    eq(matches('? {{nope}}[1] x', '{{nope}}[1] x'), true, 'an unknown token keeps its pick as written');
+    eq(matches('? star~2', 'star~2 here'), true, '`~N` on any other term is still text');
+    eq(matches('? star~2', 'a star'), false);
+    eq(matches('/{{char}}/', 'Dr. (Doc) Brown'), true, 'a pattern takes the value escaped');
+    eq(matches('/{{char}}/', 'DrX (Doc) Brown'), false, '...so its dot is a dot');
+    eq(matches('{{user}}', 'nick parsons here'), true, 'a plain key is the substring, as core');
+    eq(matches('{{user}}', 'Parsons, Nick'), false);
+    eq(matches('? {{nope}} x', '{{nope}} x'), true, 'an unknown token stays as written');
+    eq(matches('? {{empty}} sword', 'a sword'), true, 'an empty value contributes no term');
+    // Through the primed path too: an empty literal interned into the automaton would count at every position.
+    const lone = k => ({ key: [k] }), kcfg = { k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    for (const k of ['{{empty}}', '{{user}}[3]', '? "{{empty}}"']) {
+        eq(keywordScore(lone(k), ['a sword'], [k], { ...kcfg, scope: createScanScope({ macros: M.macros }) }).hits.length, 0, `${k} expanding to nothing matches nothing, primed`);
+    }
+    eq(keywordScore({ key: ['sword'], keysecondary: ['{{empty}}'], selectiveLogic: 0 }, ['a sword'], ['sword'], { ...kcfg, scope: createScanScope({ macros: M.macros }) }).hits.length, 0, '...nor as a secondary it gates on');
+    eq(countChatHits(['{{empty}}'], ['a', 'b'], { scope: createScanScope({ macros: M.macros }) }).messagesWith.get('{{empty}}'), 0, '...nor in the chat scan');
+    M = createScanScope({ macros: { '{{path}}': '/dev/null/' } });
+    eq(matches('{{path}}', 'at /dev/null/ now'), true, 'a plain key whose value looks like a pattern is still a literal');
+    eq(matches('{{path}}', 'dev'), false);
+    M = createScanScope({ macros: { '{{user}}': 'Kyle Marlowe' } });
+    eq(matches('? {{user}}', 'Kyle Marlowe'), true, 'another scope matches under its own map');
+    eq(matches('? {{user}}', 'Nick Parsons'), false, '...and not the other\'s');
+    M = createScanScope({ macros: { '{{user}}': 'Nick Parsons' } });
+    const gated = { key: ['sword'], keysecondary: ['{{user}}'], selectiveLogic: 0 }, cfg = { k1: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
+    eq(keywordScore(gated, 'Nick Parsons has a sword', gated.key, { ...cfg, scope: M }).score > 0, true, 'a secondary key expands too');
+    eq(keywordScore(gated, 'Kyle has a sword', gated.key, { ...cfg, scope: M }).score > 0, false);
+    const chat = countChatHits(['{{user}}', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody'], { scope: M });
+    eq(chat.messagesWith.get('{{user}}'), 1, 'the chat scan counts a plain macro key by its value');
+    eq(chat.messagesWith.get('? {{user}}'), 2, '...and a SmartKey by its words');
+    // `hitIndex`: which units each key hit, so a caller scanning the same chat under several maps can union them.
+    const idx = countChatHits(['{{user}}', 'nobody', '? {{user}}'], ['Nick Parsons here', 'Parsons, then Nick', 'nobody'], { hitIndex: true, scope: M });
+    eq([...idx.hitsBy.get('{{user}}')].join(), '0', 'a literal key names the unit it hit');
+    eq([...idx.hitsBy.get('nobody')].join(), '2', '...each key its own');
+    eq([...idx.hitsBy.get('? {{user}}')].join(), '0,1', '...a SmartKey too');
+    eq([...idx.typedBy.get('{{user}}')].join(), '0', 'the typed-form hits are indexed alongside');
+    eq(idx.hitsBy.get('{{user}}').size, idx.messagesWith.get('{{user}}'), 'the index agrees with the count');
+    eq(macroTokens(['? {{user}} and {{char}}', '{{user}}', 'plain']).join(','), '{{user}},{{char}}', 'the tokens a key list carries, once each');
+    eq(JSON.stringify(macroMap(['? {{user}} x'], tok => tok.toUpperCase())), '{"{{user}}":"{{USER}}"}', 'the map is the tokens through the substitution the caller supplies');
+    const rows = usableMessages([{ chat_metadata: {} }, { name: 'You', mes: 'hi', is_user: true }, { name: 'Bot', mes: 'yo' }, { name: 'Bot', mes: '' }, { name: 'Ghost', mes: 'boo', is_user: true, is_system: true }]);
+    eq(JSON.stringify(rows), '[{"name":"You","mes":"hi","is_user":true},{"name":"Bot","mes":"yo","is_user":false}]', "a chat's usable messages: hidden and empty ones out, is_user kept");
+    eq(chatUser(rows), 'You', "...so chatUser reads the chat's own {{user}} off them");
+    eq(countKey('? {{user}} sword', 'Nick Parsons sword', false, false, NEUTRAL) > 0, false, 'without a scope a token is literal text');
+    // A scope is a context: whatever else is matched meanwhile, and under what map, a scope's answers do not move.
+    const book = { entries: { 0: { uid: 0, key: ['? {{user}}'], content: 'Kyle stood watch.' } } };
+    const auditOpts = { scanKeyword: true, scanVectorized: true, scanConstant: true, includeInactive: true, pruneUnattested: true, ignoreProper: false, minLength: 4 };
+    const audit = buildKeyPruneScan(book, auditOpts, new Set(), { scope: createScanScope({ macros: { '{{user}}': 'Kyle' } }) });
+    eq(countKey('? {{user}}', 'Nick', false, false, createScanScope({ macros: { '{{user}}': 'Nick' } })), 1, 'another context matches meanwhile...');
+    eq(audit.classifyEntry(book.entries[0]).length, 0, '...and an audit built under Kyle still finds the key attested in the book');
+    eq(buildKeyPruneScan(book, auditOpts, new Set(), { scope: createScanScope({ macros: { '{{user}}': 'Nick' } }) }).classifyEntry(book.entries[0])[0]?.flag, 'unattested', '...where one built under Nick finds it dead');
+    const ortho = { entries: { 0: { uid: 0, key: ['/{{char}}\u2019s/'], content: "Mara's coat hung there." }, 1: { uid: 1, key: ['x'], content: 'nothing' } } };
+    eq(buildKeyPruneScan(ortho, auditOpts, new Set(), { scope: createScanScope({ macros: { '{{char}}': 'Mara' } }) }).classifyEntry(ortho.entries[0])[0]?.where, 'book', 'the regex orthography check expands the pattern too, so it finds the straight form the book uses');
+}
+
+// --- optional terms: a trailing `?` never gates and scores when present, on a term, a phrase, a group or a pattern ------
+{
+    const M = createScanScope({ macros: { '{{user}}': 'Kyle Parsons' } });
+    const matches = (key, text) => countKey(key, text, false, false, M) > 0;
+    const codes = k => validateSmartKey(k).map(p => `${p.severity}:${p.code}`).join(' ');
+    const s = (k, x) => countKey(k, x, false, false, M);
+    eq(matches('? Kyle Parsons?', 'Kyle alone'), true, 'an optional term does not gate');
+    eq(s('? Kyle Parsons?', 'Kyle Parsons'), 2, '...and scores when present');
+    eq(s('? Kyle Parsons?', 'Kyle'), 1);
+    eq(matches('? Kyle Parsons?', 'Parsons alone'), false, 'the required term still gates');
+    eq(matches('? "Kyle Parsons"? sword', 'a sword'), true, 'a phrase can be optional');
+    eq(s('? "Kyle Parsons"? sword', 'Kyle Parsons sword'), 2);
+    eq(matches('? (Kyle OR Nick)? sword', 'a sword'), true, '...and a group');
+    eq(matches('? /Kyle|Nick/? sword', 'a sword'), true, '...and a pattern');
+    eq(s('? /Kyle|Nick/? sword', 'Nick sword'), 2);
+    eq(s('? Kyle?::2 sword', 'Kyle sword'), 3, 'a weight and the mark in either order');
+    eq(s('? Kyle::2? sword', 'Kyle sword'), 3);
+    eq(s('? {{user}}? sword', 'a sword'), 1, 'a macro group can be optional');
+    eq(s('? {{user}}? sword', 'Kyle Parsons sword'), 3);
+    // The idiom: the first name required, the surname a bonus.
+    eq(s('? {{user}}[1] {{user}}[2]?', 'Kyle waved'), 1, 'a first name alone fires');
+    eq(s('? {{user}}[1] {{user}}[2]?', 'Kyle Parsons waved'), 2, '...and the surname adds to it');
+    eq(matches('? {{user}}[1] {{user}}[2]?', 'Parsons waved'), false, '...but never carries it alone');
+    eq(matches('? "seriously?"', 'seriously?'), true, 'quoted, a trailing ? is text');
+    eq(matches('? (fire drill?)~1', 'a fire here'), true, 'in a proximity group an optional conjunct is not required');
+    eq(matches('? (fire drill?)~1', 'a drill here'), false, '...and the required one still is');
+    eq(codes('? Parsons?'), 'error:no-required-term', 'a key of nothing but optional terms would match everything');
+    eq(codes('? Parsons? -x'), 'error:no-required-term', '...and negations do not rescue it');
+    eq(codes('? (Kyle OR Parsons?)'), 'error:always-true', 'an optional side of an OR is always true, which is not the same as nothing being required');
+    eq(codes('? Kyle XOR Parsons?'), 'error:always-true', '...and of an XOR');
+    // Wherever an operator asks whether its operand holds, a part made only of optional terms always answers yes.
+    eq(codes('? -Parsons?'), 'error:always-true', 'an optional term under a negation is always true, so the negation never is');
+    eq(codes('? (Kyle -Parsons?)'), 'error:always-true', '...wherever the negation sits');
+    eq(codes('? Kyle (Parsons OR Ryan?)'), 'error:always-true', '...as is an optional OR side nested under an AND, though it happens to behave as an optional group');
+    eq(codes('? Kyle (Parsons OR Ryan)?'), '', '...which is the coherent spelling of it');
+    eq(codes('? Kyle -(Parsons? Ryan?)'), 'error:always-true', '...and so is a negated group of optional terms, though each mark sits on a conjunct');
+    eq(codes('? Kyle -(Parsons Ryan?)'), 'info:optional-inert', '...but under an AND the mark is inert, not fatal');
+    eq(matches('? Kyle -(Parsons Ryan?)', 'Kyle was here'), true, '...so that key still matches, exactly as it reads without the mark');
+    eq(matches('? Kyle -Parsons?', 'Kyle was here'), false, 'a negated optional matches nothing, whatever the text');
+    eq(matches('? Kyle -Parsons', 'Kyle was here'), true, '...where the same key without the mark matches');
+    eq(codes('? Kyle? XOR Ryan?'), 'error:always-true', 'two optional sides of an XOR both read as present, so it never matches');
+    eq(matches('? Kyle? XOR Ryan?', 'Kyle was here'), false, '...not even on one side alone');
+    eq(codes('? Parsons -(Kyle XOR Ryan?)'), 'error:always-true', '...and one optional side turns the XOR into a negation');
+    eq(codes('? (Kyle OR Parsons)?'), 'error:no-required-term', '...nor an optional group on its own');
+    eq(codes('? Kyle Parsons?'), '', 'one required term makes it a key');
+    eq(codes('? Kyle? Parsons'), '', '...whichever it is');
+    eq(codes('? (Kyle OR Nick) Parsons?'), '', '...and a required group does too');
+    eq(codes('? NOT water'), 'error:negation-only', 'negation-only keeps its own name');
+}
+
+// --- a flag in front of a group reaches every term in it, as it reaches every word of a macro ------------------------------
+{
+    eq(matches('? ^(A B)', 'a b'), false, '^ on a group makes each term case-sensitive');
+    eq(matches('? ^(A B)', 'A B'), true);
+    eq(matches('? ^(A or B)', 'b'), false, '...under OR too');
+    eq(matches('? ^(A or B)', 'B'), true);
+    eq(matches('? =(A or B)', 'AB'), false, '= on a group makes each term whole-word');
+    eq(matches('? =(A or B)', 'A'), true);
+    eq(matches('? =(A (B or C))', 'A BC'), false, '...into nested groups');
+    eq(matches('? =(A (B or C))', 'A C'), true);
+    eq(matches('? ^(/a/ B)', 'a b'), false, 'a pattern inside keeps its own case; the term beside it takes the flag');
+    eq(matches('? ^(/a/ B)', 'a B'), true);
+    eq(matches('? ^=(A B)', 'AB'), false, 'both flags combine on a group as on a term');
+    eq(matches('? ^=(A B)', 'A B'), true);
+}
+// A quoted term shaped like a pattern or a SmartKey is text in a proximity group, as it is anywhere else.
+eq(countKey('? ("/re/" fire)~0', 'fire burns. later and later: /re/', false, false, NEUTRAL), 0, 'a quoted /re/ is not read as a pattern for its spans');
+eq(countKey('? ("/re/" fire)~0', 'fire /re/', false, false, NEUTRAL), 1, '...and is still near where it sits beside the other term');
+eq(countKey('? ("?x" fire)~0', 'fire x, later ?x', false, false, NEUTRAL), 0, 'a quoted ?x is not re-read as a SmartKey, whose bare x would sit beside fire');
+eq(countKey('? ("?x" fire)~0', 'fire ?x', false, false, NEUTRAL), 1, '...and is near where it sits');

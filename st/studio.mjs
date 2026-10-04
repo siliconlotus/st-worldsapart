@@ -1,23 +1,23 @@
 // studio.mjs — Lorebook Studio (/wa-studio): the two-pane lorebook manager, all books on the left and the
 // selected book's entries on the right. DOM- and ST-coupled; the logic it stands on is the shared pure modules.
-import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters } from '../../../../../script.js';
+import { saveSettingsDebounced, getRequestHeaders, characters, getCharacters, substituteParams, this_chid } from '../../../../../script.js';
 import { getContext } from '../../../../extensions.js';
 import { loadWorldInfo, saveWorldInfo, reloadEditor, createWorldInfoEntry, duplicateWorldInfoEntry, deleteWorldInfoEntry, getFreeWorldEntryUid, deleteWIOriginalDataValue, deleteWorldInfo, updateWorldInfoList, world_names, world_info_depth, world_info_include_names, world_info_match_whole_words, world_info_case_sensitive, selected_world_info, world_info, METADATA_KEY } from '../../../../world-info.js';
 import { power_user } from '../../../../power-user.js';
-import { escapeHtml, getCharaFilename } from '../../../../utils.js';
+import { escapeHtml, getCharaFilename, getSanitizedFilename } from '../../../../utils.js';
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
-import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
+import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, flagProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
-import { validateSmartKey } from '../extension/smartkeys.mjs';
+import { chatUser, createScanScope, macroMap, usableMessages, validateSmartKey } from '../extension/smartkeys.mjs';
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
-import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasPromoteDecorator, isRegexKey, latchBook, partitionLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
-import { labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
+import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
+import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
 import { addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
@@ -39,6 +39,25 @@ const LOGIC_OPTS = [
     ['2', 'NOT_ANY', LOGIC_LABEL[2]],
     ['1', 'NOT_ALL', LOGIC_LABEL[1]],
 ];
+/** ST's position select, one choice per position and at-depth role, as `[value, short label, tooltip, menu label]`; the value is
+ *  `position`, or `4:role` at depth. */
+const PLACEMENTS = [
+    ['0', t`↑Char`, t`Before character definitions`, t`↑ Char`],
+    ['1', t`↓Char`, t`After character definitions`, t`↓ Char`],
+    ['5', t`↑EM`, t`Before example messages`, t`↑ Example Messages`],
+    ['6', t`↓EM`, t`After example messages`, t`↓ Example Messages`],
+    ['2', t`↑AN`, t`Before Author's Note`, t`↑ Author's Note`],
+    ['3', t`↓AN`, t`After Author's Note`, t`↓ Author's Note`],
+    ['4:0', t`@D ⚙️`, t`At depth, as system`, t`@Depth (System)`],
+    ['4:1', t`@D 👤`, t`At depth, as user`, t`@Depth (User)`],
+    ['4:2', t`@D 🤖`, t`At depth, as assistant`, t`@Depth (Assistant)`],
+    ['7', t`➡️ Outlet`, t`Outlet: placed only where the prompt holds its {{outlet::name}} macro`, t`➡️ Outlet`],
+];
+/** The PLACEMENTS row an entry's position and role select, undefined for a position core places nowhere. */
+const placementOf = e => {
+    const v = Number(e.position) === 4 ? `4:${e.role ?? 0}` : String(e.position);
+    return PLACEMENTS.find(([pv]) => pv === v);
+};
 
 /**
  * Lorebook Studio (/wa-studio).
@@ -47,8 +66,15 @@ const LOGIC_OPTS = [
  *   Lab tab, `entry` opens that entry in the Explorer.
  */
 export async function lorebookStudio(preferredBook = null, open = null) {
-    if (!(world_names ?? []).length) { toastr.warning(t`No lorebooks found.`, 'Worlds Apart'); return ''; }
+    if (!(world_names ?? []).length) { toastr.warning(t`No lorebooks found.`, 'WorldsApart'); return ''; }
     ensureStudioStyle();
+
+    /** The "additional lorebooks" a character carries: world_info.charLore, keyed by avatar filename.
+     *  Stays above attachedBookNames, which calls it while this body is still initialising. */
+    const extraBooksOf = avatar => {
+        const file = getCharaFilename(null, { manualAvatarKey: avatar });
+        return (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? [];
+    };
 
     /** bindings.mjs attachedBooks, bound to ST's globals. */
     const attachedBookNames = () => {
@@ -89,6 +115,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const searchScope = { title: true, entry: true, keywords: true };   // which fields the search looks in
     let pendingUndo = null;          // { books: [{name, data}] } of the last deletion, offered in the nav undo bar
     let undoTimer = null;            // auto-expiry for the undo bar
+    let entryUndo = null;            // { book, entries, originalData, n, chatId, latches?, rekeyBack?, uidBack?, target? } before the last entry bulk action
+    let entryUndoTimer = null;
     const selectedBooks = new Set(); // book names ticked in the nav for book-level bulk actions
     let bookAnchor = null;           // last-ticked book, for shift-click range selection
     let bookBulkMode = false;        // nav "select multiple" mode — reveals row checkboxes + the copy/delete bar
@@ -121,11 +149,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let orphans = null;       // findOrphanBindings result, computed once in the background; null until it has run
     let orphanView = false;   // showing the list instead of a book — `selected` stays a real book name
 
-    /** The "additional lorebooks" a character carries: world_info.charLore, keyed by avatar filename. */
-    const extraBooksOf = avatar => {
-        const file = getCharaFilename(null, { manualAvatarKey: avatar });
-        return (file && world_info.charLore?.find(e => e.name === file)?.extraBooks) ?? [];
-    };
     const humanSize = n => (!Number.isFinite(n) ? '?' : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 
     /** The chat index: the plugin's chat-bindings route (reads line 0 only, P1), else ST's endpoint via loadChatIndex,
@@ -134,8 +157,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (runState.pluginAvailable) {
             try {
                 const r = await fetch('/api/plugins/worlds-apart/chat-bindings', { method: 'POST', headers: getRequestHeaders() });
-                if (r.ok) {
-                    const { bindings } = await r.json();
+                if (!r.ok) throw new Error(String(r.status));
+                {
+                    const { bindings, groups: groupRows } = await r.json();
+                    // Every field the index reads, on every row.
+                    if (!Array.isArray(bindings) || !bindings.every(b => typeof b?.dir === 'string' && typeof b?.file === 'string')) throw new Error('no bindings list');
                     const byDir = new Map();
                     for (const c of characters ?? []) {
                         if (c?.avatar) byDir.set(String(c.avatar).replace(/\.png$/, ''), c);
@@ -151,10 +177,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                         return e;
                     };
                     for (const c of characters ?? []) if (c?.avatar) entry(String(c.avatar).replace(/\.png$/, ''));
-                    for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, file_size: humanSize(b.size), chat_metadata: { world_info: b.world_info } });
+                    groupIndex = (Array.isArray(groupRows) ? groupRows : []).map(g => ({ id: String(g.id), chat_metadata: { world_info: g.world_info, ...(g.fired ? { [WA_METADATA_KEY]: { fired: g.fired } } : {}) } }));
+                    for (const b of bindings ?? []) entry(b.dir).chats.push({ file_name: b.file, file_size: humanSize(b.size), chat_metadata: { world_info: b.world_info, ...(b.fired ? { [WA_METADATA_KEY]: { fired: b.fired } } : {}) } });
                     return [...out.values()];
                 }
-            } catch (err) { console.warn('[WA] chat-bindings route unavailable, falling back', err); }
+            } catch (err) { pluginFallback('chat-bindings', err); }
         }
         return loadChatIndex();
     };
@@ -179,22 +206,30 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     root.append(nav, explorer, closeBtn);
 
     const firstLine = e => { const txt = String(e.content ?? '').trim(); const nl = txt.indexOf('\n'); return (nl < 0 ? txt : txt.slice(0, nl)) || t`(empty)`; };
-    const save = () => { dirty = true; saveWorldInfo(selected, data, true); };
+    // A save ends the entry undo, whose snapshot predates it.
+    const save = () => { dirty = true; if (entryUndo) { clearEntryUndo(); refreshBulkBar(); } saveWorldInfo(selected, data, true); };
     const getSugg = uid => { let x = sugg.get(uid); if (!x) sugg.set(uid, x = { tfidf: [], llm: [] }); return x; };
+    /** ST's substitution, except that with no character selected a character macro stays unresolved rather than naming the system user or, in a group, nobody. */
+    const stSubstitute = tok => (/^\{\{char(IfNotGroup)?\}\}$/i.test(tok) && this_chid === undefined ? tok : substituteParams(tok));
+    /** The book's macro map, every token its keys carry evaluated now: the audit, the chat scan and the Lab all read it. */
+    /** Every key and secondary in the book as written, the whole book: the audit, the chat scan, the macro map and the Lab all read it. */
+    const bookKeyTexts = () => Object.values(data?.entries ?? {}).flatMap(e => [...(Array.isArray(e.key) ? e.key : []), ...(Array.isArray(e.keysecondary) ? e.keysecondary : [])]);
+    const macrosOf = () => macroMap(bookKeyTexts(), stSubstitute);
     const rebuildScan = () => {
         // Every term is judged below, so an edited row drops the false the edit forced.
         // Only those: a tick the user set is theirs, and survives a rescan on purpose.
        
         scan = buildKeyPruneScan(data, studioOpts, ignoreSet, {
+            t, translate,
             matchWindow: settings().matchWindow,
+            scope: createScanScope({ macros: macrosOf(), boundary: settings().wordBoundary }),
             // Into the classifier, not painted on in Cleanup: the Explorer's chips colour from reasonOf/severityOf.
             chatScan: chatHits ? { messagesWith: chatHits, typedWith: chatTyped, messages: chatMsgs, unit: chatUnit } : undefined,
         });
     };
     const afterChatScan = keys => { rebuildScan(); termRepaint?.(); rerenderKeys(keys); refreshTabStatus(); };
-    /** Every key in the book — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
-    const bookKeys = () => [...new Set(Object.values(data?.entries ?? {})
-        .flatMap(e => (Array.isArray(e.key) ? e.key : []).map(k => String(k).trim())).filter(Boolean))];
+    /** Every key in the book, trimmed, once each — the whole book, not visibleEntries(), so a verdict never depends on the filter. */
+    const bookKeys = () => [...new Set(bookKeyTexts().map(k => String(k).trim()).filter(Boolean))];
 
     const clearChatScan = () => { chatHits = null; chatTyped = null; chatUnit = 'message'; chatMsgs = 0; chatNames = []; };
     // Repaints the entries carrying any of `keys`; classifyEntry reads ignoreSet live, so whitelisting needs no rescan.
@@ -327,7 +362,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const coreNum = id => ({ get: () => Number(el(id)?.value) || 0, set: v => { const e = el(id); if (e) { e.value = v; fire(e); } refreshGlobalTray(); } });
         const coreChk = (id, after) => ({ get: () => !!el(id)?.checked, set: v => { const e = el(id); if (e) { e.checked = v; fire(e); } after?.(); } });
         panel.append(
-            col(t`Worlds Apart (overrides core)`,
+            col(t`WorldsApart (overrides ST)`,
                 numRow(t`Scan depth`, wa('messageDepth', '#wa_message_depth'), t`messages`, t`Recent messages WA scans / queries — overrides core scan depth`),
                 numRow(t`Budget cap`, wa('maxTokens', '#wa_max_tokens'), t`tokens`, t`Absolute token budget over all activated entries (0 = leave to core)`),
                 numRow(t`Budget %`, wa('maxTokensPercent', '#wa_max_tokens_pct'), t`% of max`, t`Token budget as a % of max prompt tokens (0 = off); tighter of the two wins`),
@@ -352,7 +387,50 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const selectedList = () => [...selectedEntries].map(uid => data?.entries?.[uid]).filter(Boolean);
     let lastSel = null;   // the selection a bulk action spent, offered back as "Reselect N"
     const consumeSelection = () => { if (!selectedEntries.size) return; lastSel = new Set(selectedEntries); selectedEntries.clear(); syncSelCheckboxes(); };
-    const applyBulk = fn => { const sel = selectedList(); if (!sel.length) return; for (const e of sel) fn(e); save(); sel.forEach(x => renderEntry(x)); consumeSelection(); };
+    const snapEntries = () => ({ entries: structuredClone(data.entries), originalData: data.originalData && structuredClone(data.originalData) });
+    const clearEntryUndo = () => { entryUndo = null; if (entryUndoTimer) { clearTimeout(entryUndoTimer); entryUndoTimer = null; } };
+    /** Offers `u` (a snapEntries() taken before the action, plus `n` and any latch or target record) as the bulk bar's undo; call after the action's save(). */
+    const armEntryUndo = u => {
+        clearEntryUndo();
+        entryUndo = { ...u, book: selected, chatId: getContext().chatId };
+        entryUndoTimer = setTimeout(() => { clearEntryUndo(); refreshBulkBar(); }, 30000);
+        refreshBulkBar();
+    };
+    const undoEntries = async () => {
+        const u = entryUndo; if (!u || u.book !== selected) return;
+        clearEntryUndo();
+        data.entries = u.entries;
+        if (u.originalData) data.originalData = u.originalData;
+        // A renumber's per-uid view state goes back to the uids it came from, as the entries do.
+        if (u.uidBack) for (const set of [entryOpen, expanded, tall, advOpen]) {
+            const moved = [...set].filter(uid => u.uidBack.has(uid));
+            for (const uid of moved) set.delete(uid);
+            for (const uid of moved) set.add(u.uidBack.get(uid));
+        }
+        selectedEntries.clear(); lastSel = null; sugg.clear();
+        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        if (u.target) {
+            const tgt = await loadWorldInfo(u.target.name);
+            if (tgt?.entries) {
+                for (const uid of u.target.uids) { deleteWIOriginalDataValue(tgt, String(uid)); delete tgt.entries[uid]; }
+                await saveWorldInfo(u.target.name, tgt, true);
+                reloadEditor(u.target.name);
+            } else toastr.warning(t`Could not load “${u.target.name}”.`, 'WorldsApart');
+        }
+        // The forward pass must have finished before it is reversed.
+        const forward = await u.latches;
+        if (u.rekeyBack) latchWarn((await rekeyChatLatches(u.rekeyBack, Object.values(u.entries))).failed);
+        if (forward?.dropped.length) latchWarn(await putLatchesBack(forward.dropped, u.chatId));
+    };
+    const applyBulk = fn => {
+        const sel = selectedList(); if (!sel.length) return;
+        const snap = snapEntries();
+        for (const e of sel) fn(e);
+        // Only what the action changed saves and counts toward the undo; an action that changed nothing offers none.
+        const changed = sel.filter(e => JSON.stringify(e) !== JSON.stringify(snap.entries[e.uid])).length;
+        if (changed) { save(); armEntryUndo({ ...snap, n: changed }); }
+        sel.forEach(x => renderEntry(x)); consumeSelection();
+    };
     const numberPrompt = async (title, label, def, min, max) => {
         const raw = await Popup.show.input(title, label, String(def));
         if (raw == null) return null;
@@ -364,8 +442,25 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const bulkTrigger = async () => { const v = await numberPrompt(t`Trigger % — selected entries`, t`Probability (0–100):`, 100, 0, 100); if (v != null) applyBulk(e => { e.probability = Math.round(v); e.useProbability = true; }); };
     const bulkDelay = async () => { const v = await numberPrompt(t`Delay — selected entries`, t`Messages before first activation (0 = none):`, 0, 0); if (v != null) applyBulk(e => e.delay = Math.floor(v) || null); };
     const bulkCooldown = async () => { const v = await numberPrompt(t`Cooldown — selected entries`, t`Messages before it can re-activate (0 = none):`, 0, 0); if (v != null) applyBulk(e => e.cooldown = Math.floor(v) || null); };
-    const bulkScanDepth = async () => { const v = await numberPrompt(t`Scan depth — selected entries`, t`Messages to scan (0 = global default):`, 0, 0); if (v != null) applyBulk(e => e.scanDepth = Math.floor(v) > 0 ? Math.floor(v) : null); };
+    // Not numberPrompt, which reads a blank as 0: blank is the global depth here, and 0 is authored.
+    const bulkScanDepth = async () => {
+        const raw = await Popup.show.input(t`Scan depth — selected entries`, t`Messages to scan (blank = global default, 0 = none):`, '');
+        if (raw == null) return;
+        const s = String(raw).trim(), n = Math.floor(Number(s));
+        if (s && !(n >= 0)) return;
+        applyBulk(e => e.scanDepth = s ? n : null);
+    };
     const bulkOrderSet = async () => { const v = await numberPrompt(t`Order — selected entries`, t`Order value for every selected entry:`, 100); if (v != null) applyBulk(e => e.order = Math.floor(v)); };
+    /** The fields a PLACEMENTS choice writes; an at-depth or outlet one asks for its depth or name first, and a cancel answers null.
+     *  @param {object} [cur] The entry whose depth and name the prompts start from */
+    const placementFields = async (val, cur = {}) => {
+        const [pos, role] = val.split(':');
+        const f = { position: Number(pos), role: role === undefined ? null : Number(role) };
+        if (pos === '4') { const d = await numberPrompt(t`Depth`, t`Depth (0 = after the last message):`, cur.depth ?? 4, 0); if (d == null) return null; f.depth = Math.floor(d); }
+        if (pos === '7') { const name = await Popup.show.input(t`Outlet`, t`Outlet name:`, cur.outletName ?? ''); if (name == null) return null; f.outletName = String(name).trim(); }
+        return f;
+    };
+    const bulkPlacement = async val => { const f = await placementFields(val); if (f) applyBulk(e => Object.assign(e, f)); };
     const bulkRecLevel = async () => { const v = await numberPrompt(t`Delay until recursion — selected entries`, t`Recursion level (0 = any; turns the flag on):`, 0, 0); if (v != null) applyBulk(e => e.delayUntilRecursion = Math.floor(v) > 0 ? Math.floor(v) : true); };
     const bulkCopyTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, false); };
     const bulkMoveTo = async () => { const l = selectedList(); consumeSelection(); await entriesToBook(l, true); };
@@ -403,14 +498,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (SORT_FNS[sortKey]) ordered.sort(SORT_FNS[sortKey]);
         const n = ordered.length;
         const targetOf = blockTarget(start, n, desc);
+        const snap = snapEntries();
 
-        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
+        if (!advanced) { ordered.forEach((e, i) => e.order = targetOf(i)); save(); armEntryUndo({ ...snap, n }); ordered.forEach(x => renderEntry(x)); consumeSelection(); return; }
 
         // UID is the entries-object key and the entry's identity, so this rebuilds data.entries.
-        if (data.originalData) { toastr.warning(t`UID renumbering is not available for character-embedded books.`, 'Worlds Apart'); return; }
-        if (start < 0) { toastr.warning(t`Start must be 0 or greater when renumbering UIDs.`, 'Worlds Apart'); return; }
+        if (data.originalData) { toastr.warning(t`UID renumbering is not available for character-embedded books.`, 'WorldsApart'); return; }
+        if (start < 0) { toastr.warning(t`Start must be 0 or greater when renumbering UIDs.`, 'WorldsApart'); return; }
         const plan = planUidReindex(data.entries, ordered.map(e => e.uid), start, desc);
-        if (plan.conflict != null) { toastr.warning(t`UID ${plan.conflict} is used by an unselected entry.`, 'Worlds Apart'); return; }
+        if (plan.conflict != null) { toastr.warning(t`UID ${plan.conflict} is used by an unselected entry.`, 'WorldsApart'); return; }
         const byUid = new Map(ordered.map(e => [e.uid, e]));
         const selUids = new Set(byUid.keys());
         const next = {};
@@ -420,14 +516,28 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
         entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
-        toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'Worlds Apart');
+        const latches = rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))), ordered);
+        armEntryUndo({ ...snap, n, latches, rekeyBack: uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(nu), o]))), uidBack: new Map(plan.moves.map(([o, nu]) => [nu, o])) });
+        latchWarn((await latches).failed);
+        toastr.success(n === 1 ? t`Renumbered ${n} entry (order + UID).` : t`Renumbered ${n} entries (order + UID).`, 'WorldsApart');
+    };
+    /** Deletes `gone` (uids of the open book), after a confirm titled `title` when one is given, with the bulk bar's undo and the latch
+     *  pass; false on a cancel. */
+    const deleteEntries = async (gone, title = null) => {
+        if (!gone.length || (title && !await Popup.show.confirm(title, t`Undo is available for 30 seconds.`))) return false;
+        const snap = snapEntries();
+        // Out of the selection too: core hands freed uids back out, so a stale one would re-point at the next entry created.
+        for (const uid of gone) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); selectedEntries.delete(uid); lastSel?.delete(uid); }
+        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        const latches = rekeyChatLatches(uidRekey(selected, new Map(gone.map(u => [String(u), null]))), gone.map(u => snap.entries[u]));
+        armEntryUndo({ ...snap, n: gone.length, latches });
+        latchWarn((await latches).failed);
+        return true;
     };
     const bulkDelete = async () => {
-        const n = selectedEntries.size; if (!n) return;
-        if (!await Popup.show.confirm(n === 1 ? t`Delete ${n} selected entry?` : t`Delete ${n} selected entries?`, t`This is irreversible.`)) return;
-        for (const uid of [...selectedEntries]) { await deleteWorldInfoEntry(data, uid, { silent: true }); sugg.delete(uid); rowEls.delete(uid); }
-        selectedEntries.clear(); lastSel = null;   // no Reselect offer: those uids don't exist any more
-        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        const gone = [...selectedEntries], n = gone.length;
+        // No Reselect offer: those uids don't exist any more.
+        if (await deleteEntries(gone, n === 1 ? t`Delete ${n} selected entry?` : t`Delete ${n} selected entries?`)) { lastSel = null; refreshBulkBar(); }
     };
     const bulkAddTerm = async () => {
         const raw = await Popup.show.input(t`Add key — selected entries`, t`Key to add to every selected entry:`);
@@ -438,26 +548,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         applyBulk(e => { if (!hasKey(e, term)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(term); added++; } });
         const skipped = n - added;
         const addedTxt = added === 1 ? t`“${term}” added to ${added} entry` : t`“${term}” added to ${added} entries`;
-        toastr[added ? 'success' : 'info'](added ? (skipped ? t`${addedTxt} (${skipped} already had it).` : `${addedTxt}.`) : t`Every selected entry already has “${term}”.`, 'Worlds Apart');
+        toastr[added ? 'success' : 'info'](added ? (skipped ? t`${addedTxt} (${skipped} already had it).` : `${addedTxt}.`) : t`Every selected entry already has “${term}”.`, 'WorldsApart');
     };
-    // Undo restores by uid (a rescan rebuilds rows) and refuses if the book changed, since save() writes to `selected`.
     const bulkClearTerms = async () => {
         const sel = selectedList(); if (!sel.length) return;
         const total = sel.reduce((n, e) => n + (Array.isArray(e.key) ? e.key.length : 0), 0);
-        if (!total) { toastr.info(t`The selected entries have no keys.`, 'Worlds Apart'); return; }
+        if (!total) { toastr.info(t`The selected entries have no keys.`, 'WorldsApart'); return; }
         const kwTxt = total === 1 ? t`${total} key` : t`${total} keys`;
-        if (!await Popup.show.confirm(sel.length === 1 ? t`Delete all ${kwTxt} from ${sel.length} selected entry?` : t`Delete all ${kwTxt} from ${sel.length} selected entries?`, t`Undo is available for 20 seconds.`)) return;
-        const book = selected, before = sel.map(e => [e.uid, Array.isArray(e.key) ? [...e.key] : []]);
+        if (!await Popup.show.confirm(sel.length === 1 ? t`Delete all ${kwTxt} from ${sel.length} selected entry?` : t`Delete all ${kwTxt} from ${sel.length} selected entries?`, t`Undo is available for 30 seconds.`)) return;
         applyBulk(e => e.key = []);
         suggest = null; if (scan) { rebuildScan(); sel.forEach(x => renderEntry(x)); }
-        const undo = () => {
-            if (selected !== book) { toastr.warning(t`That undo belongs to “${book}”. Reopen it first.`, 'Worlds Apart'); return; }
-            let n = 0;
-            for (const [uid, keys] of before) { const e = data?.entries?.[uid]; if (!e) continue; e.key = keys; n += keys.length; }
-            save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
-            toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'Worlds Apart');
-        };
-        toastr.success(total === 1 ? t`Deleted ${total} key. Click to undo.` : t`Deleted ${total} keys. Click to undo.`, 'Worlds Apart', { timeOut: 20000, extendedTimeOut: 10000, onclick: undo });
+        toastr.success(total === 1 ? t`Deleted ${total} key.` : t`Deleted ${total} keys.`, 'WorldsApart');
     };
     const menuBtn = (label, onClick, cls = '', style = '') => {
         const b = document.createElement('button'); b.type = 'button';
@@ -472,9 +573,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const wrap = document.createElement('div');
         const n = selectedEntries.size;
         const sep = () => { const s = document.createElement('span'); s.className = 'wa-bulk-sep'; return s; };
-        if (!n) {   // nothing selected -> the Reselect offer if a bulk action just spent one, else no footprint
-            if (!lastSel?.size) return wrap;
+        const undo = entryUndo?.book === selected ? [barBtn(t`Undo (${entryUndo.n})`, undoEntries)] : [];
+        if (!n) {   // nothing selected -> the Reselect offer if a bulk action just spent one, and the undo while it lasts, else no footprint
+            if (!lastSel?.size && !undo.length) return wrap;
             wrap.classList.add('wa-bulk-on');
+            wrap.append(...undo);
+            if (!lastSel?.size) return wrap;
             const note = document.createElement('span'); note.className = 'wa-bulk-count'; note.textContent = t`Deselected`;
             const drop = document.createElement('i'); drop.className = 'fa-solid fa-xmark wa-undo-dismiss'; drop.title = t`Dismiss`;
             drop.addEventListener('click', () => { lastSel = null; refreshBulkBar(); });
@@ -513,6 +617,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 ] },
                 { label: t`Ignore budget`, children: onOff('ignoreBudget') },
                 { label: t`Order…`, fn: bulkOrderSet },
+                { label: t`Position`, children: PLACEMENTS.map(([val, , , label]) => ({ label, fn: () => bulkPlacement(val) })) },
                 { label: t`Scan depth…`, fn: bulkScanDepth },
             ];
         };
@@ -524,6 +629,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             count,
             barBtn(n === all.length ? t`Select none` : t`Select all`, () => { if (n === all.length) consumeSelection(); else { lastSel = null; all.forEach(e => selectedEntries.add(e.uid)); syncSelCheckboxes(); } }),
             ...(n === all.length ? [] : [barBtn(t`Deselect`, consumeSelection)]),
+            ...undo,
             sep(),
             addTermBtn,
             setBtn,
@@ -553,7 +659,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ? secondaryKeys({ keysecondary: [term], selectiveLogic: entry?.selectiveLogic }).length
             : usableKeys([term]).length;
         const err = usable ? null : problems.find(p => p.severity === 'error');
-        if (err) { toastr.warning(err.message, 'Worlds Apart', { timeOut: 8000 }); return false; }
+        if (err) { toastr.warning(err.message, 'WorldsApart', { timeOut: 8000 }); return false; }
         // One toast per code, not per instance.
         const byCode = new Map();
         for (const w of problems) {
@@ -562,7 +668,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (seen) seen.n++; else byCode.set(w.code, { message: w.message, n: 1 });
         }
         for (const { message, n } of byCode.values()) {
-            toastr.info(n > 1 ? t`${message} (${n} keys)` : message, 'Worlds Apart', { timeOut: 6000 });
+            toastr.info(n > 1 ? t`${message} (${n} keys)` : message, 'WorldsApart', { timeOut: 6000 });
         }
         return true;
     };
@@ -685,7 +791,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const s = ensureSuggest();
         const pe = s.perEntry.find(p => String(p.entry.uid) === String(e.uid));
         const fresh = (pe?.newRows ?? []).map(r => r.display).filter(x => !hasKey(e, x));
-        if (!fresh.length) { toastr.info(t`No TF-IDF suggestions for this entry.`, 'Worlds Apart'); return; }
+        if (!fresh.length) { toastr.info(t`No TF-IDF suggestions for this entry.`, 'WorldsApart'); return; }
         const g = getSugg(e.uid);
         const seen = new Set([...g.tfidf, ...g.llm].map(x => s.canon(x)));
         for (const x of fresh) { const c = s.canon(x); if (!seen.has(c)) { g.tfidf.push(x); seen.add(c); } }
@@ -713,9 +819,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const s = ensureSuggest();
         let cands;
         try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
-        catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); return; }
+        catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'WorldsApart'); return; }
         const added = mergeLlmCands(e, cands, s);
-        toastr[added ? 'success' : 'info'](added ? t`${wiTitleOf(e)}: +${added} from model` : t`Model returned nothing usable — click ✨ to retry.`, 'Worlds Apart');
+        toastr[added ? 'success' : 'info'](added ? t`${wiTitleOf(e)}: +${added} from model` : t`Model returned nothing usable — click ✨ to retry.`, 'WorldsApart');
         after(e);
     });
     const acceptSugg = (e, term, after = renderEntry) => {
@@ -788,14 +894,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const hits = kwHits(key);
         if (hits.length > 1 && !await Popup.show.confirm(t`Delete “${key}” from ${hits.length} entries?`, t`Removes the key everywhere it appears in this book.`)) return;
         const touched = deleteKey(Object.values(data.entries), key);
-        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Deleted “${key}” from ${touched} entry.` : t`Deleted “${key}” from ${touched} entries.`, 'Worlds Apart'); }
+        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Deleted “${key}” from ${touched} entry.` : t`Deleted “${key}” from ${touched} entries.`, 'WorldsApart'); }
     };
     const replaceKeyEverywhere = async key => {
         const next = (await Popup.show.input(t`Replace key`, t`Replace “${key}” across all entries with:`, key))?.trim();
         if (!next || next === key) return;   // exact-match only: a case-only rewrite is a real edit, not a no-op
         if (!keyWriteOk(next)) return;
         const touched = replaceKey(Object.values(data.entries), key, next);
-        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Replaced “${key}” → “${next}” in ${touched} entry.` : t`Replaced “${key}” → “${next}” in ${touched} entries.`, 'Worlds Apart'); }
+        if (touched) { save(); keepScroll(renderExplorer); toastr.success(touched === 1 ? t`Replaced “${key}” → “${next}” in ${touched} entry.` : t`Replaced “${key}” → “${next}” in ${touched} entries.`, 'WorldsApart'); }
     };
     // A second term on every entry keyed `key` — the alias case.
     const addVariantEverywhere = async key => {
@@ -807,7 +913,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (added) { save(); keepScroll(renderExplorer); }
         toastr[added ? 'success' : 'info'](added
             ? (added === 1 ? t`“${term}” added to ${added} entry keyed “${key}”.` : t`“${term}” added to ${added} entries keyed “${key}”.`)
-            : t`Every entry keyed “${key}” already has “${term}”.`, 'Worlds Apart');
+            : t`Every entry keyed “${key}” already has “${term}”.`, 'WorldsApart');
     };
     const toggleIgnore = key => { ignoreSet.has(key) ? ignoreSet.delete(key) : ignoreSet.add(key); persistIgnore(); afterIgnoreChange([key]); };
     // Menus mount in this popup's <dialog> so they stack above the modal.
@@ -930,11 +1036,49 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const delay = Number(e.delay) || 0;
         const cooldown = Number(e.cooldown) || 0;
         const keysTxt = keyCount ? (keyCount === 1 ? t`${keyCount} key` : t`${keyCount} keys`) : t`no keys`;
-        const metaBits = [keysTxt, t`UID ${e.uid}`, t`order ${e.order ?? 100}`];
+        const place = placementOf(e);
+        const placeTxt = !place ? t`position not set`
+            : Number(e.position) === 4 ? t`position ${place[1]} depth ${e.depth ?? 4}`
+                : Number(e.position) === 7 && e.outletName ? t`position ${place[1]} ${e.outletName}`
+                    : t`position ${place[1]}`;
+        // Every click here stops at the bit: the header row's own click toggles the entry open.
+        const editBit = (text, tip, onClick) => {
+            const b = document.createElement('span'); b.className = 'wa-meta-edit'; b.textContent = text; b.title = tip;
+            b.addEventListener('click', ev => { ev.stopPropagation(); onClick(b); });
+            return b;
+        };
+        const orderBit = editBit(t`order ${e.order ?? 100}`, t`Click to edit the order`, b => {
+            const { inp } = inlineInput(b, (nv, ok) => {
+                const n = Math.floor(Number(nv));
+                if (ok && nv !== '' && Number.isFinite(n) && n !== (e.order ?? 100)) { e.order = n; save(); }
+                renderEntry(e);
+            }, { value: String(e.order ?? 100), css: 'margin:0;font-size:1em;width:auto;', fit: x => Math.max(4, x.value.length + 2) });
+            inp.addEventListener('click', ev => ev.stopPropagation());
+        });
+        const placeBit = editBit(placeTxt, t`Click to change the position`, b => {
+            const r = b.getBoundingClientRect();
+            showCtxMenu(PLACEMENTS.map(([val, , , label]) => ({ label, active: val === place?.[0], fn: async () => {
+                const f = await placementFields(val, e);
+                if (f) { Object.assign(e, f); save(); renderEntry(e); }
+            } })), r.left, r.bottom + 2, ctxMount());
+        });
+        // Plain text on a character-embedded book, whose uids Renumber refuses too.
+        const uidBit = data.originalData ? t`UID ${e.uid}` : editBit(t`UID ${e.uid}`, t`Click to change the UID`, b => {
+            const { inp } = inlineInput(b, (nv, ok) => {
+                const to = Number(nv);
+                renderEntry(e);
+                if (!ok || nv === '' || to === e.uid) return;
+                if (!Number.isInteger(to) || to < 0) { toastr.warning(t`A UID is a whole number, 0 or more.`, 'WorldsApart'); return; }
+                if (Object.hasOwn(data.entries, to)) { toastr.warning(t`UID ${to} is already used by another entry.`, 'WorldsApart'); return; }
+                void changeUid(e, to);
+            }, { value: String(e.uid), css: 'margin:0;font-size:1em;width:auto;', fit: x => Math.max(4, x.value.length + 2) });
+            inp.addEventListener('click', ev => ev.stopPropagation());
+        });
+        const metaBits = [keysTxt, uidBit, orderBit, placeBit];
         if (e.useProbability !== false && prob < 100) metaBits.push(`${prob}%`);   // only when it actually gates
         if (delay > 0) metaBits.push(t`delay ${delay}`);
         if (cooldown > 0) metaBits.push(t`cd ${cooldown}`);
-        meta.textContent = `· ${metaBits.join(' · ')}`;
+        meta.append('· ', ...metaBits.flatMap((b, i) => (i ? [' · ', b] : [b])));
         const probTxt = e.useProbability !== false ? prob : 100;
         meta.title = (keyCount ? t`Keys (${keyCount}): ${e.key.join(', ')}` : t`No keys`) + '\n' + t`trigger probability ${probTxt}% · delay ${delay} · cooldown ${cooldown} (messages)`;
         // Open: the meta line sits under the title, with the title's own left edge; closed: it trails the row.
@@ -946,8 +1090,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         h.append(selBox, chev, mode, titleWrap, ...(open ? [] : [meta]));
         // Collapsed-line badge: flagged-key count tinted by the worst flag; counts problems, not warnings (yellow, green).
         const counted = flagged ? [...flagged.values()].filter(v => scan.severityOf(v) === SEVERE) : [];
-        // Unusable secondaries count too, as severe: the entry gates on fewer keys than written.
-        const secBad = scan ? scan.unusableKeysOf(e).length : 0;
+        // Refused secondaries count too, as severe: the entry gates on fewer keys than written. A dead one is neutral, as a dead primary is.
+        const secBad = scan ? scan.unusableKeysOf(e).filter(r => scan.severityOf(r) === SEVERE).length : 0;
         if (counted.length + secBad) {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
             badge.textContent = t`${counted.length + secBad} flagged`;
@@ -963,7 +1107,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
             const softer = (flagged?.size ?? 0) - counted.length;
             // No colour means the uncoloured flag; name it from reasonOf.
-            const worstTxt = worst ? translate(worst) : scan.reasonOf(counted[0]).text;
+            const worstTxt = worst ? translate(worst) : scan.reasonOf(counted[0]).label;
             const tip = [t`Flagged keys. Worst: ${worstTxt}.`];
             if (secBad) tip.push(secBad === 1 ? t`Includes ${secBad} secondary key the matcher cannot run.` : t`Includes ${secBad} secondary keys the matcher cannot run.`);
             if (softer) tip.push(t`${softer} more are warnings, not counted here.`);
@@ -1001,16 +1145,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const isDead = v && v.flag === 'unattested';
             const isIgnored = ignoreSet.has(key);
             // Tooltip wording comes from reasonOf even for dead: the (book) and (book/chat) scopes are different claims.
-            const why = v && !isIgnored ? scan.reasonOf(v).text : '';
+            const rc = v && !isIgnored ? scan.reasonOf(v) : null;
+            const why = rc?.label ?? '';
             if (isIgnored) { annot = t`ignored`; chip.classList.add('wa-kw-ignored'); }
             else if (v && !isDead) {
-                const rc = scan.reasonOf(v); annot = why;
+                annot = why;
                 const c = SEVERITY_COLOR[rc.severity];
                 if (c) { chip.style.borderColor = c; chip.style.background = `color-mix(in srgb, ${c} 18%, transparent)`; }
             }
             else if (isDead) chip.classList.add('wa-kw-dead');
             else if (flagged) chip.style.borderColor = WA_GREEN;
-            text.title = isIgnored ? t`${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? t`${key} — ${why} (click to edit)` : t`${key} (click to edit)`);
+            text.title = isIgnored ? t`${key} — ignored (click to edit; shift-click ✕ to un-ignore)` : (v ? t`${key} — ${rc?.message ?? why} (click to edit)` : t`${key} (click to edit)`);
             text.addEventListener('click', () => editKeyInline(e, key, text));
             chip.append(text);   // term only inside the chip
             const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = t`Delete key. Shift-click to ignore it instead.`;
@@ -1051,8 +1196,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }, { placeholder: t`keyword` }));
         para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
 
-        // --- Secondary keys: rendered only when present, and only the `unusable` verdict is painted, a gate not being a trigger.
-        // ponytail: a secondary that matches nowhere is not painted; whether that is a fault depends on the logic.
+        // --- Secondary keys: rendered only when present; a refused or dead one is painted (unusableKeysOf) and nothing else, a gate not being a trigger.
         let secPara = null;
         if (Array.isArray(e.keysecondary) && e.keysecondary.length) {
             const gated = e.selective !== false;
@@ -1068,7 +1212,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             logic.value = gated ? String(e.selectiveLogic ?? WI_LOGIC.AND_ANY) : 'off';
             logic.title = gated
                 ? t`How the secondary keys gate the primaries above. They never activate on their own.`
-                : t`Switched off: ST and Worlds Apart both ignore these keys. Pick an operator to gate on them again.`;
+                : t`Switched off: ST and WorldsApart both ignore these keys. Pick an operator to gate on them again.`;
             // A negation-only secondary changes meaning per operator with no visible change; warn at the moment it moves.
             const negOnly = e.keysecondary.filter(k => validateSmartKey(k).some(f => f.code === 'negation-only'));
             logic.addEventListener('change', () => {
@@ -1080,7 +1224,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     toastr.warning(logic.value === String(WI_LOGIC.AND_ANY)
                         ? t`${names} — a negation is satisfied by absence, so AND_ANY would never gate on it. Dropped under this operator; the key is kept, and counts again under any other.`
                         : t`${names} — ${op} negates the key again, so it now REQUIRES the term it excludes.`,
-                    'Worlds Apart', { timeOut: 9000 });
+                    'WorldsApart', { timeOut: 9000 });
                 }
                 save(); renderEntry(e);
             });
@@ -1090,11 +1234,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const item = document.createElement('span'); item.className = 'wa-kw-item' + (gated ? '' : ' wa-off');
                 const chip = document.createElement('span'); chip.className = 'wa-kw';
                 const text = document.createElement('span'); text.className = 'wa-kw-text'; text.textContent = key;
-                const why = v ? t`unusable — ${v.code}` : '';
-                if (v) { chip.style.borderColor = WA_RED; chip.style.background = `color-mix(in srgb, ${WA_RED} 18%, transparent)`; }
-                // Green means the key is doing its job; a switched-off key takes the dimmed neutral instead.
+                // As a primary chip: a verdict colours by severity, dead is dimmed with no label, green means the key is doing its
+                // job, and a switched-off key takes the dimmed neutral instead.
+                const rc = v ? scan.reasonOf(v) : null;
+                const isDead = v?.flag === 'unattested';
+                if (isDead) chip.classList.add('wa-kw-dead');
+                else if (rc) { const c = SEVERITY_COLOR[rc.severity]; if (c) { chip.style.borderColor = c; chip.style.background = `color-mix(in srgb, ${c} 18%, transparent)`; } }
                 else if (scan && gated) chip.style.borderColor = WA_GREEN;
-                text.title = v ? t`${key} — ${v.message} (click to edit)` : t`${key} (click to edit)`;
+                const why = rc && !isDead ? rc.label : '';
+                const tip = rc?.message ?? rc?.label;   // the validator's sentence where there is one; a dead key's says (book) or (book/chat)
+                text.title = v ? t`${key} — ${tip} (click to edit)` : t`${key} (click to edit)`;
                 text.addEventListener('click', () => editKeyInline(e, key, text, 'keysecondary'));
                 chip.append(text);
                 const del = document.createElement('i'); del.className = 'fa-solid fa-xmark wa-kw-del'; del.title = t`Delete this secondary key`;
@@ -1187,10 +1336,38 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); repaint(e); });
             l.append(s, sel); return l;
         };
+        // Writes `role` as ST's editor does: the at-depth choice's role, null for every other position.
+        const placeSel = () => {
+            const l = document.createElement('label'); l.className = 'wa-adv-row';
+            const s = document.createElement('span'); s.textContent = t`Position`; s.style.whiteSpace = 'nowrap';
+            const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';
+            const cur = placementOf(e);
+            // Disabled: choosing it would write no position, and Number('') would write 0.
+            if (!cur) { const o = new Option(t`Not set`, ''); o.disabled = true; sel.append(o); }
+            for (const [val, label, tip] of PLACEMENTS) { const o = new Option(label, val); o.title = tip; sel.append(o); }
+            sel.value = cur?.[0] ?? '';
+            sel.title = cur?.[2] ?? t`No position: SillyTavern leaves this entry out of the prompt even when it activates.`;
+            sel.addEventListener('change', () => {
+                const [pos, role] = sel.value.split(':');
+                e.position = Number(pos); e.role = role === undefined ? null : Number(role);
+                save(); repaint(e);
+            });
+            l.append(s, sel); return l;
+        };
+        const outletRow = () => {
+            const l = document.createElement('label'); l.className = 'wa-adv-row';
+            const s = document.createElement('span'); s.textContent = t`Outlet name`; s.style.whiteSpace = 'nowrap';
+            const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.value = e.outletName ?? '';
+            inp.addEventListener('change', () => { e.outletName = inp.value.trim(); save(); repaint(e); });
+            l.append(s, inp); return l;
+        };
         const durLevel = (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0) ? e.delayUntilRecursion : '';
         adv.append(
             col(t`Placement`,
                 numRow(t`Order`, () => (e.order ?? 100), v => e.order = Math.floor(Number(v) || 0), '100'),
+                placeSel(),
+                ...(Number(e.position) === 4 ? [numRow(t`Depth`, () => (e.depth ?? 4), v => e.depth = Math.max(0, Math.floor(Number(v) || 0)), '4')] : []),
+                ...(Number(e.position) === 7 ? [outletRow()] : []),
             ),
             col(t`Timed`,
                 numRow(t`Sticky`, () => (Number(e.sticky) > 0 ? Number(e.sticky) : ''), v => e.sticky = toMsg(v), '0'),
@@ -1214,7 +1391,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ),
             col(t`Budget / scan`,
                 chk(t`Ignore budget`, () => !!e.ignoreBudget, v => e.ignoreBudget = v),
-                numRow(t`Scan depth`, () => (e.scanDepth ? e.scanDepth : ''), v => { const n = Math.floor(Number(v) || 0); e.scanDepth = n > 0 ? n : null; }, t`global`),
+                // As core's editor: blank is null (the global depth), and 0 is authored, the chat triggering nothing.
+                numRow(t`Scan depth`, () => (e.scanDepth ?? ''), v => { const s = String(v).trim(); e.scanDepth = s === '' ? null : Math.max(0, Math.floor(Number(s) || 0)); }, t`global`),
             ),
         );
         return adv;
@@ -1223,7 +1401,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** New blank entry from core's createWorldInfoEntry — never a hand-rolled object, so the field set cannot drift. */
     const newEntry = () => {
         const ne = createWorldInfoEntry(selected, data);
-        if (!ne) { toastr.warning(t`Could not create an entry.`, 'Worlds Apart'); return; }
+        if (!ne) { toastr.warning(t`Could not create an entry.`, 'WorldsApart'); return; }
         save(); suggest = null; if (scan) rebuildScan();   // corpus changed -> ranker/scan stale
         entryOpen.add(ne.uid); expanded.add(ne.uid);
         renderExplorer();
@@ -1241,19 +1419,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // The copy sorts wherever its uid falls, often off-screen, so scroll to it and flash.
         const row = rowEls.get(ne.uid);
         if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('wa-flash'); setTimeout(() => row.classList.remove('wa-flash'), 1200); }
-        toastr.success(t`Entry duplicated.`, 'Worlds Apart');
+        toastr.success(t`Entry duplicated.`, 'WorldsApart');
     };
-    const delEntry = async e => {
-        if (!await deleteWorldInfoEntry(data, e.uid)) return;   // shows its own confirm
-        // Drop the uid from the selection: core hands freed uids back out, so it would re-point at the next entry created.
-        selectedEntries.delete(e.uid); lastSel?.delete(e.uid);
-        save(); suggest = null; if (scan) rebuildScan(); sugg.delete(e.uid); rowEls.delete(e.uid); renderExplorer();
-    };
+    const delEntry = e => deleteEntries([e.uid]);
     // Picks a target lorebook (any but the open one); null = cancelled.
     // `withSelected` includes the open book, which a copy/move target must not offer.
     const pickBook = async (prompt, withSelected = false) => {
         const others = [...world_names].filter(n => withSelected || n !== selected).sort((a, b) => a.localeCompare(b));
-        if (!others.length) { toastr.info(t`No other lorebook to target.`, 'Worlds Apart'); return null; }
+        if (!others.length) { toastr.info(t`No other lorebook to target.`, 'WorldsApart'); return null; }
         const wrap = document.createElement('div');
         const lbl = document.createElement('div'); lbl.textContent = prompt; lbl.style.marginBottom = '6px';
         const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.width = '100%';
@@ -1275,22 +1448,28 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const target = await pickBook(deleteOriginal ? t`Move ${what} to:` : t`Copy ${what} to:`);
         if (!target) return;
         const tgt = await loadWorldInfo(target);
-        if (!tgt?.entries) { toastr.warning(t`Could not load “${target}”.`, 'Worlds Apart'); return; }
+        if (!tgt?.entries) { toastr.warning(t`Could not load “${target}”.`, 'WorldsApart'); return; }
         let maxDisplay = Object.values(tgt.entries).reduce((m, x) => Math.max(m, x.displayIndex ?? -1), -1);
-        const copied = [];
+        const copied = [], landed = new Map(), added = [];
         for (const e of list) {
             const uid = getFreeWorldEntryUid(tgt); if (uid == null) break;   // book full (1M entries) — stop, keep what copied
             const clone = structuredClone(e); clone.uid = uid; clone.displayIndex = ++maxDisplay;
-            tgt.entries[uid] = clone; copied.push(e);
+            tgt.entries[uid] = clone; copied.push(e); added.push(uid); landed.set(latchKey({ world: selected, uid: e.uid }), latchKey({ world: target, uid }));
         }
         await saveWorldInfo(target, tgt, true);
         reloadEditor(target);   // refresh the core WI editor if that book happens to be open there
         if (deleteOriginal) {
+            const snap = snapEntries();
             // Only what landed in the target is dropped; deleteWIOriginalDataValue keeps embedded-book originalData in sync.
             for (const e of copied) { deleteWIOriginalDataValue(data, String(e.uid)); delete data.entries[e.uid]; sugg.delete(e.uid); rowEls.delete(e.uid); selectedEntries.delete(e.uid); lastSel?.delete(e.uid); }
             save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+            // A move keeps the entry's after-match state; a copy is a new entry and starts without one.
+            const latches = rekeyChatLatches(k => landed.get(k), copied);
+            const back = new Map([...landed].map(([from, to]) => [to, from]));
+            armEntryUndo({ ...snap, n: copied.length, latches, rekeyBack: k => back.get(k), target: { name: target, uids: added } });
+            latchWarn((await latches).failed);
         }
-        toastr.success(deleteOriginal ? t`Moved ${copied.length} to “${target}”.` : t`Copied ${copied.length} to “${target}”.`, 'Worlds Apart');
+        toastr.success(deleteOriginal ? t`Moved ${copied.length} to “${target}”.` : t`Copied ${copied.length} to “${target}”.`, 'WorldsApart');
     };
     const copyEntryTo = e => entriesToBook([e], false);
     const moveEntryTo = e => entriesToBook([e], true);
@@ -1318,7 +1497,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const copyBookByName = async (srcName, carryIgnored = false, asName = null) => {
         const src = (srcName === selected) ? data : await loadWorldInfo(srcName);
         if (!src) return null;
-        const name = asName || freeCopyName(srcName);
+        // The server saves under the sanitised name whatever it is sent, so that is the name to return.
+        const name = asName ? await getSanitizedFilename(asName) : freeCopyName(srcName);
+        if (!name) { toastr.warning(t`That name has no characters a file name can keep.`, 'WorldsApart'); return null; }
         await saveWorldInfo(name, structuredClone(src), true);
         if (carryIgnored) {
             const from = settings().keywordIgnore?.[srcName];
@@ -1357,8 +1538,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             onClosing: pp => {
                 if (pp.result !== POPUP_RESULT.AFFIRMATIVE || !inp) return true;
                 const v = inp.value.trim();
-                if (!v) { toastr.warning(t`Give the copy a name.`, 'Worlds Apart'); return false; }
-                if (nameTaken(v)) { toastr.warning(t`A lorebook named “${v}” already exists.`, 'Worlds Apart'); return false; }
+                if (!v) { toastr.warning(t`Give the copy a name.`, 'WorldsApart'); return false; }
+                if (nameTaken(v)) { toastr.warning(t`A lorebook named “${v}” already exists.`, 'WorldsApart'); return false; }
                 return true;
             },
         }).show();
@@ -1371,7 +1552,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!name) return;
         await updateWorldInfoList();
         renderBooks();
-        toastr.success(t`Duplicated to “${name}”.`, 'Worlds Apart');
+        toastr.success(t`Duplicated to “${name}”.`, 'WorldsApart');
         openBook(name);
     };
     const bulkCopyBooks = async () => {
@@ -1382,7 +1563,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         await updateWorldInfoList();
         selectedBooks.clear(); bookAnchor = null;
         renderBooks();
-        toastr.success(names.length === 1 ? t`Duplicated ${names.length} lorebook.` : t`Duplicated ${names.length} lorebooks.`, 'Worlds Apart');
+        toastr.success(names.length === 1 ? t`Duplicated ${names.length} lorebook.` : t`Duplicated ${names.length} lorebooks.`, 'WorldsApart');
     };
     // Deletes books, keeping snapshots for the nav undo bar; switches the open book away if it was among them.
     const deleteBooks = async names => {
@@ -1393,33 +1574,27 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (d) books.push({ name: n, data: structuredClone(d) });
             await deleteWorldInfo(n);
         }
-        // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
-        const meta = getContext().chatMetadata;
-        const { kept, dropped } = partitionLatches(meta?.[WA_METADATA_KEY]?.fired, names);
-        if (Object.keys(dropped).length) {
-            meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: kept };
-            getContext().saveMetadata?.();
-        }
         // The per-book settings and latch keys go with the book; restoreBook puts them back when the delete is undone.
         const s = settings();
-        const forgotten = names.map(n => ({
-            name: n,
-            sort: s.studioSortByBook?.[n],
-            ignore: s.keywordIgnore?.[n],
-            fired: Object.fromEntries(Object.entries(dropped).filter(([k]) => latchBook(k) === n)),
-        }));
+        const forgotten = names.map(n => ({ name: n, sort: s.studioSortByBook?.[n], ignore: s.keywordIgnore?.[n] }));
         for (const n of names) { delete s.studioSortByBook?.[n]; delete s.keywordIgnore?.[n]; }
         saveSettingsDebounced();
+        // Off the deleted book before the latch pass awaits: save() writes `selected`, and would recreate it.
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
             data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
         }
         dirty = false;
-        if (undoTimer) clearTimeout(undoTimer);
-        pendingUndo = { books, forgotten, chatId: getContext().chatId };
-        undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; renderBooks(); }, 30000);
         renderBooks();
         if (wasOpen) { if (selected) openBook(selected); else renderExplorer(); }
+        const chatId = getContext().chatId;
+        // The latch record is chat-scoped, not a setting; a deleted book's entries can never fire again.
+        const latches = await rekeyChatLatches(k => (names.includes(latchBook(k)) ? null : undefined), books.flatMap(b => Object.values(b.data?.entries ?? {})));
+        latchWarn(latches.failed);
+        if (undoTimer) clearTimeout(undoTimer);
+        pendingUndo = { books, forgotten, latches: latches.dropped, chatId };
+        undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; renderBooks(); }, 30000);
+        renderBooks();
     };
     const delBook = async () => {
         if (!await Popup.show.confirm(t`Delete lorebook “${selected}”?`, t`This deletes the entire book and every entry in it.`)) return;
@@ -1449,44 +1624,158 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (f.ignore) (settings().keywordIgnore ??= {})[f.name] = f.ignore;
         }
         if (p.forgotten?.some(f => !skipped.includes(f.name))) saveSettingsDebounced();
-        // Only into the chat the keys came from: the record is chat-scoped, and writing chat A's latches into
-        // chat B would mark entries fired where they never fired. A closed chat has no metadata-only write.
-        if (p.chatId && p.chatId === getContext().chatId) {
-            const back = Object.assign({}, ...(p.forgotten ?? []).filter(f => !skipped.includes(f.name)).map(f => f.fired ?? {}));
-            if (Object.keys(back).length) {
-                const meta = getContext().chatMetadata;
-                meta[WA_METADATA_KEY] = { ...meta[WA_METADATA_KEY], fired: { ...(meta?.[WA_METADATA_KEY]?.fired ?? {}), ...back } };
-                getContext().saveMetadata?.();
-            }
-        }
+        latchWarn(await putLatchesBack(p.latches, p.chatId, k => !skipped.includes(latchBook(k))));
         await updateWorldInfoList();
         if (restored && !selected) selected = p.books.find(b => world_names.includes(b.name))?.name ?? null;
         renderBooks();
         if (selected) openBook(selected); else renderExplorer();
-        if (skipped.length) toastr.warning(t`Skipped ${skipped.length} (name already exists again): ${skipped.join(', ')}`, 'Worlds Apart');
-        if (restored) toastr.success(restored === 1 ? t`Restored ${restored} lorebook.` : t`Restored ${restored} lorebooks.`, 'Worlds Apart');
+        if (skipped.length) toastr.warning(t`Skipped ${skipped.length} (name already exists again): ${skipped.join(', ')}`, 'WorldsApart');
+        if (restored) toastr.success(restored === 1 ? t`Restored ${restored} lorebook.` : t`Restored ${restored} lorebooks.`, 'WorldsApart');
     };
     /**
-     * Re-points one closed chat's binding by round-tripping the whole chat through /api/chats/get and /api/chats/save; ST has no metadata-only write.
-     * ponytail: the whole chat crosses the wire per binding; revisit if ST exposes a metadata-only endpoint.
+     * Rewrites one closed chat's metadata by round-tripping the whole chat through /api/chats/get and /api/chats/save; ST has no
+     * metadata-only write. `edit` returns the new metadata, or null to leave the file untouched.
+     * ponytail: the whole chat crosses the wire per edit; revisit if ST exposes a metadata-only endpoint.
      */
-    const repointOne = async ({ char, avatar, file }, newName) => {
-        const name = String(file ?? '').replace(/\.jsonl$/, '');
+    // One closed-chat edit at a time: each is a whole-chat read then write, and two interleaved would save from a stale read.
+    let chatEdits = Promise.resolve();
+    const editClosedChat = (target, edit) => (chatEdits = chatEdits.then(() => editClosedChatNow(target, edit)));
+    const editClosedChatNow = async ({ char, avatar, file, group }, edit) => {
+        const name = group != null ? String(group) : String(file ?? '').replace(/\.jsonl$/, '');
         if (!name) return false;
+        const route = group != null ? '/api/chats/group' : '/api/chats';
+        const ids = group != null ? { id: name } : { ch_name: char, file_name: name, avatar_url: avatar };
         try {
-            const got = await fetch('/api/chats/get', {
+            const got = await fetch(`${route}/get`, {
                 method: 'POST', headers: getRequestHeaders(), cache: 'no-cache',
-                body: JSON.stringify({ ch_name: char, file_name: name, avatar_url: avatar }),
+                body: JSON.stringify(ids),
             });
             const chat = got.ok ? await got.json() : null;
             if (!Array.isArray(chat) || !chat.length) return false;
-            chat[0].chat_metadata = { ...(chat[0].chat_metadata ?? {}), [METADATA_KEY]: newName };
-            const put = await fetch('/api/chats/save', {
+            const next = edit(chat[0].chat_metadata ?? {});
+            if (!next) return true;
+            chat[0].chat_metadata = next;
+            const put = await fetch(`${route}/save`, {
                 method: 'POST', headers: getRequestHeaders(),
-                body: JSON.stringify({ ch_name: char, file_name: name, avatar_url: avatar, chat }),
+                body: JSON.stringify({ ...ids, chat }),
             });
             return put.ok;
-        } catch (err) { console.error('[WA] repoint', name, err); return false; }
+        } catch (err) { console.error('[WA] edit chat', name, err); return false; }
+    };
+    /** Every group chat's metadata: the plugin's line-0 read when bindingIndex had it, else one /group/get per chat.
+     *  ponytail: without the plugin each group chat crosses the wire whole to read its line 0. */
+    const groupChatIndex = async () => {
+        if (!groupIndex) await bindingIndex();
+        if (groupIndex) return groupIndex;
+        const out = [];
+        for (const id of (getContext().groups ?? []).flatMap(g => (Array.isArray(g.chats) ? g.chats : []))) {
+            try {
+                const r = await fetch('/api/chats/group/get', { method: 'POST', headers: getRequestHeaders(), cache: 'no-cache', body: JSON.stringify({ id }) });
+                const chat = r.ok ? await r.json() : null;
+                out.push({ id: String(id), chat_metadata: Array.isArray(chat) ? chat[0]?.chat_metadata ?? {} : {} });
+            } catch { /* an unreadable group chat is skipped */ }
+        }
+        return (groupIndex = out);
+    };
+    /** Every chat but the open one, character and group, as `{ target, meta }`; `target.file` names it in a warning. */
+    const closedChats = async () => {
+        const openFile = String(getContext().chatId ?? '');
+        const out = [];
+        for (const c of await bindingIndex()) for (const ch of c.chats) {
+            const file = String(ch.file_name ?? '').replace(/\.jsonl$/, '');
+            if (file && file !== openFile) out.push({ target: { char: c.char, avatar: c.avatar, file }, meta: ch.chat_metadata });
+        }
+        for (const g of await groupChatIndex()) if (g.id !== openFile) out.push({ target: { group: g.id, file: g.id }, meta: g.chat_metadata });
+        return out;
+    };
+    const repointOne = (target, newName) => editClosedChat(target, m => ({ ...m, [METADATA_KEY]: newName }));
+    /** `m` with its latch record replaced by `fired`. */
+    const withFired = (m, fired) => ({ ...m, [WA_METADATA_KEY]: { ...(m?.[WA_METADATA_KEY] ?? {}), fired } });
+    // One pass at a time, on its own chain: a pass picks its chats from an index a running one may be about to make stale.
+    let latchPasses = Promise.resolve();
+    /** The open chat as an editClosedChat target, for writing to it once it is no longer open; null with no chat. */
+    const openChatTarget = () => {
+        const ctx = getContext();
+        if (!ctx.chatId) return null;
+        if (ctx.groupId) return { group: String(ctx.chatId), file: String(ctx.chatId) };
+        const ch = characters?.[ctx.characterId];
+        return ch ? { char: ch.name, avatar: ch.avatar, file: String(ctx.chatId) } : null;
+    };
+    /**
+     * Applies rekeyLatches' `rekey` to the open chat's latch record and to every closed chat whose record it changes.
+     * @param {object[]} [entries] The entries the rekey can touch: when none carries a latch decorator, the closed chats are not
+     *        read, a record without its decorator being inert
+     * @returns {Promise<{dropped: Array<{target: object|null, openAs?: object, fired: object}>, failed: string[]}>} `target` null for
+     *          the open chat, `openAs` the same chat as a closed-chat target; `dropped` is what an undo puts back
+     */
+    const rekeyChatLatches = (rekey, entries = null) => {
+        const pass = latchPasses.then(() => rekeyChatLatchesNow(rekey, entries));
+        latchPasses = pass.catch(() => {});
+        return pass;
+    };
+    const rekeyChatLatchesNow = async (rekey, entries) => {
+        const dropped = [], failed = [];
+        const ctx = getContext();
+        const open = ctx.chatMetadata && rekeyLatches(ctx.chatMetadata[WA_METADATA_KEY]?.fired, rekey);
+        if (open) {
+            Object.assign(ctx.chatMetadata, withFired(ctx.chatMetadata, open.fired));
+            ctx.saveMetadata?.();
+            if (Object.keys(open.dropped).length) dropped.push({ target: null, openAs: openChatTarget(), fired: open.dropped });
+        }
+        // Every closed chat is read below, the whole of each without the plugin (P1).
+        if (entries && !entries.some(e => e && hasLatch(e))) return { dropped, failed };
+        for (const { target, meta } of await closedChats()) {
+            if (!rekeyLatches(meta?.[WA_METADATA_KEY]?.fired, rekey)) continue;
+            let out = null;
+            const ok = await editClosedChat(target, m => { out = rekeyLatches(m?.[WA_METADATA_KEY]?.fired, rekey); return out && withFired(m, out.fired); });
+            if (!ok) failed.push(target.file);
+            else if (out && Object.keys(out.dropped).length) dropped.push({ target, fired: out.dropped });
+        }
+        chatIndex = null; groupIndex = null;   // the records just changed under it
+        return { dropped, failed };
+    };
+    /**
+     * Puts rekeyChatLatches' `dropped` back into the chat each key came from: the open chat in memory while it is still `chatId`,
+     * its file once it is not.
+     * @returns {Promise<string[]>} the chats it could not write
+     */
+    const putLatchesBack = async (dropped, chatId, keep = () => true) => {
+        const failed = [];
+        let wroteClosed = false;
+        for (const { target, openAs, fired } of dropped ?? []) {
+            const back = Object.fromEntries(Object.entries(fired).filter(([k]) => keep(k)));
+            if (!Object.keys(back).length) continue;
+            const add = m => withFired(m, { ...(m?.[WA_METADATA_KEY]?.fired ?? {}), ...back });
+            if (!target && chatId && chatId === getContext().chatId) { Object.assign(getContext().chatMetadata, add(getContext().chatMetadata)); getContext().saveMetadata?.(); continue; }
+            // A record from the chat open at the time, which has since been switched away from, is written to its file.
+            const to = target ?? openAs;
+            if (!to) { failed.push(String(chatId ?? '')); continue; }
+            wroteClosed = true;
+            if (!await editClosedChat(to, add)) failed.push(to.file);
+        }
+        if (wroteClosed) { chatIndex = null; groupIndex = null; }
+        return failed;
+    };
+    const latchWarn = failed => { if (failed.length) toastr.warning(t`Could not carry over the after-match state in: ${failed.join(', ')}.`, 'WorldsApart', { timeOut: 12000 }); };
+    /** Gives the open book's entry `e` the free uid `to`, carrying its per-uid view state and its after-match state with it. */
+    const changeUid = async (e, to) => {
+        const from = e.uid;
+        const next = {};
+        for (const [k, x] of Object.entries(data.entries)) if (x !== e) next[k] = x;
+        e.uid = to; next[to] = e; data.entries = next;
+        for (const set of [entryOpen, expanded, tall, advOpen, selectedEntries, ...(lastSel ? [lastSel] : [])]) if (set.delete(from)) set.add(to);
+        if (sugg.has(from)) { sugg.set(to, sugg.get(from)); sugg.delete(from); }
+        rowEls.delete(from);
+        save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
+        latchWarn((await rekeyChatLatches(uidRekey(selected, new Map([[String(from), to]])), [e])).failed);
+    };
+    /** Latch keys of `book` whose uid `moves` maps (old uid -> new uid, or null to drop), as a rekeyLatches `rekey`. */
+    const uidRekey = (book, moves) => k => {
+        if (latchBook(k) !== book) return undefined;
+        const uid = k.slice(book.length + 1);
+        if (!moves.has(uid)) return undefined;
+        const to = moves.get(uid);
+        return to === null ? null : latchKey({ world: book, uid: to });
     };
 
     /** Re-points every character card whose primary lorebook is `oldName`, through /api/characters/merge-attributes (what /char-set runs), one card per call. */
@@ -1508,17 +1797,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     const repointChats = async (oldName, newName) => {
         const moved = [], failed = [];
-        const openFile = String(getContext().chatId ?? '');
-        chatIndex = null;   // a rename invalidates the fallback's cache, and this is the one place that must not read stale
-        for (const c of await bindingIndex()) {
-            for (const ch of c.chats) {
-                if (ch?.chat_metadata?.world_info !== oldName) continue;
-                const file = String(ch.file_name ?? '').replace(/\.jsonl$/, '');
-                if (!file || file === openFile) continue;   // the open chat goes through saveMetadata
-                (await repointOne({ char: c.char, avatar: c.avatar, file }, newName) ? moved : failed).push(file);
-            }
+        chatIndex = null; groupIndex = null;   // a rename invalidates the fallback's cache, and this is the one place that must not read stale
+        // The open chat goes through saveMetadata; closedChats leaves it out.
+        for (const { target, meta } of await closedChats()) {
+            if (meta?.world_info !== oldName) continue;
+            (await repointOne(target, newName) ? moved : failed).push(target.file);
         }
-        chatIndex = null;   // the bindings just changed under it
+        chatIndex = null; groupIndex = null;   // the bindings just changed under it
         return { moved, failed };
     };
 
@@ -1526,16 +1811,23 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const renameBook = async (srcName = selected, prefill = null) => {
         const oldName = srcName;
         const raw = await Popup.show.input(t`Rename lorebook`, t`New name:`, prefill ?? oldName);
-        const newName = (raw ?? '').trim();
-        if (!newName || newName === oldName) return;
-        if (world_names.some(n => n.toLowerCase() === newName.toLowerCase())) { toastr.warning(t`A lorebook with that name already exists.`, 'Worlds Apart'); return; }
+        const typed = (raw ?? '').trim();
+        if (!typed || typed === oldName) return;
+        // The server saves under the sanitised name whatever it is sent, and every binding must name the file that exists.
+        const newName = await getSanitizedFilename(typed);
+        if (!newName) { toastr.warning(t`That name has no characters a file name can keep.`, 'WorldsApart'); return; }
+        if (newName === oldName) return;
+        if (world_names.some(n => n.toLowerCase() === newName.toLowerCase())) { toastr.warning(t`A lorebook with that name already exists.`, 'WorldsApart'); return; }
         const bookData = (oldName === selected) ? data : await loadWorldInfo(oldName);
-        if (!bookData) { toastr.warning(t`Could not load “${oldName}”.`, 'Worlds Apart'); return; }
+        if (!bookData) { toastr.warning(t`Could not load “${oldName}”.`, 'WorldsApart'); return; }
         const ctx = getContext();
         const wasSelected = selected_world_info.includes(oldName);
         const wasPersona = power_user.persona_description_lorebook === oldName;
         const wasChat = ctx.chatMetadata?.[METADATA_KEY] === oldName;
         await saveWorldInfo(newName, bookData, true);
+        // saveWorldInfo resolves on a failed write too: the old book goes only once the server lists the new one.
+        await updateWorldInfoList();
+        if (!world_names.includes(newName)) { toastr.error(t`Could not save “${newName}”. “${oldName}” is unchanged.`, 'WorldsApart'); return; }
         await deleteWorldInfo(oldName);   // clears old's global-select / persona / active-char bindings
         try {
             if (wasSelected && !selected_world_info.includes(newName)) selected_world_info.push(newName);
@@ -1559,19 +1851,20 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (oldName === selected) { renderBooks(); openBook(newName); }
         else { renderBooks(); }
         const { moved, failed } = await repointChats(oldName, newName);
+        latchWarn((await rekeyChatLatches(k => (latchBook(k) === oldName ? latchKey({ world: newName, uid: k.slice(oldName.length + 1) }) : undefined), Object.values(bookData.entries ?? {}))).failed);
         const cards = await repointCards(oldName, newName);
         const bits = [];
         if (moved.length) bits.push(moved.length === 1 ? t`${moved.length} chat` : t`${moved.length} chats`);
         if (cards.moved.length) bits.push(cards.moved.length === 1 ? t`${cards.moved.length} character card` : t`${cards.moved.length} character cards`);
         const joined = bits.length === 2 ? t`${bits[0]} and ${bits[1]}` : bits[0];
         const also = bits.length ? ' ' + t`Re-pointed ${joined}.` : '';
-        toastr.success(t`Renamed to “${newName}”.` + also, 'Worlds Apart');
+        toastr.success(t`Renamed to “${newName}”.` + also, 'WorldsApart');
         const stuck = [...failed, ...cards.failed];
-        if (stuck.length) toastr.warning(t`Still bound to “${oldName}”: ${stuck.join(', ')}.`, 'Worlds Apart', { timeOut: 12000 });
+        if (stuck.length) toastr.warning(t`Still bound to “${oldName}”: ${stuck.join(', ')}.`, 'WorldsApart', { timeOut: 12000 });
     };
     // Batch TF-IDF into every entry's ⚡ chips; yields a frame first so the button can dim before the build.
     const suggestAll = btn => withBusy(btn, '0.5', async () => {
-        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'Worlds Apart'); return; }
+        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'WorldsApart'); return; }
         let n = 0;
         for (const pe of s.perEntry) {
             const e = data.entries[pe.entry.uid]; if (!e) continue;
@@ -1583,24 +1876,24 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             entryOpen.add(e.uid); n++;
         }
         renderExplorer();
-        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Suggestions added to ${n} entry — review the ⚡ chips.` : t`Suggestions added to ${n} entries — review the ⚡ chips.`) : t`No TF-IDF suggestions to add.`, 'Worlds Apart');
+        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Suggestions added to ${n} entry — review the ⚡ chips.` : t`Suggestions added to ${n} entries — review the ⚡ chips.`) : t`No TF-IDF suggestions to add.`, 'WorldsApart');
     });
 
     // One ✨ pass per visible non-empty entry, sequential: a small model serves one request at a time.
     const suggestAllLlm = btn => withBusy(btn, '0.5', async () => {
         const label = btn.innerHTML;
-        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'Worlds Apart'); return; }
+        let s; try { s = ensureSuggest(); } catch { toastr.warning(t`Could not build suggestions.`, 'WorldsApart'); return; }
         const targets = Object.values(data?.entries ?? {}).filter(filterMatch).filter(e => String(e.content ?? '').trim());
         let n = 0, i = 0;
         for (const e of targets) {
             btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i><small class="wa-rail-count">${++i}/${targets.length}</small>`;
             let cands; try { cands = await llmKeyCandidates(e.content, s.avoid, suggestOpts.llmChunk); }
-            catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'Worlds Apart'); break; }
+            catch (err) { toastr.warning(t`Local model: ${String(err?.message ?? err)}`, 'WorldsApart'); break; }
             if (mergeLlmCands(e, cands, s)) { n++; entryOpen.add(e.uid); }
         }
         btn.innerHTML = label;
         renderExplorer();
-        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Model suggestions added to ${n} entry — review the ✨ chips.` : t`Model suggestions added to ${n} entries — review the ✨ chips.`) : t`Model returned nothing usable.`, 'Worlds Apart');
+        toastr[n ? 'success' : 'info'](n ? (n === 1 ? t`Model suggestions added to ${n} entry — review the ✨ chips.` : t`Model suggestions added to ${n} entries — review the ✨ chips.`) : t`Model returned nothing usable.`, 'WorldsApart');
     });
 
     // The term tabs' entry set: type filter + the shared sort, without the search — those tabs rank by it (rankBySearch).
@@ -1730,6 +2023,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (termColor) name.style.color = termColor;
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why === 'ignored' ? t`ignored` : (r.why ?? '');   // muted, whatever the flag: the term's own colour carries the state
+        if (r.message) why.title = r.message;
         if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
         row.append(cb, name);
         if (onEdit) {
@@ -1793,14 +2087,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
     // --- Cleanup tab ---
     /** Confirms which chats to scan, grouped by card and pre-ticked by binding; global candidates and the open chat start unticked. */
-    /** `verb` is the OK button's word: the Cleanup scans what is picked, the Lab loads it. */
-    const pickChats = async (candidates, verb = 'Scan') => {
+    /** `verb` is the OK button's word: the Cleanup scans what is picked, the Lab loads it. `load`, when given, is `{ depth, end }`: the
+     *  picker shows both as fields and writes the chosen values back, so one dialog settles what to load and how deep. */
+    const pickChats = async (candidates, verb = 'Scan', load = null) => {
         const wrap = document.createElement('div');
         // Scrolls: the shift-click list is every chat on the install, which is hundreds of rows on a real one (P1).
-        wrap.style.cssText = 'text-align:left;max-width:44rem;max-height:60vh;overflow-y:auto;';
-        const h3 = document.createElement('h3'); h3.style.cssText = 'margin:0 0 0.6em;';
+        wrap.style.cssText = 'text-align:left;max-width:44rem;display:flex;flex-direction:column;max-height:70vh;';
+        const h3 = document.createElement('h3'); h3.style.cssText = 'margin:0 0 0.6em;flex:0 0 auto;';
         h3.textContent = verb === 'Load' ? t`Load which chats?` : t`Check keys against which chats?`;
         wrap.append(h3);
+        // Two panes: the chat list scrolls on its own, so the total, the fields and the buttons below never scroll away with it.
+        const list = document.createElement('div');
+        list.style.cssText = 'flex:1 1 auto;min-height:6em;overflow-y:auto;';
+        wrap.append(list);
         // `why` is a binding id the pre-tick compares; the caption is its own string.
         const whyLabel = { 'chat-bound': t`chat-bound`, 'character-bound': t`character-bound`, 'character-bound (additional lorebook)': t`character-bound (additional lorebook)`, 'global (book is always active)': t`global (book is always active)`, 'not bound': t`not bound`, 'currently open': t`currently open` };
         // Grouped by card, keyed on the avatar: two cards can carry the same name, and a chat belongs to the file it lives beside.
@@ -1843,17 +2142,17 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 return cb;
             });
             // Closed, except a card holding a pre-ticked chat: what the scan is about to read is never hidden behind a twisty.
-            det.open = g.items.some(({ c }) => preTick(c));
+            det.open = !candidates.all;   // the book's own chats open to read; the every-chat listing is hundreds of rows, so it stays folded
             const sync = () => {
                 const on = boxes.filter(b => b.checked).length;
                 const chats = boxes.length === 1 ? t`${boxes.length} chat` : t`${boxes.length} chats`;
                 sum.innerHTML = `${escapeHtml(String(g.char || '—'))} <small style="opacity:0.6;">· ${escapeHtml(chats)}${on ? ` · ${escapeHtml(t`${on} selected`)}` : ''}</small>`;
             };
             syncers.push(sync); sync();
-            wrap.append(det);
+            list.append(det);
         }
         const tot = document.createElement('div');
-        tot.style.cssText = 'margin-top:0.6em;opacity:0.8;font-size:0.9em;';
+        tot.style.cssText = 'margin-top:0.6em;opacity:0.8;font-size:0.9em;flex:0 0 auto;';
         const syncTot = () => {
             const on = rows.filter(cb => cb.checked).length;
             tot.textContent = t`${on} chat(s) selected`;
@@ -1861,6 +2160,19 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         rows.forEach(cb => cb.addEventListener('change', syncTot));
         wrap.append(tot); syncTot();
+        let depthInp = null, endInp = null;
+        if (load) {
+            const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:12px;align-items:center;margin-top:0.6em;flex-wrap:wrap;flex:0 0 auto;';
+            const field = (label, value, min) => {
+                const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:6px;align-items:center;';
+                const inp = document.createElement('input'); inp.type = 'number'; inp.className = 'text_pole'; inp.style.cssText = 'width:6em;margin:0;'; inp.value = String(value); inp.min = String(min);
+                l.append(document.createTextNode(label), inp); row.append(l);
+                return inp;
+            };
+            depthInp = field(t`How many messages deep, per chat? (0 for all)`, load.depth, 0);
+            endInp = field(t`Last message ID (-1 for the last message)`, load.end, -1);
+            wrap.append(row);
+        }
         if (candidates.isGlobal && !candidates.all) {
             const g = document.createElement('small');
             g.style.cssText = 'display:block;opacity:0.75;margin-top:0.4em;';
@@ -1869,10 +2181,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         const pop = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: verb === 'Load' ? t`Load selected` : t`Scan selected`, cancelButton: t`Cancel`, wide: false });
         if (await pop.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
+        if (load) {
+            const d = Math.floor(Number(depthInp.value)); if (d >= 0) load.depth = d;
+            const e = Math.floor(Number(endInp.value)); load.end = Number.isFinite(e) && e >= -1 ? e : -1;
+        }
         return rows.filter(cb => cb.checked).map(cb => candidates[Number(cb.dataset.i)]);
     };
 
     let chatIndex = null;   // [{ char, avatar, charWorld, chats }], cached for the Studio session and book-independent
+    let groupIndex = null;  // [{ id, chat_metadata }], every group chat; cleared wherever chatIndex is
     const loadChatIndex = async () => {
         if (chatIndex) return chatIndex;
         const list = (characters ?? []).filter(c => c?.avatar);
@@ -1902,7 +2219,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         return rows;
     };
 
-    /** No-plugin path: pulls a chat's messages over HTTP, as {name, mes}. `byId` instead returns every message with the
+    /** No-plugin path: pulls a chat's messages over HTTP, as usableMessages. `byId` instead returns every message with the
      *  metadata header dropped, so an index is the MESSAGE ID it is live — what a "last message" cut must slice. */
     const fetchChatMessages = async ({ char, avatar, file }, { byId = false } = {}) => {
         const r = await fetch('/api/chats/get', {
@@ -1912,8 +2229,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!r.ok) return [];
         const j = await r.json();
         const list = (Array.isArray(j) ? j : []).filter(m => m && typeof m.mes === 'string');   // the header carries no `mes`
-        // Hidden messages are not scanned live (C3), so they are not counted here; names ride along for includeNames.
-        return byId ? list : list.filter(m => !m.is_system && m.mes).map(m => ({ name: m.name, mes: String(m.mes) }));
+        return byId ? list : usableMessages(list);
     };
 
     /** One pass of `keys` over `picked`: counts by both routes, merged. Plugin route for whatever is on disk — it runs this
@@ -1921,6 +2237,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
      *  chat has no file, so it is always the browser's. Results merge by summing every field (countChatHits), so the two
      *  routes can split the picked chats between them. */
     const scanKeys = async (keys, picked) => {
+        const macros = macrosOf();
         const totals = new Map(keys.map(k => [k, 0])), typedTotals = new Map();
         let seen = 0, via = '', unit = 'message';
         // The chat is cut into the unit the book's match window matches a conjunction within; the scan depth only sizes
@@ -1938,12 +2255,24 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             try {
                 const r = await fetch('/api/plugins/worlds-apart/scan-chats', {
                     method: 'POST', headers: getRequestHeaders(),
-                    body: JSON.stringify({ keys, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file })) }),
+                    body: JSON.stringify({ keys, macros, wordBoundary: settings().wordBoundary, dropChatTags: settings().dropChatTags ?? '', ...unitOpts, chats: onDisk.map(c => ({ dir: c.avatar.replace(/\.png$/, ''), file: c.file, macros: c.char ? { '{{char}}': c.char } : {} })) }),
                 });
-                j = r.ok ? await r.json() : null;
+                // Before the fallback: the browser would run the same keys and hang the tab instead.
+                const refused = r.status === 422 ? await r.clone().json().catch(() => null) : null;
+                if (refused?.slow) {
+                    toastr.error(refused.key
+                        ? t`The key ${refused.key} took too long to match, so the chat scan was stopped. Rewrite it so that it cannot backtrack.`
+                        : t`A key took too long to match, so the chat scan was stopped. A regex key that backtracks is the usual cause.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+                    return { totals, typedTotals, seen: 0, via, unit };
+                }
+                if (!r.ok) throw new Error(String(r.status));
+                j = await r.json();
+                // Every field the audit reads: the message count and both count tables. `unit` is optional.
+                if (!Number.isFinite(Number(j?.messages)) || !j?.counts || typeof j.counts !== 'object' || !j?.typed || typeof j.typed !== 'object') throw new Error('counts missing');
             } catch (error) {
                 // A plugin mid-redeploy or gone is not an audit failure: the browser scans the same chats below.
-                console.warn('Worlds Apart: /scan-chats threw, falling back to the client-side scan', error);
+                pluginFallback('scan-chats', error);
+                j = null;
             }
             // 0 messages means the route resolved no files; taking it would zero every key's share, so the browser retries them.
             if (Number(j?.messages)) {
@@ -1956,7 +2285,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 unit = j.unit ?? unit;
                 via = 'server';
             } else {
-                console.warn('Worlds Apart: /scan-chats returned nothing, falling back to client-side scan', j);
+                console.warn('WorldsApart: /scan-chats returned nothing, falling back to client-side scan', j);
                 onDisk = [];
             }
         } else {
@@ -1967,16 +2296,32 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const spec = settings().dropChatTags;
         // The same strip the runtime applies at intake, so the audit counts the text WA actually reads, not the trackers in it.
         const strip = ms => (spec?.trim() ? ms.map(m => ({ ...m, mes: dropTags(String(m.mes ?? ''), spec) })) : ms);
-        const msgs = [];
+        // Each chat under its own values: {{char}} its character, {{user}} the name on its user messages. The open chat of a
+        // group has no one speaker, so it is counted once per member and a unit counts if any member's name makes it match.
+        const members = ctx.groupId
+            ? (ctx.groups?.find(g => String(g.id) === String(ctx.groupId))?.members ?? []).map(a => characters.find(ch => ch?.avatar === a)?.name).filter(Boolean)
+            : [];
         for (const c of picked) {
             if (served.has(c)) continue;
-            const got = c.open
-                ? (ctx.chat ?? []).filter(m => m && !m.is_system && String(m.mes ?? '')).map(m => ({ name: m.name, mes: String(m.mes) }))
-                : await fetchChatMessages(c);
-            msgs.push(...strip(got));
-        }
-        if (msgs.length) {
-            add(countChatHits(keys, msgs, unitOpts));
+            const got = strip(c.open
+                ? usableMessages(ctx.chat)
+                : await fetchChatMessages(c));
+            if (!got.length) continue;
+            const user = chatUser(got);
+            const chatMap = { ...macros, ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) };
+            if (c.open && members.length > 1) {
+                const by = new Map(), typedBy = new Map();
+                let messages = 0, unit;
+                const union = (into, from) => { for (const [k, set] of from) { const s = into.get(k) ?? new Set(); for (const i of set) s.add(i); into.set(k, s); } };
+                for (const name of members) {
+                    const r = countChatHits(keys, got, { ...unitOpts, hitIndex: true, scope: createScanScope({ macros: { ...chatMap, '{{char}}': name }, boundary: settings().wordBoundary }) });
+                    messages = r.messages; unit = r.unit;
+                    union(by, r.hitsBy); union(typedBy, r.typedBy);
+                }
+                add({ messagesWith: new Map([...by].map(([k, s]) => [k, s.size])), typedWith: new Map([...typedBy].map(([k, s]) => [k, s.size])), messages, unit });
+            } else {
+                add(countChatHits(keys, got, { ...unitOpts, scope: createScanScope({ macros: chatMap, boundary: settings().wordBoundary }) }));
+            }
             via = via ? 'server + browser' : 'browser';
         }
         return { totals, typedTotals, seen, via, unit };
@@ -1996,8 +2341,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Second pass, probes only for the keys over the gate: a probe is a SmartKey evaluated per message, and the gate
         // admits a handful of keys where the book has thousands.
         const gate = studioOpts.chatCommon ?? KEY_CHAT_COMMON;
-        // substring's whole-word and case probes, and a SmartKey's paths, so `chat common` can name the one that matches.
-        const probes = own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(k => [...substringProbes(k), ...pathProbes(k)]);
+        // substring's whole-word and case probes, the key under each flag combination, and a SmartKey's paths, so `chat common` can name the one that matches.
+        const probes = [...new Set(own.filter(k => (totals.get(k) ?? 0) / seen >= gate).flatMap(k => [...substringProbes(k), ...flagProbes(k), ...pathProbes(k)]))];
         if (probes.length) {
             const second = await scanKeys(probes, picked);
             for (const [k, n] of second.totals) totals.set(k, n);
@@ -2015,12 +2360,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const boundChats = async () => {
         let bound = (await findBookChats()).filter(c => c.bound);
         // The index is session-cached, so a chat bound since reads as absent: drop the cache and look again.
-        if (!bound.length) { chatIndex = null; bound = (await findBookChats()).filter(c => c.bound); }
+        if (!bound.length) { chatIndex = null; groupIndex = null; bound = (await findBookChats()).filter(c => c.bound); }
         return bound;
     };
 
     const runChatScan = async (all = false, btn = null) => {
-        if (!scan) { toastr.info(t`Run the audit first.`, 'Worlds Apart'); return; }
+        if (!scan) { toastr.info(t`Run the audit first.`, 'WorldsApart'); return; }
         // The button shows the wait, as the audit button does; a toast for a lookup this short only lingers.
         const finding = () => findBookChats(all);
         const found = btn ? await withBusy(btn, '0.5', finding, '<i class="fa-solid fa-spinner fa-spin"></i>') : await finding();   // a rail square: the spinner alone
@@ -2032,14 +2377,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         if (!found.length) {
             toastr.warning(all ? t`No chats found.` : t`No chat is bound to “${selected}”. Shift-click to pick any chat.`,
-                'Worlds Apart', { timeOut: 9000 });
+                'WorldsApart', { timeOut: 9000 });
             return;
         }
 
         const picked = await pickChats(found);
         if (!picked?.length) return;
         const got = await scanChats(picked);
-        if (!got) { toastr.warning(t`Those chats returned no messages.`, 'Worlds Apart'); return; }
+        if (!got) { toastr.warning(t`Those chats returned no messages.`, 'WorldsApart'); return; }
         afterChatScan(got.keys);
     };
 
@@ -2053,12 +2398,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }
         }
         rebuildScan();
-        console.log('Worlds Apart: audit evidence —', {
+        console.log('WorldsApart: audit evidence —', {
             book: selected, matchWindow: settings().matchWindow, boundChats: bound.length,
             scanned: got?.via ?? 'none', messages: chatMsgs, keys: chatHits?.size ?? 0, matching: got?.live ?? 0,
         });
         // Only the absence is worth saying: the bulk bar carries the counts when there are any.
-        if (!got && !chatHits) toastr.info(t`No chat is bound; scanned the book only.`, 'Worlds Apart', { timeOut: 6000 });
+        if (!got && !chatHits) toastr.info(t`No chat is bound; scanned the book only.`, 'WorldsApart', { timeOut: 6000 });
     };
 
     const cleanupGroups = () => {
@@ -2089,10 +2434,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 cleanupChecks.delete(id);
             }
         }
-        if (!removed.length) { toastr.info(t`Nothing selected.`, 'Worlds Apart'); return; }
+        if (!removed.length) { toastr.info(t`Nothing selected.`, 'WorldsApart'); return; }
         cleanupUndo = removed;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(removed.length === 1 ? t`Deleted ${removed.length} key.` : t`Deleted ${removed.length} keys.`, 'Worlds Apart');
+        toastr.success(removed.length === 1 ? t`Deleted ${removed.length} key.` : t`Deleted ${removed.length} keys.`, 'WorldsApart');
     };
     const undoPrune = () => {
         if (!cleanupUndo?.length) return;
@@ -2104,7 +2449,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         }
         cleanupUndo = null;
         save(); rebuildScan(); suggest = null; renderExplorer();
-        toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'Worlds Apart');
+        toastr.success(n === 1 ? t`Restored ${n} key.` : t`Restored ${n} keys.`, 'WorldsApart');
     };
     // Whitelists the ticked terms — persistent, where unticking spares a term for this run only.
     const ignoreChecked = () => {
@@ -2112,9 +2457,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         for (const g of cleanupGroups()) for (const r of g.rows) {
             if (cleanupChecks.get(rowId(g.entry.uid, r.term)) && !ignoreSet.has(r.term)) { ignoreSet.add(r.term); n++; }
         }
-        if (!n) { toastr.info(t`Nothing selected to ignore.`, 'Worlds Apart'); return; }
+        if (!n) { toastr.info(t`Nothing selected to ignore.`, 'WorldsApart'); return; }
         persistIgnore(); rebuildScan(); renderExplorer();
-        toastr.success(n === 1 ? t`Ignoring ${n} key in “${selected}”.` : t`Ignoring ${n} keys in “${selected}”.`, 'Worlds Apart');
+        toastr.success(n === 1 ? t`Ignoring ${n} key in “${selected}”.` : t`Ignoring ${n} keys in “${selected}”.`, 'WorldsApart');
     };
     // Both term tabs paint a working note, yield a frame, then run the synchronous pre-pass.
 
@@ -2149,7 +2494,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const showAllBtn = railBtn(cleanupShowAll ? 'fa-eye-slash' : 'fa-eye', showAllTitle(),
             () => { cleanupShowAll = !cleanupShowAll; showAllBtn.innerHTML = `<i class="fa-solid ${cleanupShowAll ? 'fa-eye-slash' : 'fa-eye'}"></i>`; showAllBtn.title = showAllTitle(); repaint(); });
         const chatsBtn = railBtn('fa-comments', t`Choose chats: pick which chats to count key hits over. Bound chats are scanned when the audit runs; shift-click lists every chat on this install.`,
-            ev => runChatScan(ev?.shiftKey, chatsBtn).catch(e => { console.error('Worlds Apart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'Worlds Apart'); }));
+            ev => runChatScan(ev?.shiftKey, chatsBtn).catch(e => { console.error('WorldsApart: chat scan failed', e); toastr.error(String(e?.message ?? e), 'WorldsApart'); }));
         const selectAllBtn = railBtn('fa-square-check', t`Select all visible`, () => { for (const id of allIds) cleanupChecks.set(id, true); sync(); });
         const deselectBtn = railBtn('fa-xmark', t`Deselect`, () => { for (const id of allIds) cleanupChecks.set(id, false); sync(); });
         const cog = trayBtn(); cog.style.width = ''; cog.style.padding = '';
@@ -2218,7 +2563,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (!pane.isConnected || tab !== 'cleanup') return;   // switched away while we were blocked
             // runAudit, not rebuildScan: an audit that gathered no chat evidence is a different audit from the Explorer's.
             try { await runAudit(); }
-            catch (error) { console.error('Worlds Apart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'Worlds Apart'); }
+            catch (error) { console.error('WorldsApart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'WorldsApart'); }
             auditBtn.title = auditTitle();   // a rail square: the word rides the tooltip
             refreshTabStatus();
         }
@@ -2261,6 +2606,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     let labRunSource = null;     // how to re-read what the last run ran over: `{ label, load }`, so a re-run sees the books
                                  // as they are now: a snapshot taken at apply time would still hold a key since deleted   // the source behind the rendering: every tag, entity and delimiter shown at once
     let labSec = '', labLogic = String(WI_LOGIC.AND_ANY);
+    let labMacros = {};   // the Lab's overrides, token -> value; a blank field restores SillyTavern's value
+    let labFlagOverride = {};   // a run's override of the entries' own flags, per flag; a new run clears it, a re-run keeps it
+    let labChatMacros = {};     // what the loaded chats say {{char}} and {{user}} are, where they agree; under the Lab's own overrides, over ST's values
+    let labChatMixed = new Set(); // tokens the loaded chats disagree on: matched per part while the parts stand, the field saying so
+    let labParts = null;          // the loaded chats as parts, each with its own map and offset; null once the text is edited or erased
+    let labRunEntries = [];     // what the last run scanned, for the boxes' as-written state
 
     const LAB_JOIN = `\n\n${'-'.repeat(24)}\n\n`;
     const labChatMessages = (full, depth, end) => labMessages(full, {
@@ -2271,9 +2622,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const chatHaystack = (override, end = -1) => {
         const spec = settings().dropChatTags;
         const depth = Number(override ?? (settings().messageDepth || world_info_depth));
-        const { messages, hidden } = labChatMessages(getContext().chat ?? [], depth, end);
+        // 0 is every message here, where a per-entry scanDepth of 0 means none: the Lab reads a chat, it does not gate one.
+        const { messages, hidden } = labChatMessages(getContext().chat ?? [], depth === 0 ? Infinity : depth, end);
         // Reports depth and the is_system drop: neither is visible in the pane, and both change the count.
-        const bits = [messages.length === 1 ? t`${messages.length} message at depth ${depth}` : t`${messages.length} messages at depth ${depth}`];
+        const n = messages.length;
+        const bits = [depth === 0 ? (n === 1 ? t`${n} message, the whole chat` : t`${n} messages, the whole chat`) : (n === 1 ? t`${n} message at depth ${depth}` : t`${n} messages at depth ${depth}`)];
         if (end >= 0) bits.push(t`ending at #${end}`);
         if (hidden) bits.push(hidden === 1 ? t`${hidden} hidden message skipped` : t`${hidden} hidden messages skipped`);
         // dropChatTags removes the named element WITH its contents, so a tracker block leaves a gap in the pane.
@@ -2288,13 +2641,32 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Fetched together: the chats are independent, and Promise.all keeps `picked` order, which `parts` reads.
         // byId: message ids count hidden messages, so the cut is on the raw chat, as chatHaystack cuts the open one.
         const loaded = await Promise.all(picked.map(c => (c.open ? Promise.resolve(getContext().chat ?? []) : fetchChatMessages(c, { byId: true }))));
+        // The chats say who they are about: a character by name, a persona off the user messages. Where they agree the value
+        // stands; where they differ the token is unresolved, one haystack matching under one map.
+        labChatMacros = {}; labChatMixed = new Set();
+        const agree = (tok, values) => {
+            const set = new Set(values.filter(Boolean));
+            if (set.size === 1) labChatMacros[tok] = [...set][0];
+            else if (set.size > 1) { labChatMacros[tok] = tok; labChatMixed.add(tok); }
+        };
+        agree('{{char}}', picked.map(c => c.char));
+        agree('{{user}}', loaded.map(chatUser));
+        const chatParts = []; let at = 0;
         for (const [i, c] of picked.entries()) {
-            const { messages } = labChatMessages(loaded[i], depth, end);
+            const { messages } = labChatMessages(loaded[i], depth === 0 ? Infinity : depth, end);
             total += messages.length;
-            parts.push(`${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(LAB_JOIN)}`);
+            const block = `${'='.repeat(8)} ${String(c.file).replace(/\.jsonl$/, '')} ${'='.repeat(8)}\n\n${messages.join(LAB_JOIN)}`;
+            parts.push(block);
+            // Each block matches under its own chat's values; `at` is its offset in the text joined below.
+            const user = chatUser(loaded[i]);
+            chatParts.push({ text: block, at, macros: { ...(c.char ? { '{{char}}': c.char } : {}), ...(user ? { '{{user}}': user } : {}) } });
+            at += block.length + 2;
         }
+        labParts = chatParts;
         const chats = picked.length === 1 ? t`${picked.length} chat` : t`${picked.length} chats`;
-        const line = total === 1 ? t`${total} message from ${chats} at depth ${depth}` : t`${total} messages from ${chats} at depth ${depth}`;
+        const line = depth === 0
+            ? (total === 1 ? t`${total} message from ${chats}, whole chats` : t`${total} messages from ${chats}, whole chats`)
+            : (total === 1 ? t`${total} message from ${chats} at depth ${depth}` : t`${total} messages from ${chats} at depth ${depth}`);
         toastr.info(end >= 0 ? line + ', ' + t`ending at #${end}` : line, t`Key Lab`);
         return parts.join('\n\n');
     };
@@ -2329,7 +2701,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (await p.show() !== POPUP_RESULT.AFFIRMATIVE) return null;
         const e = book?.entries?.[entrySel.value];
         if (!e) return null;
-        const sec = e.selective ? secondaryKeys(e) : [];
+        // secondaryKeys reads `selective` itself; a truthiness test here dropped the gate of an entry with no such field.
+        const sec = secondaryKeys(e);
         return { keys: usableKeys(e.key), sec, logic: String(e.selectiveLogic ?? WI_LOGIC.AND_ANY) };
     };
 
@@ -2395,11 +2768,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** Runs `entries` against the haystack and shows the result; `label` names what ran, for the header. */
-    const applyFrom = async (label, load) => {
+    const applyFrom = async (label, load, { keep = false } = {}) => {
         labRunSource = { label, load };
-        const run = runBook(await load(), labHay, {
+        if (!keep) labFlagOverride = {};
+        labRunEntries = await load();
+        const base = labBaseMap();
+        const run = runBook(labRunEntries, labHay, {
             matchWindow: labWindow,
             context: 30,
+            override: labFlagOverride,
+            parts: labPartsFor(base), scope: createScanScope({ macros: labMacroMap(base), boundary: settings().wordBoundary }),
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
             skipVectorized: labSkipVector,
         });
@@ -2439,8 +2817,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         if (!scanned) return `${head}<div style="opacity:0.6;">${escapeHtml(t`No entry there has a key to match with.`)}</div>`;
         if (!entries.length) return head;
         return head + entries.map(({ entry, rows }) => {
+            const { caseSensitive, wholeWords } = entryFlags(entry, { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words });
             const title = `<b style="overflow-wrap:anywhere;">${escapeHtml(wiTitleOf(entry))}</b>`
-                + `<small style="opacity:0.6;"> ${escapeHtml(rows.length === 1 ? t`${rows.length} key` : t`${rows.length} keys`)}</small>`;
+                + `<small style="opacity:0.6;"> ${escapeHtml(rows.length === 1 ? t`${rows.length} key` : t`${rows.length} keys`)}`
+                + ` · ${escapeHtml(caseSensitive ? t`case-sensitive` : t`case-insensitive`)} · ${escapeHtml(wholeWords ? t`whole words` : t`substring`)}</small>`;
             const bookLine = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
             return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${bookLine}</summary>`
                 + `<div style="margin-left:10px;">${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))), entry)).join('')}</div></details>`;
@@ -2473,7 +2853,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const applyToBook = async (world, mutate) => {
         const isOpen = world === selected;
         const book = isOpen ? data : await loadWorldInfo(world);
-        if (!book?.entries) { toastr.warning(t`Could not load “${world}”.`, 'Worlds Apart'); return 0; }
+        if (!book?.entries) { toastr.warning(t`Could not load “${world}”.`, 'WorldsApart'); return 0; }
         const touched = mutate(Object.values(book.entries), book);
         if (!touched) return 0;
         // Not while the Lab is up: renderExplorer rebuilds the tab, discarding the Lab's panes and run.
@@ -2508,7 +2888,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const n = await apply(es => deleteKey(es, key));
                 toastr[n ? 'success' : 'info'](n
                     ? (n === 1 ? t`Deleted “${key}” from ${n} entry.` : t`Deleted “${key}” from ${n} entries.`)
-                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'Worlds Apart');
+                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'WorldsApart');
             },
         },
         {
@@ -2519,7 +2899,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const n = await apply(es => replaceKey(es, key, next));
                 toastr[n ? 'success' : 'info'](n
                     ? (n === 1 ? t`Replaced “${key}” → “${next}” in ${n} entry.` : t`Replaced “${key}” → “${next}” in ${n} entries.`)
-                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'Worlds Apart');
+                    : t`Nothing in ${scopeLabel} is keyed “${key}”.`, 'WorldsApart');
             },
         },
         {
@@ -2531,7 +2911,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const n = await apply(es => addVariant(es, key, term));
                 toastr[n ? 'success' : 'info'](n
                     ? (n === 1 ? t`“${term}” added to ${n} entry keyed “${key}”.` : t`“${term}” added to ${n} entries keyed “${key}”.`)
-                    : t`Every entry in ${scopeLabel} keyed “${key}” already has “${term}”.`, 'Worlds Apart');
+                    : t`Every entry in ${scopeLabel} keyed “${key}” already has “${term}”.`, 'WorldsApart');
             },
         },
     ];
@@ -2551,7 +2931,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                         const held = e?.key?.find(k => kwNorm(k) === kwNorm(key));
                         return held && renameKeyOn(e, held, next) ? 1 : 0;
                     });
-                    if (n) toastr.success(t`“${key}” → “${next}”.`, 'Worlds Apart');
+                    if (n) toastr.success(t`“${key}” → “${next}”.`, 'WorldsApart');
                 },
             },
             {
@@ -2579,7 +2959,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /** Re-runs the last applied books, re-reading them: an edit or a setting change is what asks for this. */
-    const rerunLab = () => { if (labRunSource) applyFrom(labRunSource.label, labRunSource.load); };
+    const rerunLab = () => { if (labRunSource) applyFrom(labRunSource.label, labRunSource.load, { keep: true }); };
 
     /** Scrolls `el` into view and rings it briefly, opening whatever it is folded inside. */
     const revealIn = el => {
@@ -2605,9 +2985,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         });
     };
 
+    /** Every token the typed keys and the book carry, at SillyTavern's value. */
+    const labBaseMap = () => macroMap([labKeys, labSec, ...bookKeyTexts()], stSubstitute);
+    /** The map the field shows and a part-less scan matches under: the Lab's overrides, else what the loaded chats agree on, else SillyTavern's value. */
+    const labMacroMap = (base = labBaseMap()) => Object.fromEntries(Object.entries(base).map(([tok, v]) => [tok, Object.hasOwn(labMacros, tok) ? labMacros[tok] : Object.hasOwn(labChatMacros, tok) ? labChatMacros[tok] : v]));
+    /** The loaded chats as parts for the model, each under its own values with the Lab's overrides on top; null without a load. */
+    const labPartsFor = (base = labBaseMap()) => labParts?.map(p => ({ ...p, macros: { ...base, ...p.macros, ...labMacros } })) ?? null;
+
     /** The Lab's result plus the colour to draw it in, from whatever the panes hold now. */
-    const scanLab = () => {
+    const scanLab = (base = labBaseMap()) => {
         const r = labScan({
+            parts: labPartsFor(base),
+            scope: createScanScope({ macros: labMacroMap(base), boundary: settings().wordBoundary }),
             hay: labHay,
             keys: labKeys,
             sec: labSec,
@@ -2617,6 +3006,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             wholeWords: labWhole,
             context: 30,
             run: labRun,
+            override: labFlagOverride,
             defaults: { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words },
         });
         const ink = (sp, a) => labInk(Math.max(0, r.keys.indexOf(sp.key)), a);
@@ -2640,7 +3030,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ta.addEventListener('input', () => { set(ta.value); clearTimeout(timer); timer = setTimeout(repaint, 180); });
             return ta;
         };
-        const hayBox = box(t`Paste any text to match against… a line of dashes separates one message from the next`, () => labHay, v => { labHay = v; });
+        const hayBox = box(t`Paste any text to match against… a line of dashes separates one message from the next`, () => labHay, v => { labHay = v; labParts = null; });   // an edit moves every offset, so the parts stand down
         hayBox.style.flex = '1 1 auto';
         // The same box, read-only and marked: text_pole so it keeps the border and padding the textarea had. height and
         // margin beat .text_pole's `fit-content` and `5px 0`, which would let it hug its content and never scroll.
@@ -2686,7 +3076,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         hayErase.title = t`Clear the text`;
         hayErase.style.cssText = 'position:absolute;top:5px;right:59px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
             + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
-        hayErase.addEventListener('click', () => { labHay = ''; hayBox.value = ''; hayBeforeEdit = null; labCommitted = false; repaint(); hayBox.focus(); });
+        hayErase.addEventListener('click', () => { labHay = ''; hayBox.value = ''; hayBeforeEdit = null; labCommitted = false; labChatMacros = {}; labChatMixed = new Set(); labParts = null; repaint(); hayBox.focus(); });
         hayWrap.append(hayBox, hayRead, srcToggle, hayCancel, hayErase, hayToggle);
         const keyBox = box(t`Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey`, () => labKeys, v => { labKeys = v; });
         const gateBox = document.createElement('details');
@@ -2731,11 +3121,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             labRun = null;
             repaint();
         });
-        panes.append(hayWrap, keyWrap, gateBox, bookList);
 
         const opts = document.createElement('div');
-        // One line: the labels shrink, wrapping their own text; the tools group never shrinks.
-        opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:6px 8px;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
+        // One line above the keys, which is what the flags and the window apply to; the labels shrink, wrapping their own text.
+        opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:2px 0;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
         const flag = (label, get, set) => {
             const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
             const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();
@@ -2743,11 +3132,51 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             l.append(c, document.createTextNode(label));
             return l;
         };
-        opts.append(
-            flag(t`Case sensitive`, () => labCase, v => { labCase = v; }),
-            flag(t`Match whole words`, () => labWhole, v => { labWhole = v; }),
-            flag(t`Skip vector entries`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); }),
-        );
+        const caseFlag = flag(t`Case sensitive`, () => labCase, v => { if (labRun) { labFlagOverride.caseSensitive = v; rerunLab(); } else labCase = v; });
+        const wholeFlag = flag(t`Match whole words`, () => labWhole, v => { if (labRun) { labFlagOverride.wholeWords = v; rerunLab(); } else labWhole = v; });
+        opts.append(caseFlag, wholeFlag, flag(t`Skip vector entries`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); }));
+        // Typed keys: the boxes are the typed flags. A run: each box is the entries' own flag, indeterminate where they differ,
+        // and an override where one is set, marked as drift so a toggle reads as the experiment it is.
+        const renderFlagState = () => {
+            const defaults = { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words };
+            const own = f => { const vals = new Set(labRunEntries.map(e => entryFlags(e, defaults)[f])); return vals.size === 1 ? [...vals][0] : null; };
+            for (const [l, f, typed] of [[caseFlag, 'caseSensitive', labCase], [wholeFlag, 'wholeWords', labWhole]]) {
+                const c = l.querySelector('input');
+                if (!labRun) { c.indeterminate = false; c.checked = typed; l.style.color = ''; l.title = ''; continue; }
+                const as = own(f), forced = labFlagOverride[f];
+                c.indeterminate = as === null && forced === undefined;
+                c.checked = forced ?? as ?? false;
+                const drift = forced !== undefined && forced !== as;
+                l.style.color = drift ? '#d9b74a' : '';
+                l.title = drift
+                    ? (as === null ? t`Forced for every entry in the run; each entry has its own setting.` : (as ? t`Overriding: the entry has this on.` : t`Overriding: the entry has this off.`))
+                    : (as === null ? t`As each entry has it; entries in this run differ. Toggle to force one setting.` : t`As the entry has it. Toggle to test the other setting on this run.`);
+            }
+        };
+        // Its own line above the haystack; redrawn on every repaint, since the typed keys decide which tokens show.
+        const macroRow = document.createElement('div');
+        macroRow.style.cssText = 'flex:0 0 auto;display:none;flex-wrap:wrap;gap:6px 12px;align-items:center;opacity:0.8;font-size:0.9em;padding:2px 0;';
+        const renderMacroRow = base => {
+            const map = labMacroMap(base);
+            const tokens = Object.keys(map);
+            macroRow.innerHTML = '';
+            macroRow.style.display = tokens.length ? 'flex' : 'none';
+            if (!tokens.length) return;
+            const cap = document.createElement('span'); cap.style.opacity = '0.7'; cap.textContent = t`Macros:`;
+            cap.title = t`What each macro in the keys expands to here. Edit a value to test another persona or speaker; a blank field restores SillyTavern's value.`;
+            macroRow.append(cap);
+            for (const tok of tokens) {
+                const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;';
+                const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.style.cssText = 'width:12em;margin:0;';
+                // A value equal to its token is unresolved: no character is open, or a group has no speaker outside a generation.
+                const unresolved = map[tok] === tok;
+                inp.value = unresolved ? '' : map[tok];
+                inp.placeholder = !unresolved ? tok : labChatMixed.has(tok) ? (labParts ? t`${tok}: per chat` : t`${tok}: the loaded chats differ`) : t`${tok}: no character open`;
+                inp.addEventListener('change', () => { if (inp.value === '') delete labMacros[tok]; else labMacros[tok] = inp.value; rerunLab(); repaint(); });
+                l.append(document.createTextNode(tok), inp);
+                macroRow.append(l);
+            }
+        };
         const winLabel = document.createElement('label');
         winLabel.style.cssText = 'display:flex;gap:6px;align-items:center;';
         winLabel.title = t`Match window, as set in the settings`;
@@ -2767,41 +3196,40 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             return i;
         };
         const tools = document.createElement('span');
-        tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex-shrink:0;margin-left:auto;';
-        opts.append(winLabel, tools);
+        tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex:0 0 auto;align-self:flex-end;padding:6px 0 2px;';
+        opts.append(winLabel);
+        // After every const above it is declared: this runs while the Lab is still being built.
+        panes.append(macroRow, hayWrap, opts, keyWrap, gateBox, bookList);
         tools.append(
             labTool('fa-comment-dots', t`Load current chat to scan depth ${settings().messageDepth || world_info_depth}. Shift-click to select depth.`,
                 async ev => {
                     // No character or group: there is no chat to read, and nothing here may cause ST to make one.
                     if (getContext().characterId === undefined && !getContext().groupId) { toastr.info(t`No chat is open.`, t`Key Lab`); return; }
                     const depth = ev.shiftKey
-                        ? await numberPrompt(t`Load chat`, t`How many messages deep?`, settings().messageDepth || world_info_depth, 1)
+                        ? await numberPrompt(t`Load chat`, t`How many messages deep? (0 for all)`, settings().messageDepth || world_info_depth, 0)
                         : undefined;
                     if (ev.shiftKey && depth == null) return;
                     const end = ev.shiftKey ? await numberPrompt(t`Load chat`, t`Last message ID (-1 for the last message)`, -1, -1) : -1;
                     if (ev.shiftKey && end == null) return;
-                    labHay = chatHaystack(depth, end);
+                    // The open chat is ST's own values, so the last load's chat names stand down with its parts.
+                    labHay = chatHaystack(depth, end); labParts = null; labChatMacros = {}; labChatMixed = new Set();
                     hayBox.value = labHay;
                     labCommitted = true;   // imported text is for reading, not editing
                     repaint();
                 }),
-            labTool('fa-comments', t`Load chats to scan depth ${settings().messageDepth || world_info_depth}: pick from the chats bound to this book, or from every chat when none is. Shift-click to list every chat and select depth.`,
+            labTool('fa-comments', t`Load chats: pick from the chats bound to this book, or from every chat when none is, and set the depth. Shift-click to list every chat.`,
                 async ev => {
-                    const depth = ev.shiftKey
-                        ? await numberPrompt(t`Load chats`, t`How many messages deep, per chat?`, settings().messageDepth || world_info_depth, 1)
-                        : undefined;
-                    if (ev.shiftKey && depth == null) return;
-                    const end = ev.shiftKey ? await numberPrompt(t`Load chats`, t`Last message ID (-1 for the last message)`, -1, -1) : -1;
-                    if (ev.shiftKey && end == null) return;
                     // Bound chats when there are any; otherwise every chat, nothing pre-ticked. Shift-click lists every chat regardless.
                     let found = ev.shiftKey ? [] : await findBookChats(false);
                     if (!found.length) found = await findBookChats(true);
                     const ctx = getContext(); const openName = String(ctx.chatId ?? '');
                     if (openName && !found.some(f => f.file.startsWith(openName))) found.push({ char: ctx.name2 ?? '', avatar: null, file: openName, size: t`${(ctx.chat ?? []).length} msgs`, why: 'currently open', open: true });
                     if (!found.length) { toastr.warning(t`No chats found.`, t`Key Lab`); return; }
-                    const picked = await pickChats(found, 'Load');
+                    // Depth and end are fields of the same dialog, so what to load and how deep is one decision.
+                    const load = { depth: settings().messageDepth || world_info_depth, end: -1 };
+                    const picked = await pickChats(found, 'Load', load);
                     if (!picked?.length) return;
-                    labHay = await chatsHaystack(picked, depth, end);
+                    labHay = await chatsHaystack(picked, load.depth, load.end);
                     hayBox.value = labHay;
                     labCommitted = true;
                     repaint();
@@ -2814,7 +3242,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 labLogic = picked.logic;
                 keyBox.value = labKeys; secBox.value = labSec; logicSel.value = labLogic;
                 growKeys();
-                if (picked.sec.length) gateBox.open = true;   // an imported gate must not land shut and invisible
+                gateBox.open = picked.sec.length > 0;   // an imported gate must not land shut and invisible, and an entry without one leaves no stale tray open
                 repaint();
             }),
             labTool('fa-book', t`Apply the books attached to this chat, hits only. Shift-click to pick any book.`,
@@ -2825,9 +3253,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 }),
         );
         const out = document.createElement('div');
-        out.style.cssText = 'flex:2 1 0;overflow:auto;min-width:0;min-height:0;';
+        out.style.cssText = 'flex:1 1 auto;overflow:auto;min-width:0;min-height:0;';
+        const right = document.createElement('div');
+        right.style.cssText = 'flex:2 1 0;display:flex;flex-direction:column;min-width:0;min-height:0;';
+        right.append(tools, out);
         const repaint = () => {
-            const { ink, rows, spans } = scanLab();
+            // One pass over the book's tokens per repaint: the macro row, the parts and the part-less map all read it.
+            const base = labBaseMap();
+            renderMacroRow(base);
+            renderFlagState();
+            const { ink, rows, spans } = scanLab(base);
             const digestTop = out.scrollTop;   // an edit repaints the digest, and the row acted on is wherever it was
             out.innerHTML = labRun
                 ? labRunHtml()
@@ -2881,8 +3316,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
         body.style.cssText = 'flex:1 1 auto;display:flex;gap:10px;padding:0 8px 8px;min-height:0;';
-        body.append(panes, out);
-        pane.append(opts, body);
+        body.append(panes, right);
+        pane.append(body);
     };
 
     const TABS = [['explorer', t`Explorer`], ['cleanup', t`Bulk Cleanup`], ['lab', t`Key Lab`]];
@@ -2922,7 +3357,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     /** Re-run the scan and repaint, after anything that changes a binding. */
     const refreshOrphans = async () => {
-        chatIndex = null;
+        chatIndex = null; groupIndex = null;
         orphanChecks.clear();
         const r = findOrphanBindings(await bindingIndex(), world_names);
         orphans = (r.chatCount || r.cardCount) ? r : null;
@@ -2981,8 +3416,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const go = btn(g.cards.length === 1 ? t`Re-point card` : t`Re-point ${g.cards.length} cards`, async () => {
                     const target = sel.value; if (!target) return;
                     const r = await repointCards(g.name, target);
-                    if (r.moved.length) toastr.success(t`Re-pointed ${r.moved.join(', ')} to “${target}”.`, 'Worlds Apart');
-                    if (r.failed.length) toastr.warning(t`Could not re-point: ${r.failed.join(', ')}`, 'Worlds Apart', { timeOut: 12000 });
+                    if (r.moved.length) toastr.success(t`Re-pointed ${r.moved.join(', ')} to “${target}”.`, 'WorldsApart');
+                    if (r.failed.length) toastr.warning(t`Could not re-point: ${r.failed.join(', ')}`, 'WorldsApart', { timeOut: 12000 });
                     await refreshOrphans();
                 });
                 go.title = (g.cards.length === 1 ? t`Set the primary lorebook on this card to the chosen book.` : t`Set the primary lorebook on these cards to the chosen book.`)
@@ -3039,8 +3474,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                         if (c.file.replace(/\.jsonl$/, '') === open) { bad.push(t`${c.file} (open — switch away first)`); continue; }
                         (await repointOne(c, target)) ? ok++ : bad.push(c.file);
                     }
-                    if (ok) toastr.success(ok === 1 ? t`Re-pointed ${ok} chat to “${target}”.` : t`Re-pointed ${ok} chats to “${target}”.`, 'Worlds Apart');
-                    if (bad.length) toastr.warning(t`Could not re-point: ${bad.join(', ')}`, 'Worlds Apart', { timeOut: 12000 });
+                    if (ok) toastr.success(ok === 1 ? t`Re-pointed ${ok} chat to “${target}”.` : t`Re-pointed ${ok} chats to “${target}”.`, 'WorldsApart');
+                    if (bad.length) toastr.warning(t`Could not re-point: ${bad.join(', ')}`, 'WorldsApart', { timeOut: 12000 });
                     await refreshOrphans();
                 }));
                 box.append(bar);
@@ -3094,7 +3529,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         scanBtn.title = (scan ? t`Re-audit: flag dead, common and short keys.` : t`Key audit: flag dead, common and short keys.`) + '\n' + (chatHits ? t`Chat evidence: ${chatLabel()}, ${chatMsgs} messages.` : t`No chat searched yet.`);
         scanBtn.addEventListener('click', async () => {
             try { await withBusy(scanBtn, '0.5', runAudit, '<i class="fa-solid fa-spinner fa-spin"></i>'); }
-            catch (error) { console.error('Worlds Apart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'Worlds Apart'); }
+            catch (error) { console.error('WorldsApart: key audit failed', error); toastr.error(t`The key audit failed — see the browser console.`, 'WorldsApart'); }
             renderExplorer();
         });
         const allOpen = entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
@@ -3180,12 +3615,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         orphanView = false;
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
         selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
-        cleanupChecks.clear(); cleanupUndo = null;   // rowId is (uid, term): uids collide across books, so a tick or an undo must not cross one
+        cleanupChecks.clear(); cleanupUndo = null; clearEntryUndo();   // rowId is (uid, term): uids collide across books, so a tick or an undo must not cross one
         explorer.innerHTML = `<div style="opacity:0.6;padding:8px;">${escapeHtml(t`Loading…`)}</div>`; explorer.append(closeBtn);   // same re-adopt as the no-book branch
         renderBooks();
         data = await loadWorldInfo(name);
         if (selected !== name) return;   // a faster second click won this race
-        if (!data?.entries) { toastr.warning(t`Could not load “${name}”.`, 'Worlds Apart'); return; }
+        if (!data?.entries) { toastr.warning(t`Could not load “${name}”.`, 'WorldsApart'); return; }
         const s = settings(); if (!s.keywordIgnore) s.keywordIgnore = {};
         ignoreSet = new Set(s.keywordIgnore[name] ?? []);
         renderExplorer();
@@ -3202,9 +3637,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         navToggle.addEventListener('click', () => { navCollapsed = !navCollapsed; renderBooks(); });
         // Collapsed, the rail holds nothing but the way back.
         if (navCollapsed) { nav.append(navToggle); return; }
+        // Sticky; holds the title row, the undo bar after a delete and, in select mode, the bulk bar.
         const head = document.createElement('div');
         head.className = 'wa-studio-navhead';
-        head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;';
+        const headRow = document.createElement('div');
+        headRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;';
         const ttl = document.createElement('b'); ttl.textContent = t`Lorebooks`;
         const sortBtn = document.createElement('i');
         sortBtn.className = `fa-solid ${sortAsc ? 'fa-arrow-down-a-z' : 'fa-arrow-up-a-z'}`;
@@ -3218,7 +3655,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         bulkToggle.addEventListener('click', () => { bookBulkMode = !bookBulkMode; if (!bookBulkMode) { selectedBooks.clear(); bookAnchor = null; } renderBooks(); });
         const navtools = document.createElement('span'); navtools.style.cssText = 'display:flex;align-items:center;gap:9px;';
         navtools.append(bulkToggle, sortBtn, navToggle);
-        head.append(ttl, navtools);
+        headRow.append(ttl, navtools);
+        head.append(headRow);
         nav.append(head);
 
         if (pendingUndo) {
@@ -3234,7 +3672,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const undoBtn = document.createElement('button'); undoBtn.type = 'button'; undoBtn.className = 'menu_button wa-undo-btn'; undoBtn.textContent = t`Undo`;
             undoBtn.addEventListener('click', restoreBook);
             bar.append(top, name, undoBtn);
-            nav.append(bar);
+            head.append(bar);
         }
 
         const names = [...world_names].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
@@ -3254,7 +3692,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 const hint = document.createElement('div'); hint.className = 'wa-bookbulk-hint'; hint.textContent = t`Tick books to copy or delete.`;
                 bar.append(hint);
             }
-            nav.append(bar);
+            head.append(bar);
         }
 
         const attached = new Set(attachedBookNames());
@@ -3318,7 +3756,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     pop.buttonControls.style.display = 'none';   // hiding the OK button alone leaves the row's padding
     closeBtn.addEventListener('click', () => pop.complete(POPUP_RESULT.AFFIRMATIVE));
     await pop.show();
-    clearUndo();   // drop the pending timer/snapshot when Studio closes
+    clearUndo(); clearEntryUndo();   // drop the pending timers/snapshots when Studio closes
     if (dirty && selected) reloadEditor(selected);
     return '';
 }

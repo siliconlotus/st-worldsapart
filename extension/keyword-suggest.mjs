@@ -1,8 +1,8 @@
 // keyword-suggest.mjs — the key suggester: what to propose for an entry, from its own text (the TF-IDF ranker) and
 // from a model (the prompt, parser and post-filter). ST-free; docs/keyword-suggestions.md is the reference.
 import { table } from './lang.mjs';
-import { buildAutomaton, scanAutomaton } from './smartkeys.mjs';
-import { FUNCTION_WORDS } from './keyword-audit.mjs';
+import { buildAutomaton, fold as matchFold, scanAutomaton } from './smartkeys.mjs';
+import { maskMarkup } from './matcher.mjs';
 
 // Curly apostrophes to straight for a table lookup only (K14); the term keeps what it was written with.
 const tblKey = w => w.includes('’') ? w.replace(/’/g, "'") : w;
@@ -73,7 +73,8 @@ export function classifyLlmCand(cand, { canon, exampleCanon, exampleWords, entry
 }
 
 /** Corpus name evidence: `wordSeq(text)` observes a text and returns the suggester's token sequence; `isName(w)` reads it — mid-sentence
- *  capitals at >= NAME_CAP_RATIO, acronyms exempt, "I" excluded, a never-lowercase word absent from the table accepted. The one properness test. */
+ *  capitals at >= NAME_CAP_RATIO, acronyms exempt, "I" excluded, a never-lowercase word absent from the table accepted; acronyms alone where the table's
+ *  `nameDetector` is not 'capitalised'. The one properness test. */
 export function nameEvidence() {
     const fold = w => { w = w.replace(/^['’-]+|['’-]+$/g, ''); return /['’]s$/i.test(w) ? w.slice(0, -2) : w; };
     // A token seen only in all-caps is an acronym; capitals count only mid-sentence.
@@ -99,6 +100,8 @@ export function nameEvidence() {
     const NAME_CAP_RATIO = 0.95;
     const isName = w => {
         if (isAcr(w)) return true;
+        // Capitals are evidence of a name only where the language's pack says so; elsewhere every noun would pass.
+        if (table().nameDetector !== 'capitalised') return false;
         if (w === 'i' || /^i['’]/.test(w)) return false;
         const up = capMidCount.get(w) ?? 0, lo = lowerCount.get(w) ?? 0;
         if (up > 0 && up / (up + lo) >= NAME_CAP_RATIO) return true;
@@ -115,7 +118,8 @@ export function nameEvidence() {
 export function buildKeySuggest(data, opts) {
     const { dfCeil, maxN, excludeDates, excludeShort, onlyActive, cap, bgDocs = [], englishGate = true } = opts;
     const T = table();   // read once per build: a switch takes effect on the next build
-    const STOP = FUNCTION_WORDS;
+    // The pack's function words where its fragmentDetector supplies them; without, isFunc's own df test is the only one.
+    const STOP = T.functionWords;
     const { fold, wordSeq, isName, isAcr } = nameEvidence();
     const canon = k => (String(k).match(/[\p{L}][\p{L}'’-]+/gu) ?? []).map(w => fold(w).toLowerCase()).join(' ');
 
@@ -190,15 +194,17 @@ export function buildKeySuggest(data, opts) {
     const DF = new Map();
     for (const s of seqs) for (const t of new Set(ngramsOf(s, true))) DF.set(t, (DF.get(t) ?? 0) + 1);
 
-    // Substring df, as countKey sees a key. dfCache is filled by the automaton warm-up below; the scan-on-miss path serves the ✨ path's terms.
+    // Substring df, as countKey sees a key: folded and markup-masked. dfCache is filled by the automaton warm-up below; the scan-on-miss path serves the ✨ path's terms.
+    // `contentsLc` is only lowercased: tallyForms indexes the raw text with it, and the fold can change a length.
     const contentsLc = entries.map(e => String(e.content ?? '').toLowerCase());
+    const contentsFolded = entries.map(e => matchFold(maskMarkup(String(e.content ?? ''))));
     const dfCache = new Map();
     const dfSubstr = t => {
-        const q = String(t).toLowerCase();
+        const q = matchFold(t);
         let m = dfCache.get(q);
         if (m === undefined) {
             m = 0;
-            for (const c of contentsLc) if (c.includes(q)) m++;
+            for (const c of contentsFolded) if (c.includes(q)) m++;
             dfCache.set(q, m);
         }
         return m;
@@ -242,7 +248,6 @@ export function buildKeySuggest(data, opts) {
 
     // Frequency gate (lang.mjs table): names z 0; a unigram in the table is cut; a phrase rides its rarest word on a ramp (full at
     // z<=2.5, gone at z>=3.8) and is cut if any non-linker, non-name word is top-500 English. A lowercase -ing word inherits a junk-band pseudo-z.
-    // ponytail: constants eyeballed off one book's junk band; retune there.
     const isGer = w => w.length >= 6 && w.endsWith('ing');
     // Naive de-inflection for the table lookup, consulted on a miss only.
     const stems = w => {
@@ -277,7 +282,7 @@ export function buildKeySuggest(data, opts) {
     };
 
     // Warm dfCache in ONE automaton pass per document (S10); bgDocs pool into the idf denominator.
-    const bgLc = bgDocs.map(d => String(d).toLowerCase());
+    const bgLc = bgDocs.map(d => matchFold(maskMarkup(String(d))));
     const M = bgLc.length;
     const bgDF = new Map();
     {
@@ -286,14 +291,14 @@ export function buildKeySuggest(data, opts) {
             for (const [term, f] of tf) {
                 if (!admit(term, f)) continue;
                 if ((DF.get(term) ?? 1) / N > dfCeil) continue;   // the cheap gate that precedes it
-                wanted.add(term.toLowerCase());
+                wanted.add(matchFold(term));
             }
         }
         if (wanted.size) {
             const terms = [...wanted];
             const aut = buildAutomaton(terms);
             const hits = new Int32Array(terms.length);
-            for (const c of contentsLc) for (const idx of scanAutomaton(aut, c).keys()) hits[idx]++;
+            for (const c of contentsFolded) for (const idx of scanAutomaton(aut, c).keys()) hits[idx]++;
             terms.forEach((t, i) => dfCache.set(t, hits[i]));
             if (M) {
                 const bg = new Int32Array(terms.length);
@@ -307,7 +312,7 @@ export function buildKeySuggest(data, opts) {
     // ponytail: validated at n=3..4; a longer gram compares only its shoulders, which errs toward keeping it.
     const bgCache = new Map();
     const bgCount = t => {
-        const q = t.toLowerCase();
+        const q = matchFold(t);
         let v = bgCache.get(q);
         if (v === undefined) { v = 0; for (const c of bgLc) if (c.includes(q)) v++; bgCache.set(q, v); }
         return v;
@@ -325,7 +330,6 @@ export function buildKeySuggest(data, opts) {
     };
     // Subsumption at equal frequency: a cohesive long gram swallows contained phrases but never a bare word (S7); a particle form gives way to a
     // distinctive bare name; an incohesive one gives way only to its shoulder.
-    // ponytail: measured on n>=3 only; bigram-over-unigram keeps the old rule.
     const SUBSUME_COHESION = 0.4;
     const subsume = list => list.filter(r => !list.some(o => {
         if (o === r || o.f !== r.f) return false;
@@ -369,7 +373,7 @@ export function buildKeySuggest(data, opts) {
             const rec = SUCC.get(term);
             if (n > 1 && rec && rec.n >= 2 && rec.s && rec.s !== '.') continue;
             rows.push({ term, display: displayOf(term, idx), present: existing.has(term), df, f, n,
-                score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(term) ?? 0) + 0.5)) * (1 + 0.5 * (contentLen(term) - 1)) });
+                score: f * engMult * Math.log((N + M + 1) / (df + (bgDF.get(matchFold(term)) ?? 0) + 0.5)) * (1 + 0.5 * (contentLen(term) - 1)) });
         }
         rows.sort((a, b) => b.score - a.score);
         // A plural adds nothing a substring key can use, so the singular stands alone.

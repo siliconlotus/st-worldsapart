@@ -1,7 +1,7 @@
 # ST core's World Info scan: what activates, what survives, where it lands
 
 Reference for core's behaviour, not WA's. WA's own pipeline is the stages in `CLAUDE.md`; core's scan
-is what WA's stage 2 shares the entry list with and what stage 4 deletes from. Matching itself
+is what WA's activation shares the entry list with and what selection deletes from. Matching itself
 (`matchKeys`, the fold, whole-word) is `docs/matching-architecture.md` *Divergences from ST core*. Core defects go
 in `upstream-st.md` in the SillyTavern root. Read off `public/scripts/world-info.js` and
 `public/script.js`; identifiers are the contract.
@@ -176,17 +176,18 @@ is charged to later passes and pushed into the recurse buffer despite never bein
   `preventRecursion`; their content is pushed into the recurse buffer for the next pass.
 - Min activations — fewer than `world_info_min_activations` total activated, and depth has not passed
   `world_info_min_activations_depth_max` or the chat length. Advances `#skew` by one.
-- Delayed recursion levels — when nothing else continues the scan but `delayUntilRecursion` levels
-  remain, the next level opens and forces one more recursion pass.
+- Delayed recursion levels — when nothing else continues the scan but `delayUntilRecursion` levels remain, the next level opens and forces one more recursion pass. The lowest level is current from the start and is never what remains, so a book with one level gets no forced pass: its delayed entries wait on ordinary recursion. The levels are read off every entry, disabled ones included, and the branch is not guarded on `world_info_recursive`, so with two levels a scan with recursion off still runs forced passes. Every delayed entry the chat names activates in them, and they scan the recurse buffer, which `addRecurse` fills regardless of the setting, so any entry can be triggered by another's content (`upstream-st.md` #19). WA ends that pass on a scan it owns, and the harness runs none.
 - Budget overflow blocks the first two, not the third: recursion and min activations are guarded on
   `!token_budget_overflowed`, the delayed-recursion branch is not, so an overflowed scan still runs a
   pass per remaining level in which only `ignoreBudget` entries can activate.
 
 `WORLDINFO_SCAN_DONE` fires at the end of every pass, and core reads back `state.next`,
 `activated.text`, `recursionDelay.currentLevel` and both budget fields from the event args, so a
-listener can extend, redirect or halt the scan. That is the hook WA's stage 3 runs on.
+listener can extend, redirect or halt the scan. That is the hook WA's scoring runs on.
 
-## Assembly: six sinks, not one list
+The step cap is tested at the head of the loop, before `count++`, and leaves by `break`. So on a capped scan the last `WORLDINFO_SCAN_DONE` carries a truthy `state.next` and a `state.loopCount` equal to `world_info_max_recursion_steps`, and nothing fires after it: `next` alone cannot tell a listener which pass was last. WA's `isLastLoop` reads the cap against `loopCount` to find it, which holds only while core tests the cap at the loop head.
+
+## Assembly: seven sinks, not one list
 
 The tail of `checkWorldInfo` walks the survivors once and drops each into a sink by `position`; the
 activated entries never exist as one ordered sequence of prompt text.

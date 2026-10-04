@@ -3,6 +3,7 @@
 
 import { MINOR, MODERATE, SEVERE } from './keyword-audit.mjs';
 import { wiTitleOf } from './sort.mjs';
+import { isConstant } from './layout.mjs';
 
 /** Whether `e` matches the free-text query under `scope`; a scope with nothing ticked admits everything. */
 export const matchSearch = (e, query, scope) => {
@@ -18,18 +19,16 @@ export const matchSearch = (e, query, scope) => {
 /** One facet of the type filter. `scan` is buildKeyPruneScan's; without it the audit facets admit nothing. */
 export const facetMatch = (e, f, scan) => {
     switch (f) {
-        case 'keyword': return !e.constant && !e.vectorized;
-        case 'constant': return !!e.constant;
+        case 'keyword': return !isConstant(e) && !e.vectorized;
+        case 'constant': return isConstant(e);
         case 'vector': return !!e.vectorized;
         case 'enabled': return !e.disable;
         case 'disabled': return !!e.disable;
         case 'flagged': return !!scan && (scan.classifyEntry(e).length > 0 || scan.unusableKeysOf(e).length > 0);
-        // Severity is per key, so this is "holds at least one" — the same reading as `flagged`. An unusable
-        // secondary counts severe here as it does on the badge: the entry gates on fewer keys than written.
+        // Severity is per key, so this is "holds at least one" — the same reading as `flagged` — over both lists: a refused
+        // secondary counts severe here as it does on the badge, and a dead one is neutral, as a dead primary is.
         case SEVERE: case MODERATE: case MINOR:
-            if (!scan) return false;
-            if (f === SEVERE && scan.unusableKeysOf(e).length) return true;
-            return scan.classifyEntry(e).some(p => scan.severityOf(p) === f);
+            return !!scan && [...scan.classifyEntry(e), ...scan.unusableKeysOf(e)].some(p => scan.severityOf(p) === f);
         default: return true;
     }
 };

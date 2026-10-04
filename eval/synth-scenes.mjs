@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor } from './lib/scene.mjs';
+import { haystackFor, loadScene, makeCandidateSet, makeLayoutOrder, sceneParams, indexPath, embed, stInstall, wiTitle, bookFingerprint, whyFor, boundaryOverride } from './lib/scene.mjs';
 import { ensureIndex } from './lib/reindex.mjs';
 import { arg } from './lib/metrics.mjs';
 
@@ -18,6 +18,7 @@ import { offlineTokenCounter } from './lib/tokens.mjs';
 import * as query from '../extension/query.mjs';
 import * as entity from '../extension/entity.mjs';
 import * as matcher from '../extension/matcher.mjs';
+import { isConstant } from '../extension/layout.mjs';
 import { bundleSamples, openBundle, stRelative } from '../extension/grading.mjs';
 import { gitVersion } from './lib/gitversion.mjs';
 
@@ -173,7 +174,8 @@ let picks;
 if (arg(argv, '--msgs') === 'same') {
     if (!src) { console.error('--msgs same needs --from'); process.exit(2); }
     // The donor's own fields, never its filename; sceneEnd is where the scene ends, generatedFrom.msg what wrote it.
-    const same = src.sceneEnd ?? src.generatedFrom?.msg;
+    // `records` is the jsonl with its header at 0, so a message index is one below its record.
+    const same = Number.isFinite(Number(src.sceneEnd)) ? Number(src.sceneEnd) + 1 : src.generatedFrom?.msg;
     if (!Number.isFinite(Number(same))) { console.error(`${basename(FROM)} records no scene end to reuse`); process.exit(2); }
     picks = [Number(same)];
 } else if (arg(argv, '--msgs')) {
@@ -239,8 +241,8 @@ for (const idx of picks) {
     });
     const queryText = query.buildQuery(visible, { depth: DEPTH });   // not `query`: that shadows the module namespace this line reads
     const queryChat = query.queryMessages(visible, { depth: DEPTH });
-    const sceneStart = srcIndex[queryChat[0].i];
-    const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i];
+    const sceneStart = srcIndex[queryChat[0].i] - 1;
+    const sceneEnd = srcIndex[queryChat[queryChat.length - 1].i] - 1;
     // The donor's knobs, minus `depth` — that is the scene's span, and this derivation sets its own.
     const { depth: _d, ...base } = { ...(src?.params ?? {}) };
     // The messages, not a window: what /wa-grade freezes (runState.lastScanChat).
@@ -256,7 +258,7 @@ for (const idx of picks) {
             query: queryText, queryChat, scanChat, depth: DEPTH, params: capture,
             paramSnapshot: src?.paramSnapshot, index: built.path,
         };
-        const P = sceneParams(S);
+        const P = sceneParams(S, boundaryOverride());
         // Per arm, not once: the gazetteer is baked at load time and an arm moves it.
         const scene = loadScene(S, { indexFile: indexPath(S, { model: MODEL }), indexOpts: { model: MODEL }, params: P });
         const haystack = haystackFor(S, P);
@@ -272,7 +274,7 @@ for (const idx of picks) {
             const row = {
                 title: wiTitle(e),
                 // Derived, not observed: sticky is 'sticky' only once an earlier turn armed it, and nothing offline does.
-                block: e.constant ? 'constant' : 'dynamic',
+                block: isConstant(e) ? 'constant' : 'dynamic',
                 sticky: e.sticky || 0,
                 tokens: tokens.count(e.content ?? ''),
                 score: r5(r.fused), uid: Number(e.uid),

@@ -1,9 +1,16 @@
-// delivery.mjs — stage 5: what fits, and in what order the budget walks. Pure; every setting is injected.
-import { hasDecorator } from './matcher.mjs';
+// delivery.mjs — what fits, and in what order the budget walks. Pure; every setting is injected.
+import { isConstant } from './layout.mjs';
 
 /** The budget's walk order: constants, armed stickies, promoted, then the dynamic block — durable first is what makes every cap in applyBudget a prefix cut. */
 export function walkOrder({ sticky = [], constant = [], promoted = [], results = [] }) {
     return [...constant, ...sticky, ...promoted, ...results];
+}
+
+/** applyBudget's two populations over layoutOrder's blocks: dynamic is `results`, and the caps add `promoted`. */
+export function budgetRoles({ promoted = [], results = [] }) {
+    const dynamic = new Set(results);
+    const capped = new Set([...results, ...promoted]);
+    return { isDynamic: item => dynamic.has(item), isCapped: item => capped.has(item) };
 }
 
 /** What ships when WA owns activation and the ranking failed: constants, `@@activate` and armed stickies — the rows that never
@@ -11,7 +18,7 @@ export function walkOrder({ sticky = [], constant = [], promoted = [], results =
 export function dropUndecided(activated, isStickyArmed = () => false) {
     let kept = 0;
     for (const [key, entry] of [...activated]) {
-        if (entry && (entry.constant || hasDecorator(entry, '@@activate') || isStickyArmed(entry))) kept++;
+        if (entry && (isConstant(entry) || isStickyArmed(entry))) kept++;
         else activated.delete(key);
     }
     return kept;

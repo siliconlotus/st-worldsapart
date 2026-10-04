@@ -3,7 +3,7 @@
 //   node .../param-screen.mjs <sample.json> [sample2.json ...] [--arms K1=3,filter=off] [--k 10] [--list]
 // Pool first (/wa-super-grade): an arm that surfaces unjudged entries scores them 0 and looks worse than it is.
 import { readFileSync } from 'node:fs';
-import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels } from './lib/scene.mjs';
+import { indexPath, loadScene, openSample, sceneParams, scoreScene, embed, sceneLabel, lineagesOf, fittedModels, boundaryOverride } from './lib/scene.mjs';
 import { modelKey } from '../extension/relevance.mjs';
 import { jaccard, signTest, spearman, gradeValue, arg } from './lib/metrics.mjs';
 import { isDurable, rowKey } from '../extension/grading.mjs';
@@ -99,7 +99,7 @@ if (CUTOFF === null && picked.some(a => 'relevanceFit' in ARMS[a])) {
     console.error('a fit= arm needs --cutoff: without it each fit cuts at its own provenance cutoff and the contrast is confounded');
     process.exit(2);
 }
-/** The globals that ride on the baseline and on every arm, so both are scored under one stage-4 condition. */
+/** The globals that ride on the baseline and on every arm, so both are scored under one selection condition. */
 const GLOBAL = { ...(BUDGET ? { budgetTokens: BUDGET } : {}), ...(CUTOFF !== null ? { memoryCutoff: CUTOFF } : {}) };
 // fAtCut is F-beta(2) over the set the relevance cut admits; the others are diagnostics on the ordering at a fixed window.
 const METRIC = arg(argv, '--metric') ?? 'fAtCut';
@@ -143,10 +143,10 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
         }
         if (!Object.keys(S.books?.[S.primaryBook] ?? {}).length) { console.error(`${path}: embeds no entries for primary book "${S.primaryBook ?? '?'}" — re-grade with books=full|meta`); process.exit(2); }
         if (!S.candidates?.length) { console.error(`${path}: logs no candidates`); process.exit(2); }
-        const P = sceneParams(S, GLOBAL);
+        const P = sceneParams(S, { ...boundaryOverride(), ...GLOBAL });
         const scene = loadScene(S, { indexFile: indexPath(S, { model: EM.label, all: P.denseAllEntries }), indexOpts: { model: EM.label }, params: P });
         const qv = await embed(EM.query + S.query, { ollama: OLLAMA, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url });
-        const base = await scoreScene({ sample: S, overrides: GLOBAL, k: K, scene, qv });
+        const base = await scoreScene({ sample: S, overrides: { ...boundaryOverride(), ...GLOBAL }, k: K, scene, qv });
         scenes.push({ path, name: sceneLabel(S) || path, S, scene, qv, P, base });
         console.log(`scene "${sceneLabel(S) || path}": baseline ${METRIC}@${K} ${mOf(base).toFixed(4)} (nDCG ${base.n.toFixed(4)}, P ${base.precision.toFixed(3)}, R ${base.recall.toFixed(3)}, rel ${base.relevant}), judged ${base.judged}/${base.of}${base.judged < base.of ? ' !!' : ''}`);
         console.log(`    F@R ${base.atR.f.toFixed(4)} (P ${base.atR.precision.toFixed(3)} R ${base.atR.recall.toFixed(3)}, n ${base.atR.n})`);
@@ -180,7 +180,8 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
 
     console.log('\nsignal quality — Spearman against the human grade (absent signal counts as 0)');
     for (const sc of scenes) {
-        const gm = new Map((sc.S.entries ?? []).filter(x => x.uid !== undefined).map(x => [rowKey(x), gradeValue(x) || 0]));
+        // Finite only: a row with no verdict is ungraded, never a 0.
+        const gm = new Map((sc.S.entries ?? []).filter(x => x.uid !== undefined && Number.isFinite(gradeValue(x))).map(x => [rowKey(x), gradeValue(x)]));
         const rs = (sc.S.candidates ?? []).filter(c => !isDurable(c) && gm.has(rowKey(c)));
         if (rs.length < 5) { console.log(`  ${sc.name.slice(0, 34).padEnd(34)} only ${rs.length} judged candidate rows — skipped`); continue; }
         const gv = rs.map(r => gm.get(rowKey(r)));
@@ -200,7 +201,7 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
     const results = [];
     for (const armName of picked) {
         const { __chunk: chunkCfg, __reload: needsReload, __dense: denseAll, __archived: archived, ...armParams } = ARMS[armName];
-        // GLOBAL rides on every arm as well as the baseline, or the delta is the stage-4 difference.
+        // GLOBAL rides on every arm as well as the baseline, or the delta is the selection difference.
         const scoring = { ...armParams, ...GLOBAL };
         const cells = [];
         for (const sc of scenes) {
@@ -208,12 +209,12 @@ const fx = n => (n >= 0 ? '+' : '') + n.toFixed(4);
             if (chunkCfg || denseAll || archived) {
                 // all from the scene's params when the arm does not force it: a vectorized-only collection cannot be scored under denseAllEntries.
                 const built = await ensureIndex(sc.S, { overrides: chunkCfg ?? {}, all: !!denseAll || !!sc.P.denseAllEntries, archived: !!archived, model: EM.model, label: EM.label, endpoint: EM.endpoint, url: EM.endpoint === 'ollama' ? OLLAMA : EM.url, ollama: OLLAMA, log: () => {} });
-                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
+                r = await scoreScene({ sample: sc.S, overrides: { ...boundaryOverride(), ...scoring }, k: K, index: built.path, model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else if (needsReload) {
                 // The gazetteer is baked at load time, so the preloaded scene is stale here; all from the scene's own params, as above.
-                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, index: indexPath(sc.S, { model: EM.label, all: sc.P.denseAllEntries }), model: MODEL, ollama: OLLAMA, qv: sc.qv });
+                r = await scoreScene({ sample: sc.S, overrides: { ...boundaryOverride(), ...scoring }, k: K, index: indexPath(sc.S, { model: EM.label, all: sc.P.denseAllEntries }), model: MODEL, ollama: OLLAMA, qv: sc.qv });
             } else {
-                r = await scoreScene({ sample: sc.S, overrides: scoring, k: K, scene: sc.scene, qv: sc.qv });
+                r = await scoreScene({ sample: sc.S, overrides: { ...boundaryOverride(), ...scoring }, k: K, scene: sc.scene, qv: sc.qv });
             }
             // Read at the window the score is taken from, or a cell scored at the cut could deliver an ungraded row and print no ?.
             const win = WINDOWED[METRIC] ? { judged: r.atCut?.judged ?? 0, of: r.atCut?.n ?? 0 } : { judged: r.judged, of: r.of };
