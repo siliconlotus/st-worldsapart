@@ -908,5 +908,15 @@
  "➡️ Outlet": "➡️ Sortie",
  "🔗 Vector": "🔗 Vectorielle",
  "🔵 Constant": "🔵 Constante",
- "🟢 Keyword": "🟢 Mot-clé"
+ "🟢 Keyword": "🟢 Mot-clé",
+ "Downloaded language packs": "Packs de langue téléchargés",
+ "WorldsApart's vector collections, which are rebuilt when next needed": "Les collections vectorielles de WorldsApart, reconstruites dès qu’elles sont à nouveau nécessaires",
+ "Settings: cutoff, caps, language and display choices": "Réglages : seuil, plafonds, langue et choix d’affichage",
+ "Lorebook order and priorities for each character": "Ordre et priorités des lorebooks pour chaque personnage",
+ "Curation for each lorebook: ignored keys and saved views": "Curation de chaque lorebook : clés ignorées et vues enregistrées",
+ "The server plugin's loader, so the plugin stops loading at the next SillyTavern restart": "Le chargeur du plugin serveur : le plugin ne se chargera plus au prochain redémarrage de SillyTavern",
+ "What should WorldsApart remove?": "Que doit supprimer WorldsApart ?",
+ "Anything left unticked is kept.": "Tout ce qui n’est pas coché est conservé.",
+ "Remove": "Supprimer",
+ "WorldsApart could not remove everything you chose. See the browser console.": "WorldsApart n’a pas pu supprimer tout ce que vous avez choisi. Consultez la console du navigateur."
 }

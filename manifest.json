@@ -11,7 +11,8 @@
     "auto_update": true,
     "homePage": "https://github.com/siliconlotus/st-worldsapart",
     "hooks": {
-        "activate": "init"
+        "activate": "init",
+        "clean": "clean"
     },
     "i18n": {
         "fr-fr": "i18n/fr-fr.json"

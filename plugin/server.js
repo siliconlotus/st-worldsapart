@@ -511,6 +511,27 @@ export async function init(router) {
         }
     });
 
+    /** Removes the deployed loader, for an admin: the three files deploy-plugin.mjs writes, and the folder when nothing else is in it.
+     *  This process keeps running; the plugin is gone at the next start. Reply `{ removed: string[] }`. */
+    router.post('/uninstall', (request, response) => {
+        try {
+            if (!request.user?.profile?.admin) return response.status(403).send({ error: 'only an admin may remove the server plugin' });
+            const dir = path.join(ST_ROOT, 'plugins', info.id);
+            const removed = [];
+            for (const name of ['index.js', 'package.json', 'source.json']) {
+                const file = path.join(dir, name);
+                if (fs.existsSync(file)) { fs.rmSync(file); removed.push(name); }
+            }
+            // rmdir, never recursive: a node_modules or anything else there is not this plugin's to delete.
+            try { fs.rmdirSync(dir); } catch { /* not empty, or already gone */ }
+            console.log(`[WorldsApart] loader removed from ${dir} (${removed.join(', ') || 'nothing there'}); the plugin stops loading at the next start`);
+            return response.send({ removed });
+        } catch (error) {
+            console.error('[WorldsApart] uninstall failed:', error);
+            return response.status(500).send({ error: String(error?.message ?? error) });
+        }
+    });
+
     router.post('/ping', (request, response) => {
         // Whether an install for all users sits under the caller's folder name, whose files ST serves over a per-user copy of that name.
         const dir = sanitize(String(request.body?.dir ?? ''));

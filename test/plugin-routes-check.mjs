@@ -106,6 +106,13 @@ try {
     eq(`${slow.code} ${slow.body?.slow} ${slow.body?.key}`, '422 true /(a+)+$/', 'a regex key that backtracks is stopped, and the reply names it among the others');
     eq(Date.now() - started < 3000, true, '...at the limit, not when the regex would have finished');
     eq((await scanOf(['plain'])).body?.counts?.plain, 1, 'and the next scan runs normally');
+
+    // Last: it removes the loader this check loaded the plugin through.
+    const as = admin => { const out = { code: 200, body: undefined }; const response = { send: v => (out.body = v), status: c => ((out.code = c), response) }; routes.get('/uninstall')({ user: { profile: { admin } }, body: {} }, response); return out; };
+    fs.mkdirSync(path.join(box.dir, 'node_modules'), { recursive: true });
+    eq(`${as(false).code} ${fs.existsSync(path.join(box.dir, 'index.js'))}`, '403 true', 'uninstall refuses a caller who is not an admin, and removes nothing');
+    eq(as(true).body?.removed?.join(','), 'index.js,package.json,source.json', 'for an admin it removes the three files the deploy wrote');
+    eq(`${fs.existsSync(path.join(box.dir, 'index.js'))} ${fs.existsSync(path.join(box.dir, 'node_modules'))}`, 'false true', '...and leaves a folder that still holds something else');
 } finally {
     embedder.close();
     box.cleanup();

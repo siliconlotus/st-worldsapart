@@ -54,6 +54,19 @@ const INTERNAL_KEYS = [
 /** ST's `extension_settings`, bound by ensureSettings; never import it here (CLAUDE.md, *Pure vs ST-coupled*). */
 let store = null;
 
+/** The settings a user builds up rather than chooses: each character's lorebook order and priorities, and each book's curation. */
+export const PRIORITY_KEYS = ['worldPriorityByChar'];
+export const CURATION_KEYS = ['keywordIgnore', 'studioSortByBook'];
+
+/** What is left of stored settings `s` after a clean, or null when nothing is: `settings` removes every choice that is neither
+ *  priority nor curation, and those two go only when asked for by name. */
+export function cleanedSettings(s, { settings: dropSettings = false, priority = false, curation = false } = {}) {
+    const gone = new Set([...(priority ? PRIORITY_KEYS : []), ...(curation ? CURATION_KEYS : [])]);
+    const built = new Set([...PRIORITY_KEYS, ...CURATION_KEYS]);
+    const kept = Object.fromEntries(Object.entries(s ?? {}).filter(([k]) => !gone.has(k) && !(dropSettings && !built.has(k))));
+    return Object.keys(kept).length ? kept : null;
+}
+
 /** The live WA settings object; throws if read before ensureSettings. */
 export function settings() {
     if (!store) throw new Error('WorldsApart: settings() read before ensureSettings() bound ST\'s store');

@@ -37,14 +37,15 @@ import { getTokenCountAsync, getTokenizerModel } from '../../../tokenizers.js';
 import { textgen_types, textgenerationwebui_settings } from '../../../textgen-settings.js';
 import { oai_settings } from '../../../openai.js';
 
-import { runState, defaultSettings, settings, ensureSettings } from './extension/state.mjs';
+import { runState, defaultSettings, settings, ensureSettings, cleanedSettings } from './extension/state.mjs';
 import { ensureStudioStyle, makeSortControl, makeTierEditor, pluginFallback, showEntryText, wiGlyph, wiTooltip } from './st/ui-widgets.mjs';
 import { PRESENTATION_ALIAS, normPresentation, presentationBaseLabel, reconcileTiers, wiTitleOf } from './extension/sort.mjs';
 import { lorebookStudio } from './st/studio.mjs';
 import { setCaptureHost, versusCore, gradeScene, superGradeScene, superEvalScene, waVersion, extensionIdentity, POOL_ARMS } from './st/capture-ui.mjs';
 import { isDurable } from './extension/grading.mjs';
 import { setLanguage, refreshIndex, table } from './extension/lang.mjs';
-import { packStore, fetchIndex, fetchPack } from './st/lang-store.mjs';
+import { packStore, fetchIndex, fetchPack, removePack } from './st/lang-store.mjs';
+import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
@@ -2465,6 +2466,52 @@ function renderDeliveryPanel(layout) {
         deliveryPanel.append(foot);
     }
     deliveryPanel.append(...warnRow(), lab);
+}
+
+/** ST's `clean` hook (1.19 on): asks which of WA's data to remove, and removes that. ST saves settings and reloads once it returns,
+ *  so a settings block left behind is rebuilt from defaults where WA stays installed. */
+export async function clean() {
+    const inputs = [
+        { id: 'wa_clean_packs', label: t`Downloaded language packs`, defaultState: true },
+        { id: 'wa_clean_vectors', label: t`WorldsApart's vector collections, which are rebuilt when next needed`, defaultState: true },
+        { id: 'wa_clean_settings', label: t`Settings: cutoff, caps, language and display choices`, defaultState: false },
+        { id: 'wa_clean_priority', label: t`Lorebook order and priorities for each character`, defaultState: false },
+        { id: 'wa_clean_curation', label: t`Curation for each lorebook: ignored keys and saved views`, defaultState: false },
+        // The loader is the server's, and only an admin's to remove.
+        ...(isAdmin() && await hasPlugin() ? [{ id: 'wa_clean_plugin', label: t`The server plugin's loader, so the plugin stops loading at the next SillyTavern restart`, defaultState: false }] : []),
+    ];
+    const popup = new Popup(`<h3>${escapeHtml(t`What should WorldsApart remove?`)}</h3><div>${escapeHtml(t`Anything left unticked is kept.`)}</div>`,
+        POPUP_TYPE.CONFIRM, '', { okButton: t`Remove`, cancelButton: t`Cancel`, customInputs: inputs });
+    if (await popup.show() !== POPUP_RESULT.AFFIRMATIVE) return;
+    const picked = id => Boolean(popup.inputResults?.get(id));
+
+    let failed = false;
+    const attempt = async (what, fn) => { try { await fn(); } catch (error) { failed = true; console.error(`WorldsApart: clean could not remove ${what}`, error); } };
+    const post = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify(body) }); if (!r.ok) throw new Error(`${r.status} ${url}`); return r; };
+
+    if (picked('wa_clean_packs')) {
+        await attempt('language packs', async () => {
+            // The index names what could have been stored; unreachable, the selected language is the one known.
+            const langs = new Set([...Object.keys(await fetchIndex().catch(() => ({}))), settings().language].filter(l => l && l !== 'en'));
+            for (const lang of langs) await removePack(lang);
+        });
+    }
+    if (picked('wa_clean_vectors')) {
+        await attempt('vector collections', async () => {
+            // With the plugin, every WA collection on disk; without, the ones today's lorebooks hash to.
+            const found = await findOrphanCollections();
+            const ids = found ? [...found.unclaimed, ...found.staleConfig, ...found.live].map(c => c.collectionId) : (world_names ?? []).map(n => `wa_${getStringHash(n)}`);
+            for (const collectionId of new Set(ids)) await post('/api/vector/purge', { collectionId });
+        });
+    }
+    // Before the settings go: the route is the plugin's, and still there until the restart.
+    if (picked('wa_clean_plugin')) await attempt('the server plugin loader', () => post('/api/plugins/worlds-apart/uninstall', {}));
+    const drop = { settings: picked('wa_clean_settings'), priority: picked('wa_clean_priority'), curation: picked('wa_clean_curation') };
+    if (drop.settings || drop.priority || drop.curation) {
+        const kept = cleanedSettings(extension_settings.worldsApart, drop);
+        if (kept) extension_settings.worldsApart = kept; else delete extension_settings.worldsApart;
+    }
+    if (failed) toastr.warning(t`WorldsApart could not remove everything you chose. See the browser console.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
 }
 
 let initialized = false;
