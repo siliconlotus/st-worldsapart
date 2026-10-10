@@ -6,7 +6,7 @@
     "generate_interceptor": "worldsApart_intercept",
     "js": "worldsapart.js",
     "author": "siliconlotus",
-    "version": "1.0.1+build.1",
+    "version": "1.0.2",
     "minimum_client_version": "1.17.0",
     "auto_update": true,
     "homePage": "https://github.com/siliconlotus/st-worldsapart",
