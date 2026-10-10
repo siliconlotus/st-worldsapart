@@ -134,6 +134,8 @@ function updateEmbedInfo() {
 const QUERY_TIMEOUT_MS = 10_000;
 /** The bound on a fetch that embeds, query or bulk: a hang detector, since a cold model can take minutes and Stop ends the wait. */
 const EMBED_TIMEOUT_MS = 300_000;
+/** How long an embed may take before a toast says what it is waiting on: above the stock embedder's own query time (E10), so a routine wait says nothing. */
+const SLOW_EMBED_MS = 10_000;
 
 /** A fetch signal ending at `ms` or at `stop` (the generation's Stop), whichever is first. */
 const until = (ms, stop) => (stop ? AbortSignal.any([AbortSignal.timeout(ms), stop]) : AbortSignal.timeout(ms));
@@ -346,7 +348,7 @@ async function queryCollections(args, stop = null) {
     let slowToast = null;
     const slow = setTimeout(() => {
         slowToast = toastr.info(t`Waiting for ${target} to embed the query. Press Stop to give up.`, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
-    }, 3000);
+    }, SLOW_EMBED_MS);
     try {
         // The ceiling is chosen per path here, since the no-plugin path can fire mid-request. Gated on the plugin's
         // presence, not on `meanCentered`, which is a plugin parameter.
@@ -457,7 +459,7 @@ async function syncWorld(world, entries, stop = null) {
         const slow = setTimeout(() => {
             announced = true;
             toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'WorldsApart', { timeOut: 15000 });
-        }, 3000);
+        }, SLOW_EMBED_MS);
         const started = Date.now();
         try {
             await vectorPost('insert', { collectionId, items: newItems }, EMBED_TIMEOUT_MS, stop);
