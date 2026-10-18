@@ -90,6 +90,15 @@ does not carry "rare in one corpus" as a reason.
  messages of six-plus paragraphs (one author's chats — a default, not a finding about everyone).
  — `extension/state.mjs defaultSettings`.
 
+- **R29** — jina's cosine floor is ~0.3, not 0: ten short texts with nothing in common (a recipe, a tax
+ clause, a JavaScript function, a weather forecast, a chess line, an astronomy note, furniture assembly
+ steps, a football report, a string of digits, lorem ipsum), each embedded whole by ST's own
+ transformers.js jina-embeddings-v2-base-en, 45 pairs: min 0.028, p10 0.143, median 0.311, p90 0.432,
+ max 0.552 (assembly steps × lorem ipsum). The space is anisotropic, so a raw-cosine threshold near
+ ST's Vector Storage default (0.25) sits at the floor for unrelated text; measured 2026-10-18.
+ — `eval/lib/reindex.mjs embedTexts`; `plugin/server.js` (why the plugin centres);
+ `docs/matching-architecture.md By similarity`.
+
 ## E — Embedding models
 
 - **E1** — No-plugin fit (text, properNouns, density — no embedding touched): held-out AUC 0.7979.
