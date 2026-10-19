@@ -58,7 +58,7 @@ An unparseable or out-of-range argument is refused, never clamped. A decorator o
 
 **The key pair.** `selectiveLogic` holds one value, so `@@additional_keys` keeps the core-native mapping and the exclusions ride on `waExcludeKeys`, which `selectiveEval` ANDs onto the gate as one NOT per key. Core ignores the field and gates on the additional keys alone. The entry's own keys are never rewritten. Both decorators are read as gates whatever the entry's `use_regex`, a field ST does not preserve on import; CCv3's alternative-trigger reading under it is not implemented.
 
-**The activation gates** are `activationAdds` checks rather than core fields. `@@activate_only_after` and `@@activate_only_every` count assistant messages (not `is_user`, not `is_system`); `@@is_greeting` reads `chat[0].swipe_id`, 0 when the card has no alternates; `@@is_user_icon` compares the active persona name. A gate whose input is missing does not rule. The gate and the scan window are independent, so an entry can become eligible after its trigger has left the window.
+**The activation gates** are `gateVerdict` checks rather than core fields: an entry a gate rules out is set `disable` on load, the one check core makes above constants, `@@activate` and forced activations, so it is out of every route. `@@activate_only_after` and `@@activate_only_every` count assistant messages (not `is_user`, not `is_system`); `@@is_greeting` reads `chat[0].swipe_id`, 0 when the card has no alternates; `@@is_user_icon` compares the active persona name. A gate whose input is missing does not rule. The gate and the scan window are independent, so an entry can become eligible after its trigger has left the window.
 
 **The latches.** WA owns the record rather than desugaring to core's `sticky`/`cooldown`, which core deletes whenever the entry's own field is absent.
 
@@ -66,7 +66,7 @@ An unparseable or out-of-range argument is refused, never clamped. A decorator o
 - **The clock** is core's scan clock (`scanLength`), the one its delay and timed effects read: hidden messages out and a swiped reply popped. A swipe or regenerate of the firing turn therefore reads the record as not yet fired.
 - **Written** at scan-done, for activated entries carrying either decorator; never on a dry run or a quiet generation.
 - **Read** through `firedUpTo`, which drops anything past the current length, so a rewind un-latches.
-- **Effect.** A fired `@@dont_activate_after_match` entry is set `disable` on load, the one check core makes above constants, `@@activate` and forced activations, so it is out of every route. A fired `@@keep_activate_after_match` entry is admitted with no keyword hit and is durable, laid out with constants and armed stickies rather than scored and cut. Both present latches ON.
+- **Effect.** A fired `@@dont_activate_after_match` entry is ruled out like a failed gate, out of every route. A fired `@@keep_activate_after_match` entry is admitted with no keyword hit and is durable, laid out with constants and armed stickies rather than scored and cut. Both present latches ON.
 - **Duration.** Both take an optional `N`, holding while `chatLength <= firedAt + N`, measured from the first firing only; bare holds forever.
 - **Following the entry.** A record follows its entry through the Studio's renames, renumbers, moves and deletes, in every chat on disk (`rekeyLatches`; `st/studio.mjs` `rekeyChatLatches`). Edits in ST's own editor are not followed.
 

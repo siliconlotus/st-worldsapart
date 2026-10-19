@@ -1,7 +1,7 @@
 // WA's own decorator semantics: the desugar table, the conflict rules, and the refusals.
 // An assertion citing ST core as the authority goes in core-matcher-check.mjs instead.
 import { createScanScope } from '../extension/smartkeys.mjs';
-import { decoratorFields, activationAdds, keywordScore, latchKey, latchBook, rekeyLatches, firedUpTo, latchActive, latchSuppressed, latchedOut, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
+import { decoratorFields, activationAdds, gateVerdict, keywordScore, latchKey, latchBook, rekeyLatches, firedUpTo, latchActive, latchSuppressed, latchedOut, hasLatch, GATE_INPUTS, unmodelledGates, DEFAULT_WI_DEPTH, WI_POSITION, WI_ROLE, WI_LOGIC } from '../extension/matcher.mjs';
 import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 /** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
@@ -289,14 +289,24 @@ eq(latchSuppressed(dontE(1, ' 5'), REC1, 16), false, '...and lets it back in pas
 eq(latchSuppressed(dontE(1, ' 0'), REC1, 11), false, 'a duration of 0 is over the next turn');
 eq(latchSuppressed(keepE(1), REC1, 10), false, 'the other latch is not this one');
 
-// latchedOut is what the ST half sets `disable` on, so a constant or an `@@activate` entry, which core activates above every
-// WA gate, is held out too. Core checks `disable` first.
+// A 'skip' from gateVerdict is what the ST half sets `disable` on, so a constant or an `@@activate` entry, which core activates
+// above every WA gate, is held out too. Core checks `disable` first.
 const constDont = { ...dontE(1), constant: true };
 eq(latchedOut(constDont, REC1, 11), true, 'a fired constant is held out');
 eq(latchedOut({ ...dontE(1), content: '@@activate\n@@dont_activate_after_match\nx' }, REC1, 11), true, '...and so is a fired @@activate entry');
 eq(latchedOut(constDont, {}, 11), false, 'a constant that has not fired yet is not');
 eq(latchedOut({ ...constDont, content: '@@dont_activate_after_match\n@@keep_activate_after_match\nx' }, REC1, 11), false,
     'both latches present: keep wins, so nothing is held out');
+eq(gateVerdict(constDont, { fired: REC1, chatLength: 11 }), 'skip', 'gateVerdict rules the fired constant out');
+
+const constGate = line => ({ uid: 9, world: 'W', key: [], constant: true, content: `${line}\nx` });
+eq(gateVerdict(constGate('@@activate_only_after 3'), { assistantCount: 2 }), 'skip', 'a constant before its @@activate_only_after is ruled out');
+eq(gateVerdict(constGate('@@activate_only_after 3'), { assistantCount: 3 }), null, '...and is left alone once it arrives');
+eq(gateVerdict(constGate('@@activate_only_every 2'), { assistantCount: 3 }), 'skip', 'a constant off its @@activate_only_every turn is ruled out');
+eq(gateVerdict(constGate('@@is_greeting 1'), { greetingIndex: 0 }), 'skip', 'a constant on another greeting is ruled out');
+eq(gateVerdict(constGate('@@is_user_icon Ann'), { personaName: 'Bob' }), 'skip', 'a constant for another persona is ruled out');
+eq(gateVerdict({ ...constGate('@@activate_only_after 3'), content: '@@activate\n@@activate_only_after 3\nx', constant: false }, { assistantCount: 2 }), 'skip',
+    '...and so is an @@activate entry');
 
 // A latch record follows its entry: a delete drops the keys and hands them back for the undo, a rename or a new uid moves them.
 const dropBooks = names => k => (names.includes(latchBook(k)) ? null : undefined);
