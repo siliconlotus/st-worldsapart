@@ -1,6 +1,6 @@
 // Activation verdicts (matcher.mjs activationAdds): candidacy, depth resolution, scanDepth 0, segmentation, the recursion rematch window.
 import { createScanScope } from '../extension/smartkeys.mjs';
-import { activationAdds, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
+import { activationAdds, adoptCoreHashes, makeWindowFor, scanSegments, withExtraTexts } from '../extension/matcher.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 /** No macros and the strict boundary: the context these checks match in unless one says otherwise. */
@@ -139,4 +139,17 @@ const addedUids = (entries, text, o = {}) =>
     eq(addedUids([{ uid: 24, key: ['cosmonaut'], delay: 5, content: 'x' }], 'cosmonaut'), '24',
         'no chatLength in opts at all leaves the gate off, as before');
     console.log('ok   delay is honoured, matching core\'s own gate');
+}
+
+// --- Core keys sticky and cooldown windows on the activated copy's hash, and finds the entry next scan by the hash it
+// computes itself. WA's copies are hashed before the takeover blanks keys, so without adoption no window is ever found.
+{
+    const waCopy = { world: 'B', uid: 11, cooldown: 2, hash: 111 };
+    const unscanned = { world: 'B', uid: 12, hash: 222 };
+    const activated = new Map([['B.11', waCopy], ['B.12', unscanned]]);
+    adoptCoreHashes(activated, [{ world: 'B', uid: 11, hash: 999 }, { world: 'A', uid: 12, hash: 333 }]);
+    eq(waCopy.hash, 999, 'a force-activated copy takes the hash core gave the same world.uid this scan');
+    eq(unscanned.hash, 222, 'a uid matched only in another book keeps its own hash');
+    adoptCoreHashes(undefined, undefined);
+    console.log('ok   activated copies carry core\'s hash');
 }
