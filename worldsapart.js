@@ -1082,6 +1082,9 @@ function onEntriesLoaded(loaded) {
             if (patch.waReverseDepth !== undefined) delete patch.depth;
             Object.assign(entry, patch);
         }
+        // `disable`, the one check core makes above constants, `@@activate` and forced activations alike.
+        const fired = firedLatches();
+        for (const entry of entries) if (entry && matcher.latchedOut(entry, fired, chatLength)) entry.disable = true;
     }
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.

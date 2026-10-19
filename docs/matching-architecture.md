@@ -66,7 +66,7 @@ An unparseable or out-of-range argument is refused, never clamped. A decorator o
 - **The clock** is core's scan clock (`scanLength`), the one its delay and timed effects read: hidden messages out and a swiped reply popped. A swipe or regenerate of the firing turn therefore reads the record as not yet fired.
 - **Written** at scan-done, for activated entries carrying either decorator; never on a dry run or a quiet generation.
 - **Read** through `firedUpTo`, which drops anything past the current length, so a rewind un-latches.
-- **Effect.** A fired `@@dont_activate_after_match` entry is skipped. A fired `@@keep_activate_after_match` entry is admitted with no keyword hit and is durable, laid out with constants and armed stickies rather than scored and cut. Both present latches ON.
+- **Effect.** A fired `@@dont_activate_after_match` entry is set `disable` on load, the one check core makes above constants, `@@activate` and forced activations, so it is out of every route. A fired `@@keep_activate_after_match` entry is admitted with no keyword hit and is durable, laid out with constants and armed stickies rather than scored and cut. Both present latches ON.
 - **Duration.** Both take an optional `N`, holding while `chatLength <= firedAt + N`, measured from the first firing only; bare holds forever.
 - **Following the entry.** A record follows its entry through the Studio's renames, renumbers, moves and deletes, in every chat on disk (`rekeyLatches`; `st/studio.mjs` `rekeyChatLatches`). Edits in ST's own editor are not followed.
 
