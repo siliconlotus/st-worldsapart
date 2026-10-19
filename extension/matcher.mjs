@@ -1133,6 +1133,17 @@ export function activationAdds(entries, windowFor, opts = {}) {
     return out;
 }
 
+/** Stamps each activated entry with the hash core gave it this scan, which core's sticky and cooldown windows are keyed on.
+ *  @param {Map<string, object>} activated Core's activated map, holding WA's force-activated copies
+ *  @param {object[]} sortedEntries Core's hashed entries for the scan */
+export function adoptCoreHashes(activated, sortedEntries) {
+    const hashOf = new Map((sortedEntries ?? []).map(e => [`${e.world}.${e.uid}`, e.hash]));
+    for (const entry of activated?.values?.() ?? []) {
+        const hash = hashOf.get(`${entry.world}.${entry.uid}`);
+        if (hash !== undefined) entry.hash = hash;
+    }
+}
+
 /** `position` values; must match core's `world_info_position` (world-info.js). */
 export const WI_POSITION = { before: 0, after: 1, ANTop: 2, ANBottom: 3, atDepth: 4, EMTop: 5, EMBottom: 6, outlet: 7 };
 

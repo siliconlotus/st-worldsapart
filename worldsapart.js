@@ -2692,6 +2692,8 @@ async function initBody() {
     refreshAttached();
     // Before onScanDone, which may read `depth`; onScanDone returns early on paths that still build a prompt.
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, applyReverseDepth);
+    // Core writes sticky and cooldown under the activated copy's hash; WA's copies carry the pre-takeover one, which no later scan finds.
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, args => matcher.adoptCoreHashes(args?.activated?.entries, args?.sortedEntries));
     eventSource.on(event_types.WORLDINFO_SCAN_DONE, onScanDone);
     // After onScanDone, so the feed sees the flag while the scan is live. Cleared on the final loop, not only at
     // GENERATION_ENDED, so a between-scans getSortedEntries escapes the blanking.
