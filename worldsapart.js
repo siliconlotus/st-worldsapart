@@ -23,7 +23,7 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { getStringHash, escapeHtml, getCharaFilename } from '../../../utils.js';
-import { LOADER_VERSION, pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
+import { LOADER_VERSION, pluginFingerprint, PLUGIN_FILES, readPing } from './plugin/fingerprint.mjs';
 import { admitCeiling } from './plugin/scoring.mjs';
 import * as query from './extension/query.mjs';
 import * as entity from './extension/entity.mjs';
@@ -170,7 +170,7 @@ async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS, stop = null
             throw Object.assign(new Error(`WorldsApart: /api/vector/${route} failed with 500 (${target})`),
                 { explanation: [t`SillyTavern could not get embeddings from ${target}.`, t`Check SillyTavern server logs for more info.`] });
         }
-        throw new Error(`WorldsApart: /api/vector/${route} failed with ${response.status}`);
+        throw Object.assign(new Error(`WorldsApart: /api/vector/${route} failed with ${response.status}`), { status: response.status });
     }
 
     return response.status === 200 && response.headers.get('content-type')?.includes('json')
@@ -182,26 +182,32 @@ async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS, stop = null
 /** The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not. */
 const EXT_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/+$/, '').split('/').pop();
 
+/** A host that cannot load a server plugin at all: TauriTavern, whose backend is not ST's Node server. */
+const noServerPlugins = () => Boolean(globalThis.__TAURITAVERN__);
+
 /** Whether the WA server plugin is loaded, checked once; absent is the stock install, not an error. */
 async function hasPlugin() {
     if (runState.pluginAvailable !== null) {
         return runState.pluginAvailable;
     }
+    if (noServerPlugins()) {
+        runState.pluginAvailable = false;
+        console.log('WorldsApart: server plugin not supported on TauriTavern, using stock vector search');
+        return false;
+    }
 
     try {
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir: EXT_DIR }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
-        runState.pluginAvailable = response.ok;
-        if (response.ok) {
-            // Each field absent from an older plugin, whose copy predates the loader: `loader` null is what asks for the redeploy.
-            try {
-                const d = await response.json();
-                runState.pluginRoot = d?.root ?? null;
-                runState.pluginFP = d?.fingerprint ?? null;
-                runState.pluginLoader = Number(d?.loader) || null;
-                runState.pluginInstall = d?.install ?? null;
-                runState.pluginDataRoot = d?.dataRoot ?? null;
-                runState.pluginShared = d?.shared === true;
-            } catch { /* no JSON body: nothing more is known */ }
+        const ping = response.ok ? readPing(await response.json().catch(() => null)) : null;
+        runState.pluginAvailable = ping !== null;
+        if (ping) {
+            // `loader` null, from a plugin older than the loader, is what asks for the redeploy.
+            runState.pluginRoot = ping.root;
+            runState.pluginFP = ping.fingerprint;
+            runState.pluginLoader = ping.loader;
+            runState.pluginInstall = ping.install;
+            runState.pluginDataRoot = ping.dataRoot;
+            runState.pluginShared = ping.shared;
         }
     } catch {
         runState.pluginAvailable = false;
@@ -303,6 +309,7 @@ function renderPluginSetup() {
     const line = (text, colour, why) => $(`<div style="color:${colour};"></div>`).text(text)
         .append(why ? [' ', $('<span class="fa-solid fa-circle-question note-link-span"></span>').attr('title', why)] : []);
     box.empty();
+    if (noServerPlugins()) { $('#wa_mean_centered_label').hide(); return; }
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     // With accounts on, a per-user copy is one of several the server plugin can load, each updated on its own.
     if (accountsEnabled && IS_LOCAL() && isAdmin() && !isShadowing()) {
@@ -386,7 +393,13 @@ async function queryCollections(args, stop = null) {
         }
 
         // No threshold and no server-side pooling here, so K counts chunks.
-        return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }, EMBED_TIMEOUT_MS, stop) ?? {};
+        try {
+            return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }, EMBED_TIMEOUT_MS, stop) ?? {};
+        } catch (error) {
+            // A host that caps topK answers 400; the entry ceiling is the one retry.
+            if (error?.status !== 400) throw error;
+            return await vectorPost('query-multi', { ...args, topK: admitCeiling(true) }, EMBED_TIMEOUT_MS, stop) ?? {};
+        }
     } finally {
         clearTimeout(slow);
         if (slowToast) toastr.clear(slowToast);
@@ -795,7 +808,7 @@ async function scoreEntriesUnsafe(searchText, stop = null) {
         runState.noCosineWarned = true;
         console.warn(`WorldsApart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so no entry has a cosine. `
             + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
-            + 'Check that the server plugin is loaded and that its query is not failing.');
+            + (noServerPlugins() ? 'The server plugin is not supported on TauriTavern.' : 'Check that the server plugin is loaded and that its query is not failing.'));
     }
 
     return { targets, scores, retrieved };
@@ -1846,7 +1859,7 @@ async function dryRun(verbose = false, command = null) {
 
     console.log(`%cWorldsApart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
     // Version and fingerprints stay out of paramSnapshot: a bundle carries them in SHARED_FIELDS, and recording them twice would let the two disagree.
-    console.log(`WorldsApart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
+    console.log(`WorldsApart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : noServerPlugins() ? 'not supported on TauriTavern' : 'not installed'}`);
     const identity = await extensionIdentity();
     if (identity) console.log(`WorldsApart: ${identity}`);
 
@@ -2212,7 +2225,7 @@ const SETTINGS_HTML = `
 
                     <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension." data-i18n="[title]Set the embedding model in the Vector Storage extension."></div>
 
-                    <label><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
+                    <label id="wa_mean_centered_label"><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
                     <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted." data-i18n="Find unused vector collections…;[title]Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>

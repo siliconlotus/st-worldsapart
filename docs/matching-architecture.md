@@ -197,12 +197,12 @@ Three routes reach core's `activated` map: WA's force-activate, `constant` and `
 `queryCollections` scores the query against the collections of every attached book.
 
 - **With the plugin** (`/query-multi`): every chunk is scored by cosine against the query, both centred on the collection's centroid (the memory tier's chunks, or every chunk when a book has none), pooled to the best chunk per entry and cut at `admitCeiling`, 1000 entries.
-- **Without it** the request goes to ST's `/api/vector/query-multi`, which neither centres, pools nor scores, so K counts chunks and scoring has no cosine.
+- **Without it** the request goes to ST's `/api/vector/query-multi`, which neither centres, pools nor scores, so K counts chunks and scoring has no cosine. A host that refuses that K with a 400 is asked once more at the entry ceiling.
 - **Admission** is the returned chunks' owners on both paths; only the cosine column differs. Only `vectorized` entries are activated on it; every scored entry keeps its cosine in `runState.lastScores`.
 - **A failed query** costs every entry its cosine; keyword matching and constants are unaffected.
 - **A row of another dimension.** A row whose vector is not the query's dimension was embedded under another model at the same model name, and sync cannot replace it, since a hash carries only (text, uid). `/query-multi` deletes it from the collection and the next sync re-embeds it. A query with no vector deletes nothing.
 
-A plugin route that errors, or answers without a field the extension reads, takes the no-plugin path for that call, and `pluginFallback` announces it once per load. Only fields a reader consumes are checked.
+The plugin is present when `/ping` answers its own JSON (`readPing`); a 200 with any other body, such as a host's page for an unknown path, reads as absent. A host that cannot load a server plugin (TauriTavern, `window.__TAURITAVERN__`) is never pinged and shows no plugin setup. A plugin route that errors, or answers without a field the extension reads, takes the no-plugin path for that call, and `pluginFallback` announces it once per load. Only fields a reader consumes are checked.
 
 The plugin (`plugin/server.js`, `scoring.mjs`, `vector.mjs`) caches an index's items and mean on the file's mtime and size; `scoreCollection` is mean-centred cosine, `poolEntries` keeps the best chunk per entry, `selectTopK` cuts.
 
