@@ -192,6 +192,7 @@ async function hasPlugin() {
     }
     if (noServerPlugins()) {
         runState.pluginAvailable = false;
+        console.log('WorldsApart: server plugin not supported on TauriTavern, using stock vector search');
         return false;
     }
 
@@ -807,7 +808,7 @@ async function scoreEntriesUnsafe(searchText, stop = null) {
         runState.noCosineWarned = true;
         console.warn(`WorldsApart: ${rankOnly} chunk(s) came back with no score — the no-plugin path answered, so no entry has a cosine. `
             + 'Those entries are still activated; the relevance model is running on text, proper nouns and density alone. '
-            + 'Check that the server plugin is loaded and that its query is not failing.');
+            + (noServerPlugins() ? 'The server plugin is not supported on TauriTavern.' : 'Check that the server plugin is loaded and that its query is not failing.'));
     }
 
     return { targets, scores, retrieved };
@@ -1855,7 +1856,7 @@ async function dryRun(verbose = false, command = null) {
 
     console.log(`%cWorldsApart ${(await waVersion()) || 'version unknown'}: ${verbose ? 'debug run' : 'dry run'}`, 'font-weight: bold', paramSnapshot());
     // Version and fingerprints stay out of paramSnapshot: a bundle carries them in SHARED_FIELDS, and recording them twice would let the two disagree.
-    console.log(`WorldsApart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : 'not installed'}`);
+    console.log(`WorldsApart: plugin ${runState.pluginAvailable ? `${runState.pluginFP ?? 'unknown'}, source ${runState.sourceFP ?? 'unknown'}${pluginDrifted() ? ' — OUT OF DATE, redeploy' : ''}` : noServerPlugins() ? 'not supported on TauriTavern' : 'not installed'}`);
     const identity = await extensionIdentity();
     if (identity) console.log(`WorldsApart: ${identity}`);
 
