@@ -202,7 +202,7 @@ Three routes reach core's `activated` map: WA's force-activate, `constant` and `
 - **A failed query** costs every entry its cosine; keyword matching and constants are unaffected.
 - **A row of another dimension.** A row whose vector is not the query's dimension was embedded under another model at the same model name, and sync cannot replace it, since a hash carries only (text, uid). `/query-multi` deletes it from the collection and the next sync re-embeds it. A query with no vector deletes nothing.
 
-The plugin is present when `/ping` answers its own JSON (`readPing`); a 200 with any other body, such as a host's page for an unknown path, reads as absent. A plugin route that errors, or answers without a field the extension reads, takes the no-plugin path for that call, and `pluginFallback` announces it once per load. Only fields a reader consumes are checked.
+The plugin is present when `/ping` answers its own JSON (`readPing`); a 200 with any other body, such as a host's page for an unknown path, reads as absent. A host that cannot load a server plugin (TauriTavern, `window.__TAURITAVERN__`) is never pinged and shows no plugin setup. A plugin route that errors, or answers without a field the extension reads, takes the no-plugin path for that call, and `pluginFallback` announces it once per load. Only fields a reader consumes are checked.
 
 The plugin (`plugin/server.js`, `scoring.mjs`, `vector.mjs`) caches an index's items and mean on the file's mtime and size; `scoreCollection` is mean-centred cosine, `poolEntries` keeps the best chunk per entry, `selectTopK` cuts.
 

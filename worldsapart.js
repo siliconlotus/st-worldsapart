@@ -182,10 +182,17 @@ async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS, stop = null
 /** The extension's own folder name, decoded: a pathname is percent-encoded and a folder name is not. */
 const EXT_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/+$/, '').split('/').pop();
 
+/** A host that cannot load a server plugin at all: TauriTavern, whose backend is not ST's Node server. */
+const noServerPlugins = () => Boolean(globalThis.__TAURITAVERN__);
+
 /** Whether the WA server plugin is loaded, checked once; absent is the stock install, not an error. */
 async function hasPlugin() {
     if (runState.pluginAvailable !== null) {
         return runState.pluginAvailable;
+    }
+    if (noServerPlugins()) {
+        runState.pluginAvailable = false;
+        return false;
     }
 
     try {
@@ -301,6 +308,7 @@ function renderPluginSetup() {
     const line = (text, colour, why) => $(`<div style="color:${colour};"></div>`).text(text)
         .append(why ? [' ', $('<span class="fa-solid fa-circle-question note-link-span"></span>').attr('title', why)] : []);
     box.empty();
+    if (noServerPlugins()) { $('#wa_mean_centered_label').hide(); return; }
     if (runState.pluginAvailable === null) { box.text(t`Checking for server plugin…`); return; }
     // With accounts on, a per-user copy is one of several the server plugin can load, each updated on its own.
     if (accountsEnabled && IS_LOCAL() && isAdmin() && !isShadowing()) {
@@ -2213,7 +2221,7 @@ const SETTINGS_HTML = `
 
                     <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension." data-i18n="[title]Set the embedding model in the Vector Storage extension."></div>
 
-                    <label><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
+                    <label id="wa_mean_centered_label"><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
                     <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
                     <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted." data-i18n="Find unused vector collections…;[title]Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>
