@@ -1082,6 +1082,9 @@ function onEntriesLoaded(loaded) {
             if (patch.waReverseDepth !== undefined) delete patch.depth;
             Object.assign(entry, patch);
         }
+        // `disable`, the one check core makes above constants, `@@activate` and forced activations alike.
+        const gateOpts = activationOpts();
+        for (const entry of entries) if (entry && matcher.gateVerdict(entry, gateOpts) === 'skip') entry.disable = true;
     }
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
