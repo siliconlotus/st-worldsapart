@@ -23,7 +23,7 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../../slash-commands/SlashCommandArgument.js';
 import { getStringHash, escapeHtml, getCharaFilename } from '../../../utils.js';
-import { LOADER_VERSION, pluginFingerprint, PLUGIN_FILES } from './plugin/fingerprint.mjs';
+import { LOADER_VERSION, pluginFingerprint, PLUGIN_FILES, readPing } from './plugin/fingerprint.mjs';
 import { admitCeiling } from './plugin/scoring.mjs';
 import * as query from './extension/query.mjs';
 import * as entity from './extension/entity.mjs';
@@ -170,7 +170,7 @@ async function vectorPost(route, args, timeoutMs = QUERY_TIMEOUT_MS, stop = null
             throw Object.assign(new Error(`WorldsApart: /api/vector/${route} failed with 500 (${target})`),
                 { explanation: [t`SillyTavern could not get embeddings from ${target}.`, t`Check SillyTavern server logs for more info.`] });
         }
-        throw new Error(`WorldsApart: /api/vector/${route} failed with ${response.status}`);
+        throw Object.assign(new Error(`WorldsApart: /api/vector/${route} failed with ${response.status}`), { status: response.status });
     }
 
     return response.status === 200 && response.headers.get('content-type')?.includes('json')
@@ -190,18 +190,16 @@ async function hasPlugin() {
 
     try {
         const response = await fetch('/api/plugins/worlds-apart/ping', { method: 'POST', headers: getRequestHeaders(), body: JSON.stringify({ dir: EXT_DIR }), signal: AbortSignal.timeout(QUERY_TIMEOUT_MS) });
-        runState.pluginAvailable = response.ok;
-        if (response.ok) {
-            // Each field absent from an older plugin, whose copy predates the loader: `loader` null is what asks for the redeploy.
-            try {
-                const d = await response.json();
-                runState.pluginRoot = d?.root ?? null;
-                runState.pluginFP = d?.fingerprint ?? null;
-                runState.pluginLoader = Number(d?.loader) || null;
-                runState.pluginInstall = d?.install ?? null;
-                runState.pluginDataRoot = d?.dataRoot ?? null;
-                runState.pluginShared = d?.shared === true;
-            } catch { /* no JSON body: nothing more is known */ }
+        const ping = response.ok ? readPing(await response.json().catch(() => null)) : null;
+        runState.pluginAvailable = ping !== null;
+        if (ping) {
+            // `loader` null, from a plugin older than the loader, is what asks for the redeploy.
+            runState.pluginRoot = ping.root;
+            runState.pluginFP = ping.fingerprint;
+            runState.pluginLoader = ping.loader;
+            runState.pluginInstall = ping.install;
+            runState.pluginDataRoot = ping.dataRoot;
+            runState.pluginShared = ping.shared;
         }
     } catch {
         runState.pluginAvailable = false;
@@ -386,7 +384,13 @@ async function queryCollections(args, stop = null) {
         }
 
         // No threshold and no server-side pooling here, so K counts chunks.
-        return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }, EMBED_TIMEOUT_MS, stop) ?? {};
+        try {
+            return await vectorPost('query-multi', { ...args, topK: admitCeiling(false) }, EMBED_TIMEOUT_MS, stop) ?? {};
+        } catch (error) {
+            // A host that caps topK answers 400; the entry ceiling is the one retry.
+            if (error?.status !== 400) throw error;
+            return await vectorPost('query-multi', { ...args, topK: admitCeiling(true) }, EMBED_TIMEOUT_MS, stop) ?? {};
+        }
     } finally {
         clearTimeout(slow);
         if (slowToast) toastr.clear(slowToast);

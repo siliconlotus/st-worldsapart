@@ -3,7 +3,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOADER_VERSION, PLUGIN_FILES, pluginFingerprint } from '../plugin/fingerprint.mjs';
+import { LOADER_VERSION, PLUGIN_FILES, pluginFingerprint, readPing } from '../plugin/fingerprint.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,5 +27,11 @@ for (let i = 0; i < texts.length; i++) {
     drifted[i] = `${drifted[i]}\n// drift`;
     eq(pluginFingerprint(...drifted) !== fp, true, `changing ${PLUGIN_FILES[i]} changes the fingerprint`);
 }
+
+// A 200 is not the plugin: a host that serves its page for any unknown path answers /ping with HTML, which parses to nothing.
+eq(readPing(null), null, 'a /ping body that is not JSON is no plugin');
+eq(readPing({}), null, 'JSON without ok is no plugin');
+eq(readPing({ ok: 'true' }), null, 'only ok === true is the plugin');
+eq(JSON.stringify(readPing({ ok: true })), JSON.stringify({ root: null, fingerprint: null, loader: null, install: null, dataRoot: null, shared: false }), 'a plugin older than every optional field reads as present, every field null');
 
 if (process.exitCode !== 1) console.log('fingerprint-check: ok');
