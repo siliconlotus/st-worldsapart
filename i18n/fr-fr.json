@@ -755,6 +755,7 @@
  "With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio.": "Avec le regroupement par niveaux, une entrée rejoint le premier niveau auquel elle correspond, de haut en bas. Décochez un niveau pour le sauter. Partagé avec le Studio.",
  "With user accounts on, install WorldsApart for all users instead of per user: the server plugin and every user then share one copy to update.": "Avec les comptes utilisateurs activés, installez WorldsApart pour tous les utilisateurs plutôt que par utilisateur : le plugin serveur et chaque utilisateur partagent alors une seule copie à mettre à jour.",
  "Word boundary": "Frontière de mot",
+ "World Info button opens the Studio": "Le bouton World Info ouvre le Studio",
  "WorldsApart": "WorldsApart",
  "WorldsApart (overrides ST)": "WorldsApart (remplace ST)",
  "WorldsApart Lorebook Studio: Manage lorebooks, entries, and keys.": "WorldsApart Studio des lorebooks : gérer les lorebooks, les entrées et les mots-clés.",

@@ -2176,6 +2176,9 @@ const SETTINGS_HTML = `
                 </label>
                 <small id="wa_version" style="opacity:0.55;margin-left:6px;"></small>
             </div>
+            <label class="checkbox_label" for="wa_studio_on_wi_button">
+                <input id="wa_studio_on_wi_button" type="checkbox"><span data-i18n="World Info button opens the Studio">World Info button opens the Studio</span>
+            </label>
             <label><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not."></span></label>
             <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
 
@@ -2575,6 +2578,13 @@ async function initBody() {
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
+    bind('#wa_studio_on_wi_button', 'studioOnWiButton', 'checked');
+    // Capture phase, so it runs before core's jQuery doNavbarIconClick on the same element and can stop it.
+    document.querySelector('#WI-SP-button .drawer-toggle')?.addEventListener('click', ev => {
+        if (!settings().studioOnWiButton) return;
+        ev.stopImmediatePropagation();
+        lorebookStudio(chatBook());
+    }, true);
     // ensureStudioStyle styles the sort widget; the Studio injects it lazily and this control can be used first (idempotent).
     ensureStudioStyle();
     const getTierCfg = () => reconcileTiers(settings().tierCfg);
