@@ -41,6 +41,7 @@ export const defaultSettings = {
     worldPriorityMode: 'interleaved', // 'interleaved' (one list; weight scales score, offset shifts prompt position) | 'sequential' (strict book tiers)
     /** @type {Record<string, Array<{ world: string, weight: number, offset: number, cap: number }>>} keyed by character/group id; the chat's own book is the sentinel `'chat'` */
     worldPriorityByChar: {},
+    studioOnWiButton: false, // ST's World Info toolbar button opens the Studio instead of core's drawer
     debugLog: false, // narrate each turn's run and console.table the ranking; per-generation token counting when a budget is set
 };
 
