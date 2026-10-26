@@ -116,6 +116,7 @@ export const runState = {
     waRecursionTexts: [],         // every pass's recursion-eligible entry content so far; the rematch window is chat + these
     waMinSkew: 0,                 // min-activation passes core has scheduled; widens WA's window one message per pass
     waCandidates: null,           // candidate entries fetched at intercept (live keys); null = no owned scan state
+    waForced: [],                 // the copies WA force-activated for this scan; core's budget reads these, not its own entries
     verboseRun: false,            // true during a /wa-debug run
     dryRunInProgress: false,      // true during either slash-command run
     generationIsDryRun: false,    // true while ST's own dry-run generation is in flight
