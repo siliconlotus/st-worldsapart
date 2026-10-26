@@ -955,6 +955,7 @@ async function selectAndActivate(chat, token, stop = null) {
     runState.waRecursionDepth = 0;
     runState.waMinSkew = 0;
     runState.waCandidates = null;
+    runState.waForced = [];
 
     let winners = [];
     try {
@@ -982,6 +983,7 @@ async function selectAndActivate(chat, token, stop = null) {
     const union = adds.filter(e => !winnerKeys.has(`${e.world}.${e.uid}`));
 
     const activated = [...winners, ...union];
+    runState.waForced = activated;
     if (activated.length) {
         dbg(`WorldsApart: activating ${winners.length} entries by similarity + ${union.length} by key`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, activated);
@@ -1067,6 +1069,15 @@ function applyReverseDepth(args) {
     }
 }
 
+/** Takes the budget off core for these entries, stashing the author's `ignoreBudget` for delivery. */
+function takeBudget(entries) {
+    for (const entry of entries) {
+        if (!entry) continue;
+        entry.waIgnoreBudget ??= Boolean(entry.ignoreBudget);   // `??=`, not `=`: a second load would stash the `true` set below
+        entry.ignoreBudget = true;
+    }
+}
+
 /** Blinds core's keyword matcher on a scan WA owns — keys stashed on `waKeys`/`waSecondary`, then blanked — and takes
  *  the budget off core. REASSIGN `key`, never mutate it: the array is loadWorldInfo's cache. */
 function onEntriesLoaded(loaded) {
@@ -1101,12 +1112,8 @@ function onEntriesLoaded(loaded) {
     }
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
-    if (settings().enabled && runState.waOwnsScan && !runState.generationIsDryRun) {
-        for (const entry of entries) {
-            entry.waIgnoreBudget = Boolean(entry.ignoreBudget);   // always set, so authorIgnoreBudget's `??` falls through only on the ungated paths
-            entry.ignoreBudget = true;
-        }
-    }
+    // The forced copies too: core budgets the copy it was handed, not its own entry.
+    if (settings().enabled && runState.waOwnsScan && !runState.generationIsDryRun) takeBudget([...entries, ...runState.waForced]);
 
     if (!settings().enabled) {
         return;
@@ -1426,6 +1433,8 @@ async function feedScanLoop(args) {
             runState.waMatched.add(`${e.world}.${e.uid}`);
             e.waTriggerDepth = runState.waRecursionDepth;
         }
+        // Core has already loaded this scan's entries, so onEntriesLoaded will not reach these.
+        takeBudget(adds);
         dbg(`WorldsApart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
     }
