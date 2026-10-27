@@ -18,6 +18,7 @@ import { chatUser, createScanScope, macroMap, usableMessages, validateSmartKey }
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
+import { entryStateParts, rangeOptions } from '../extension/entry-form.mjs';
 import { addSecondary, addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
@@ -126,6 +127,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const tall = new Set();          // entry uids whose editor is popped out to full Studio height
     const advOpen = new Set();       // entry uids with the Advanced tray (recursion/budget/timing) expanded
     const secOpen = new Set();       // entry uids whose EMPTY secondary-keys tray is unfolded; one with keys is always open
+    const foldOpen = new Set();      // `${uid}\u001F${fold}` for the card's inner folds (effects, secondary, suggestions) that are open
+    /** A <details> whose open state lives in foldOpen, so a repaint keeps it. */
+    const foldDetails = (uid, name, summary, ...kids) => {
+        const d = document.createElement('details'); d.className = 'wa-fold'; d.dataset.fold = name;
+        const key = `${uid}\u001F${name}`;
+        d.open = foldOpen.has(key);
+        const s = document.createElement('summary'); s.append(...[].concat(summary)); d.append(s, ...kids);
+        d.addEventListener('toggle', () => { d.open ? foldOpen.add(key) : foldOpen.delete(key); });
+        return d;
+    };
     const sugg = new Map();          // uid -> { tfidf:string[], llm:string[] } transient suggestion chips
     const rowEls = new Map();        // uid -> entry row element, so one edit re-renders just that entry
     let tab = 'explorer';            // 'explorer' | 'cleanup' | 'lab'
@@ -403,7 +414,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         data.entries = u.entries;
         if (u.originalData) data.originalData = u.originalData;
         // A renumber's per-uid view state goes back to the uids it came from, as the entries do.
-        if (u.uidBack) for (const set of [entryOpen, expanded, tall, advOpen, secOpen]) {
+        if (u.uidBack) for (const set of [entryOpen, expanded, tall, advOpen, secOpen, foldOpen]) {
             const moved = [...set].filter(uid => u.uidBack.has(uid));
             for (const uid of moved) set.delete(uid);
             for (const uid of moved) set.add(u.uidBack.get(uid));
@@ -515,7 +526,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         for (const [oldUid, newUid] of plan.moves) { const e = byUid.get(oldUid); e.uid = newUid; e.order = newUid; next[newUid] = e; }
         data.entries = next;
         // uids changed -> every per-uid transient (open/expanded/tall/sugg/selection/scan) is stale.
-        entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
+        entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); foldOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; suggest = null; if (scan) rebuildScan();
         save(); renderExplorer();
         const latches = rekeyChatLatches(uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(o), nu]))), ordered);
         armEntryUndo({ ...snap, n, latches, rekeyBack: uidRekey(selected, new Map(plan.moves.map(([o, nu]) => [String(nu), o]))), uidBack: new Map(plan.moves.map(([o, nu]) => [nu, o])) });
@@ -1323,90 +1334,111 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /**
      * ⚙ Advanced tray: the core WI fields with no icon; edits commit on change and repaint with the tray open.
      * @param {(e: object) => void} repaint What to redraw after a change
+     * @param {{layout?: 'columns'|'grid'}} [opt] columns is the desktop tray; grid is the phone card's two-up grid with an Effects fold
      */
-    const buildAdvancedTray = (e, repaint) => {
+    const buildAdvancedTray = (e, repaint, { layout = 'columns' } = {}) => {
+        const grid = layout === 'grid';
         const delay = Number(e.delay) || 0;
         const cooldown = Number(e.cooldown) || 0;
-        const adv = document.createElement('div'); adv.className = 'wa-adv';
-        const col = (heading, ...rows) => trayCol('wa-adv-col', 'wa-adv-sec', heading, ...rows);
-        const chk = (label, get, set) => trayChk('wa-adv-row', label, get(), v => { set(v); save(); repaint(e); });
-        const numRow = (label, get, set, placeholder) => {
-            const l = document.createElement('label'); l.className = 'wa-adv-row';
-            const s = document.createElement('span'); s.textContent = label;
-            const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.value = get(); if (placeholder) inp.placeholder = placeholder;
-            inp.addEventListener('change', () => { set(inp.value); save(); repaint(e); });
-            l.append(s, inp); return l;
-        };
+        const commit = () => { save(); repaint(e); };
         const toMsg = v => Math.max(0, Math.floor(Number(v) || 0)) || null;   // 0/blank -> null (off), like core
-        const recWarn = () => { const w = document.createElement('div'); w.className = 'wa-adv-warn'; w.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> '; w.append(document.createTextNode(t`Recursion is off globally; these have no effect.`)); return w; };
+        // --- controls: each returns an element; the grid wraps it in a labelled cell, the columns in a labelled row ---
+        const labelled = (label, control, { nowrap = false } = {}) => {
+            if (grid) { const c = document.createElement('div'); c.className = 'wa-cell'; const l = document.createElement('span'); l.className = 'wa-cell-l'; l.textContent = label; c.append(l, control); return c; }
+            const l = document.createElement('label'); l.className = 'wa-adv-row';
+            const s = document.createElement('span'); s.textContent = label; if (nowrap) s.style.whiteSpace = 'nowrap';
+            l.append(s, control); return l;
+        };
+        const numInput = (get, set, placeholder) => {
+            const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.className = 'text_pole'; inp.value = get(); if (placeholder) inp.placeholder = placeholder;
+            inp.addEventListener('change', () => { set(inp.value); commit(); });
+            return inp;
+        };
+        const numRow = (label, get, set, placeholder) => labelled(label, numInput(get, set, placeholder));
+        const boolRow = (label, get, set) => grid
+            ? (() => { const c = document.createElement('label'); c.className = 'wa-cell wa-cell-sw'; c.append(makeSwitch({ checked: get(), onChange: v => { set(v); commit(); } }), Object.assign(document.createElement('span'), { textContent: label })); return c; })()
+            : trayChk('wa-adv-row', label, get(), v => { set(v); commit(); });
+        const selOf = (opts, cur, onPick) => {
+            const sel = document.createElement('select'); sel.className = 'text_pole';
+            if (!grid) sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';   // fit the option text, not text_pole's full width
+            for (const o of opts) { const op = new Option(o.label, o.value); if (o.title) op.title = o.title; if (o.disabled) op.disabled = true; sel.append(op); }
+            sel.value = cur;
+            sel.addEventListener('change', () => { onPick(sel.value); commit(); });
+            return sel;
+        };
+        // Bounded number: a select on the grid (a phone draws it as its native picker), a number input in the columns.
+        const boundedRow = (label, get, set, { off = null, any = null, max, placeholder }) => {
+            if (!grid) return numRow(label, get, set, placeholder);
+            const cur = get();
+            const value = cur === '' || cur == null ? '' : cur === true ? 'any' : String(cur);
+            return labelled(label, selOf(rangeOptions(cur === true ? '' : cur, { off, any, max }), value, v => set(v === 'any' ? true : v)));
+        };
         // Tri-state select for the nullable match flags: Inherit / On / Off.
         const triSel = (label, get, set, globalOn) => {
-            const l = document.createElement('label'); l.className = 'wa-adv-row';
-            const s = document.createElement('span'); s.textContent = label; s.style.whiteSpace = 'nowrap';
-            const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';   // fit the option text, not text_pole's full width
-            for (const [val, txt] of [['', globalOn ? t`Inherit (on)` : t`Inherit (off)`], ['on', t`On`], ['off', t`Off`]]) sel.append(new Option(txt, val));
-            const cur = get(); sel.value = cur === true ? 'on' : cur === false ? 'off' : '';
-            sel.addEventListener('change', () => { set(sel.value === '' ? null : sel.value === 'on'); save(); repaint(e); });
-            l.append(s, sel); return l;
+            const cur = get();
+            return labelled(label, selOf([{ value: '', label: globalOn ? t`Inherit (on)` : t`Inherit (off)` }, { value: 'on', label: t`On` }, { value: 'off', label: t`Off` }],
+                cur === true ? 'on' : cur === false ? 'off' : '', v => set(v === '' ? null : v === 'on')), { nowrap: true });
         };
         // Writes `role` as ST's editor does: the at-depth choice's role, null for every other position.
         const placeSel = () => {
-            const l = document.createElement('label'); l.className = 'wa-adv-row';
-            const s = document.createElement('span'); s.textContent = t`Position`; s.style.whiteSpace = 'nowrap';
-            const sel = document.createElement('select'); sel.className = 'text_pole'; sel.style.cssText = 'width:auto;margin:0 0 0 auto;padding:2px 4px;';
             const cur = placementOf(e);
+            const opts = [];
             // Disabled: choosing it would write no position, and Number('') would write 0.
-            if (!cur) { const o = new Option(t`Not set`, ''); o.disabled = true; sel.append(o); }
-            for (const [val, label, tip] of PLACEMENTS) { const o = new Option(label, val); o.title = tip; sel.append(o); }
-            sel.value = cur?.[0] ?? '';
+            if (!cur) opts.push({ value: '', label: t`Not set`, disabled: true });
+            for (const [val, label, tip] of PLACEMENTS) opts.push({ value: val, label, title: tip });
+            const sel = selOf(opts, cur?.[0] ?? '', v => { const [pos, role] = v.split(':'); e.position = Number(pos); e.role = role === undefined ? null : Number(role); });
             sel.title = cur?.[2] ?? t`No position: SillyTavern leaves this entry out of the prompt even when it activates.`;
-            sel.addEventListener('change', () => {
-                const [pos, role] = sel.value.split(':');
-                e.position = Number(pos); e.role = role === undefined ? null : Number(role);
-                save(); repaint(e);
-            });
-            l.append(s, sel); return l;
+            return labelled(t`Position`, sel, { nowrap: true });
         };
         const outletRow = () => {
-            const l = document.createElement('label'); l.className = 'wa-adv-row';
-            const s = document.createElement('span'); s.textContent = t`Outlet name`; s.style.whiteSpace = 'nowrap';
             const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'text_pole'; inp.value = e.outletName ?? '';
-            inp.addEventListener('change', () => { e.outletName = inp.value.trim(); save(); repaint(e); });
-            l.append(s, inp); return l;
+            inp.addEventListener('change', () => { e.outletName = inp.value.trim(); commit(); });
+            return labelled(t`Outlet name`, inp, { nowrap: true });
         };
+        const recWarn = () => { const w = document.createElement('div'); w.className = 'wa-adv-warn'; w.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> '; w.append(document.createTextNode(t`Recursion is off globally; these have no effect.`)); return w; };
         const durLevel = (typeof e.delayUntilRecursion === 'number' && e.delayUntilRecursion > 0) ? e.delayUntilRecursion : '';
+        const recursionOn = !!document.querySelector('#world_info_recursive')?.checked;
+        // --- the fields, once ---
+        const fOrder = () => numRow(t`Order`, () => (e.order ?? 100), v => e.order = Math.floor(Number(v) || 0), '100');
+        const fDepth = () => Number(e.position) === 4 ? [numRow(t`Depth`, () => (e.depth ?? 4), v => e.depth = Math.max(0, Math.floor(Number(v) || 0)), '4')] : [];
+        const fOutlet = () => Number(e.position) === 7 ? [outletRow()] : [];
+        const fSticky = () => boundedRow(t`Sticky`, () => (Number(e.sticky) > 0 ? Number(e.sticky) : ''), v => e.sticky = toMsg(v), { off: t`Off`, max: 100, placeholder: '0' });
+        const fCooldown = () => boundedRow(t`Cooldown`, () => (cooldown || ''), v => e.cooldown = toMsg(v), { off: t`Off`, max: 100, placeholder: '0' });
+        const fDelay = () => boundedRow(t`Delay`, () => (delay || ''), v => e.delay = toMsg(v), { off: t`Off`, max: 100, placeholder: '0' });
+        const fProb = () => boundedRow(t`Probability %`, () => (e.probability != null ? Number(e.probability) : 100), v => e.probability = clampPct(v), { max: 100, placeholder: '100' });
+        const fUseProb = () => boolRow(t`Use probability`, () => e.useProbability !== false, v => e.useProbability = v);
+        const fPromoted = () => boolRow(t`Promoted`, () => hasPromoteDecorator(e), v => e.content = withPromote(e.content, v));
+        const fCase = () => triSel(t`Case-sensitive`, () => e.caseSensitive, v => e.caseSensitive = v, world_info_case_sensitive);
+        const fWhole = () => triSel(t`Whole words`, () => e.matchWholeWords, v => e.matchWholeWords = v, world_info_match_whole_words);
+        const fNonRec = () => boolRow(t`Non-recursable`, () => !!e.excludeRecursion, v => e.excludeRecursion = v);
+        const fPrevent = () => boolRow(t`Prevent further recursion`, () => !!e.preventRecursion, v => e.preventRecursion = v);
+        // Columns: a checkbox plus a level row, as the desktop had. Grid: one select, Off / Any level / a level, since the field is false, true or a number.
+        const fDelayUntil = () => grid
+            ? boundedRow(t`Delay until recursion`, () => (e.delayUntilRecursion === true ? true : durLevel), v => { const n = Math.max(0, Math.floor(Number(v) || 0)); e.delayUntilRecursion = v === true ? true : n > 0 ? n : false; }, { off: t`Off`, any: t`Any level`, max: 10 })
+            : [boolRow(t`Delay until recursion`, () => !!e.delayUntilRecursion, v => e.delayUntilRecursion = v ? (durLevel || true) : false),
+                numRow(t`↳ level`, () => durLevel, v => { const n = Math.max(0, Math.floor(Number(v) || 0)); e.delayUntilRecursion = n > 0 ? n : (e.delayUntilRecursion ? true : false); }, t`any`)];
+        const fIgnoreBudget = () => boolRow(t`Ignore budget`, () => !!e.ignoreBudget, v => e.ignoreBudget = v);
+        // As core's editor: blank is null (the global depth), and 0 is authored, the chat triggering nothing.
+        const fScanDepth = () => numRow(t`Scan depth`, () => (e.scanDepth ?? ''), v => { const s = String(v).trim(); e.scanDepth = s === '' ? null : Math.max(0, Math.floor(Number(s) || 0)); }, t`global`);
+
+        if (grid) {
+            const adv = document.createElement('div'); adv.className = 'wa-adv-grid';
+            const top = document.createElement('div'); top.className = 'wa-grp';
+            top.append(fOrder(), placeSel(), ...fDepth(), ...fOutlet(), fCase(), fWhole(), fScanDepth(), fIgnoreBudget());
+            const eff = document.createElement('div'); eff.className = 'wa-grp';
+            eff.append(fSticky(), fCooldown(), fDelay(), fProb(), fUseProb(), fPromoted(), fNonRec(), fPrevent(), fDelayUntil());
+            adv.append(top, foldDetails(e.uid, 'effects', t`Effects`, eff, ...(recursionOn ? [] : [recWarn()])));
+            return adv;
+        }
+        const adv = document.createElement('div'); adv.className = 'wa-adv';
+        const col = (heading, ...rows) => trayCol('wa-adv-col', 'wa-adv-sec', heading, ...rows);
         adv.append(
-            col(t`Placement`,
-                numRow(t`Order`, () => (e.order ?? 100), v => e.order = Math.floor(Number(v) || 0), '100'),
-                placeSel(),
-                ...(Number(e.position) === 4 ? [numRow(t`Depth`, () => (e.depth ?? 4), v => e.depth = Math.max(0, Math.floor(Number(v) || 0)), '4')] : []),
-                ...(Number(e.position) === 7 ? [outletRow()] : []),
-            ),
-            col(t`Timed`,
-                numRow(t`Sticky`, () => (Number(e.sticky) > 0 ? Number(e.sticky) : ''), v => e.sticky = toMsg(v), '0'),
-                numRow(t`Cooldown`, () => (cooldown || ''), v => e.cooldown = toMsg(v), '0'),
-                numRow(t`Delay`, () => (delay || ''), v => e.delay = toMsg(v), '0'),
-            ),
-            col(t`Trigger`,
-                numRow(t`Probability %`, () => (e.probability != null ? Number(e.probability) : 100), v => e.probability = clampPct(v), '100'),
-                chk(t`Use probability`, () => e.useProbability !== false, v => e.useProbability = v),
-            ),
-            col(t`Matching`,
-                triSel(t`Case-sensitive`, () => e.caseSensitive, v => e.caseSensitive = v, world_info_case_sensitive),
-                triSel(t`Whole words`, () => e.matchWholeWords, v => e.matchWholeWords = v, world_info_match_whole_words),
-            ),
-            col(t`Recursion`,
-                chk(t`Non-recursable`, () => !!e.excludeRecursion, v => e.excludeRecursion = v),
-                chk(t`Prevent further recursion`, () => !!e.preventRecursion, v => e.preventRecursion = v),
-                chk(t`Delay until recursion`, () => !!e.delayUntilRecursion, v => e.delayUntilRecursion = v ? (durLevel || true) : false),
-                numRow(t`↳ level`, () => durLevel, v => { const n = Math.max(0, Math.floor(Number(v) || 0)); e.delayUntilRecursion = n > 0 ? n : (e.delayUntilRecursion ? true : false); }, t`any`),
-                ...(document.querySelector('#world_info_recursive')?.checked ? [] : [recWarn()]),
-            ),
-            col(t`Budget / scan`,
-                chk(t`Ignore budget`, () => !!e.ignoreBudget, v => e.ignoreBudget = v),
-                // As core's editor: blank is null (the global depth), and 0 is authored, the chat triggering nothing.
-                numRow(t`Scan depth`, () => (e.scanDepth ?? ''), v => { const s = String(v).trim(); e.scanDepth = s === '' ? null : Math.max(0, Math.floor(Number(s) || 0)); }, t`global`),
-            ),
+            col(t`Placement`, fOrder(), placeSel(), ...fDepth(), ...fOutlet()),
+            col(t`Timed`, fSticky(), fCooldown(), fDelay()),
+            col(t`Trigger`, fProb(), fUseProb()),
+            col(t`Matching`, fCase(), fWhole()),
+            col(t`Recursion`, fNonRec(), fPrevent(), ...fDelayUntil(), ...(recursionOn ? [] : [recWarn()])),
+            col(t`Budget / scan`, fIgnoreBudget(), fScanDepth()),
         );
         return adv;
     };
@@ -1595,7 +1627,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // Off the deleted book before the latch pass awaits: save() writes `selected`, and would recreate it.
         if (wasOpen) {
             selected = [...world_names].sort((a, b) => a.localeCompare(b)).find(n => !names.includes(n)) ?? null;
-            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
+            data = null; scan = null; suggest = null; entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); foldOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null;
         }
         dirty = false;
         renderBooks();
@@ -3628,7 +3660,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const openBook = async name => {
         orphanView = false;
         if (dirty && selected) { reloadEditor(selected); dirty = false; }   // refresh the outgoing book's editor
-        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
+        selected = name; loadSortView(name); entryOpen.clear(); expanded.clear(); tall.clear(); advOpen.clear(); secOpen.clear(); foldOpen.clear(); sugg.clear(); selectedEntries.clear(); lastSel = null; selAnchorUid = null; suggest = null; scan = null; clearChatScan();   // scan is on-demand; chat counts belong to a (book, chat) pair
         cleanupChecks.clear(); cleanupUndo = null; clearEntryUndo();   // rowId is (uid, term): uids collide across books, so a tick or an undo must not cross one
         explorer.innerHTML = `<div style="opacity:0.6;padding:8px;">${escapeHtml(t`Loading…`)}</div>`; explorer.append(closeBtn);   // same re-adopt as the no-book branch
         renderBooks();

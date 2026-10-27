@@ -610,6 +610,20 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
     border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
 .wa-adv-warn i { color: var(--golden, #e0a86c); }
+/* The card's tray: two-up cells, label above field; a switch cell is one line; Effects is a fold. */
+.wa-adv-grid { margin: 6px 0 2px; padding: 6px 8px 8px; border-radius: 5px; background: var(--black30a, rgba(0,0,0,0.15)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
+.wa-grp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; padding: 4px 2px 8px; }
+.wa-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 0.9em; }
+.wa-cell-l { font-size: 0.8em; opacity: 0.6; }
+.wa-cell input.text_pole, .wa-cell select.text_pole { width: 100%; height: 34px; margin: 0; box-sizing: border-box; }
+.wa-cell-sw { flex-direction: row; align-items: center; gap: 8px; min-height: 34px; line-height: 1.2; align-self: end; cursor: pointer; }
+.wa-fold { border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 6px; background: var(--black30a, rgba(0,0,0,0.1)); }
+.wa-fold > summary { cursor: pointer; padding: 9px 10px; font-weight: bold; font-size: 0.92em; list-style: none; display: flex; align-items: center; gap: 8px; }
+.wa-fold > summary::-webkit-details-marker { display: none; }
+.wa-fold > summary::before { content: '›'; display: inline-block; width: 12px; opacity: 0.6; transition: transform 0.12s; }
+.wa-fold[open] > summary::before { transform: rotate(90deg); }
+.wa-fold > .wa-grp { padding: 2px 10px 10px; }
+.wa-fold-sub { opacity: 0.55; font-weight: normal; font-size: 0.9em; margin-left: auto; }
 /* The editable text popup: the textarea takes every pixel the dialog gives it, padded clear of a notch. */
 .wa-text-edit { display: flex; flex-direction: column; height: 100%; min-height: 0; text-align: left; }
 .wa-text-edit-head { display: flex; align-items: center; gap: 8px; padding: 2px 0 8px; flex: 0 0 auto; }
