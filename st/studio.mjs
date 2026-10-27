@@ -3145,8 +3145,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         hayWrap.className = 'wa-lab-hay';
         // Outside hayRead, which scrolls: a child of it would scroll away from the text.
         const hayToggle = document.createElement('i');
-        hayToggle.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
+        hayToggle.className = 'wa-lab-haybtn';
         // The text as it was when editing began, so a cancel can put it back; null while nothing is being edited.
         let hayBeforeEdit = null;
         hayToggle.addEventListener('click', () => {
@@ -3158,10 +3157,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         });
         // Cancel: the edit is dropped and the earlier text is marked up again. Only while editing text that was committed before.
         const hayCancel = document.createElement('i');
-        hayCancel.className = 'fa-solid fa-xmark';
+        hayCancel.className = 'fa-solid fa-xmark wa-lab-haybtn';
         hayCancel.title = t`Cancel the edit`;
-        hayCancel.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
         hayCancel.addEventListener('click', () => {
             if (hayBeforeEdit === null) return;
             labHay = hayBeforeEdit; hayBox.value = labHay; hayBeforeEdit = null;
@@ -3170,18 +3167,16 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         });
         // Beside the pencil, and only while the marked view is up: there is no rendering to see behind in a textarea.
         const srcToggle = document.createElement('i');
-        srcToggle.className = 'fa-solid fa-code';
-        srcToggle.style.cssText = 'position:absolute;top:5px;right:34px;cursor:pointer;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
+        srcToggle.className = 'fa-solid fa-code wa-lab-haybtn';
         srcToggle.addEventListener('click', () => { labShowMarkup = !labShowMarkup; repaint(); });
         // Clears the haystack outright, whichever view is up.
         const hayErase = document.createElement('i');
-        hayErase.className = 'fa-solid fa-eraser';
+        hayErase.className = 'fa-solid fa-eraser wa-lab-haybtn';
         hayErase.title = t`Clear the text`;
-        hayErase.style.cssText = 'position:absolute;top:5px;right:59px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
-            + 'background:var(--black70a, rgba(0,0,0,0.7));font-size:0.85em;z-index:1;';
         hayErase.addEventListener('click', () => { labHay = ''; hayBox.value = ''; hayBeforeEdit = null; labCommitted = false; labChatMacros = {}; labChatMixed = new Set(); labParts = null; repaint(); hayBox.focus(); });
-        hayWrap.append(hayBox, hayRead, srcToggle, hayCancel, hayErase, hayToggle);
+        const hayBtns = document.createElement('div'); hayBtns.className = 'wa-lab-haybtns';
+        hayBtns.append(hayErase, srcToggle, hayCancel, hayToggle);
+        hayWrap.append(hayBox, hayRead, hayBtns);
         const keyBox = box(t`Keys, comma- or newline-separated — plain, /regex/flags or ?SmartKey`, () => labKeys, v => { labKeys = v; });
         const gateBox = document.createElement('details');
         gateBox.style.cssText = 'flex:0 0 auto;margin-bottom:4px;';
@@ -3295,8 +3290,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         winLabel.append(document.createTextNode(t`Match window`), win);
         const labTool = (icon, title, onClick, marginLeft) => {
             const i = document.createElement('i');
-            i.className = `fa-solid ${icon}`; i.title = title;
-            i.style.cssText = `cursor:pointer;padding:2px 4px;opacity:0.7;${marginLeft ? 'margin-left:auto;' : ''}`;
+            i.className = `fa-solid ${icon} wa-lab-tool`; i.title = title;
+            if (marginLeft) i.style.marginLeft = 'auto';
             i.addEventListener('click', onClick);
             return i;
         };
@@ -3362,7 +3357,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         out.style.cssText = 'flex:1 1 auto;overflow:auto;min-width:0;min-height:0;';
         const right = document.createElement('div');
         right.style.cssText = 'flex:2 1 0;display:flex;flex-direction:column;min-width:0;min-height:0;';
-        right.append(tools, out);
+        // The tool row sits above the text box on a phone, where the result pane is below everything else.
+        if (phone()) hayWrap.before(tools); else right.append(tools);
+        right.append(out);
         const repaint = () => {
             // One pass over the book's tokens per repaint: the macro row, the parts and the part-less map all read it.
             const base = labBaseMap();
@@ -3398,7 +3395,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 bookList.innerHTML = `${escapeHtml(labRun.books.join(', ') || labRun.label)}`
                     + ` <i class="fa-solid fa-xmark wa-run-clear" title="${escapeHtml(t`Back to the typed keys`)}" style="cursor:pointer;opacity:0.6;"></i>`;
             }
-            hayToggle.className = `fa-solid ${reading ? 'fa-pen' : 'fa-check'}`;
+            hayToggle.className = `fa-solid ${reading ? 'fa-pen' : 'fa-check'} wa-lab-haybtn`;
             hayToggle.title = reading ? t`Edit the text` : t`Mark up the text`;
             hayToggle.style.display = labHay.trim() ? '' : 'none';
             hayCancel.style.display = !reading && hayBeforeEdit !== null ? '' : 'none';

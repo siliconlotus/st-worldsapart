@@ -636,6 +636,10 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-text-edit-dlg .popup-body, .wa-text-edit-dlg .popup-content { display: flex; flex-direction: column; min-height: 0; }
 .wa-text-edit-dlg .popup-content { flex: 1 1 auto; }
 .wa-text-edit-dlg { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+/* The Lab's tool icons and the text box's corner buttons. */
+.wa-lab-tool { cursor: pointer; padding: 2px 4px; opacity: 0.7; }
+.wa-lab-haybtns { position: absolute; top: 5px; right: 9px; display: flex; gap: 4px; z-index: 1; }
+.wa-lab-haybtn { cursor: pointer; padding: 3px 5px; border-radius: 4px; opacity: 0.85; font-size: 0.85em; background: var(--black70a, rgba(0,0,0,0.7)); }
 /* Phone: the nav pane is not drawn. */
 @media ${PHONE_QUERY} {
 .wa-studio-nav { display: none; }
@@ -678,6 +682,7 @@ dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !
 .wa-lab-hay { flex: 0 0 14em !important; }
 .wa-lab-opts { flex-wrap: wrap; }
 .wa-lab-tools { flex-wrap: wrap; }
+.wa-lab-tools { align-self: flex-start !important; padding: 0 0 6px !important; }
 /* Cleanup's rail: a row above the list. */
 .wa-studio-body { flex-direction: column; }
 .wa-studio-entries { min-height: 0; }
@@ -686,6 +691,18 @@ dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !
 }
 @media (max-width: 1000px) {
 dialog.popup:has(.wa-studio) { width: calc(100dvw - 2em); max-width: calc(100dvw - 2em); }
+}
+/* Phone: the Studio fills the screen and scrolls as one; no pane scrolls on its own, and the tab strip stays pinned. */
+@media ${PHONE_QUERY} {
+dialog.popup:has(.wa-studio) { width: 100dvw; min-width: 0; max-width: 100dvw !important; height: 100dvh !important; min-height: 0 !important; max-height: 100dvh !important; margin: 0; inset: 0; border-radius: 0; overflow-y: auto;
+    padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+dialog.popup:has(.wa-studio) .popup-body { height: auto; max-height: none; overflow: visible; }
+dialog.popup:has(.wa-studio) .popup-content { overflow: visible; }
+.wa-studio { height: auto; min-height: 100%; }
+.wa-studio-explorer, .wa-studio-entries, .wa-lab-body { overflow: visible; }
+.wa-studio-body { min-height: auto; }
+.wa-tabs { position: sticky; top: 0; z-index: 3; background: var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.95))); }
+.wa-studio-exphead { position: static; }
 }
 /* Touch: the whole band is the target, tools are squares with a gap, hover-only hints show always. */
 @media (pointer: coarse) {
@@ -699,6 +716,8 @@ dialog.popup:has(.wa-studio) { width: calc(100dvw - 2em); max-width: calc(100dvw
 .wa-kw-text { border-bottom: 1px dotted currentColor; }
 .wa-meta-edit, .wa-sugg-text { text-decoration: underline dotted; }
 .wa-chevron { width: auto; }
+.wa-lab-tool, .wa-lab-haybtn { padding: 8px 10px; font-size: 1em; }
+.wa-lab-hay textarea { padding-right: 6em; }   /* clear of the corner buttons */
 .wa-kw-del { min-width: 2em; justify-content: center; display: inline-flex; }
 }`;
     document.head.append(style);
