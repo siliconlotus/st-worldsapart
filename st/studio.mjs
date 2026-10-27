@@ -2070,7 +2070,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /**
-     * Entry group header for the term list: whole-entry checkbox, glyph, switch, title, count, then view and the tool row, or a ⋯ menu on a phone.
+     * Entry group header for the term list: whole-entry checkbox, glyph, title, count, then view and the tool row, or a ⋯ menu on a phone.
      * @param {{row: Map, grp: object[]}} reg Checkbox registry, so a tick updates in place without a rebuild
      * @param {() => void} onChange Re-syncs the boxes; `onEntryChange` rebuilds the list, which the tools need
      */
@@ -2088,7 +2088,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const glyph = document.createElement('span'); glyph.textContent = wiGlyph(e);
         glyph.title = e.constant ? t`Constant` : e.vectorized ? t`Vectorized` : t`Keyword`;
         glyph.style.cssText = 'flex:0 0 auto;font-size:0.85em;';
-        const onOff = makeSwitch({ checked: !e.disable, title: e.disable ? t`Disabled — switch on to enable` : t`Active — switch off to disable`, onChange: on => { e.disable = !on; save(); onEntryChange(e); } });
         const title = document.createElement('span'); title.textContent = wiTitleOf(e); title.title = wiTitleOf(e);
         title.style.cssText = `flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${e.disable ? 'opacity:0.5;' : ''}`;
         const meta = document.createElement('span'); meta.className = 'wa-tab-count'; meta.style.flex = '0 0 auto';
@@ -2107,10 +2106,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                     { label: t`Open in Explorer`, icon: 'fa-solid fa-folder-open', fn: () => revealEntry({ world: selected, uid: e.uid }) },
                 ], r.left, r.bottom + 2, ctxMount());
             });
-            head.append(glyph, onOff, title, meta, more);
+            head.append(glyph, title, meta, more);
             return head;
         }
-        head.append(glyph, onOff, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
+        head.append(glyph, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
         return head;
     };
     /** `onEdit` is the list's repaint; given, the term becomes click-to-edit and the row gains a delete, as the chips have. */
