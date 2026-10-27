@@ -949,7 +949,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     ], x, y, ctxMount());
 
     /**
-     * Rebuilds one entry's row in place; two collapse levels, the entry and then its text.
+     * Rebuilds one entry's row in place; two collapse levels, the entry and then its text, or on a phone the card from entry-card.mjs.
      * @param {HTMLElement} [mount] Parent for a row with no predecessor to replace
      * The row must be in the document before syncText, or the editor's autosize measures a detached textarea and bails.
      */
@@ -1409,7 +1409,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             sel.addEventListener('change', () => { onPick(sel.value); commit(); });
             return sel;
         };
-        // Bounded number: a select on the grid (a phone draws it as its native picker), a number input in the columns.
+        // Bounded number: a select on the grid, a number input in the columns.
         const boundedRow = (label, get, set, { off = null, any = null, max, placeholder }) => {
             if (!grid) return numRow(label, get, set, placeholder);
             const cur = get();
@@ -1455,7 +1455,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const fWhole = () => triSel(t`Whole words`, () => e.matchWholeWords, v => e.matchWholeWords = v, world_info_match_whole_words);
         const fNonRec = () => boolRow(t`Non-recursable`, () => !!e.excludeRecursion, v => e.excludeRecursion = v);
         const fPrevent = () => boolRow(t`Prevent further recursion`, () => !!e.preventRecursion, v => e.preventRecursion = v);
-        // Columns: a checkbox plus a level row, as the desktop had. Grid: one select, Off / Any level / a level, since the field is false, true or a number.
+        // Columns: a checkbox plus a level row. Grid: one select, Off / Any level / a level.
         const fDelayUntil = () => grid
             ? boundedRow(t`Delay until recursion`, () => (e.delayUntilRecursion === true ? true : durLevel), v => { const n = Math.max(0, Math.floor(Number(v) || 0)); e.delayUntilRecursion = v === true ? true : n > 0 ? n : false; }, { off: t`Off`, any: t`Any level`, max: 10 })
             : [boolRow(t`Delay until recursion`, () => !!e.delayUntilRecursion, v => e.delayUntilRecursion = v ? (durLevel || true) : false),
@@ -1491,6 +1491,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const ne = createWorldInfoEntry(selected, data);
         if (!ne) { toastr.warning(t`Could not create an entry.`, 'WorldsApart'); return; }
         save(); suggest = null; if (scan) rebuildScan();   // corpus changed -> ranker/scan stale
+        if (phone()) entryOpen.clear();
         entryOpen.add(ne.uid); expanded.add(ne.uid);
         renderExplorer();
         const row = rowEls.get(ne.uid);
@@ -2069,7 +2070,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     /**
-     * Entry group header for the term list: whole-entry checkbox, glyph, title, count, view, tool row.
+     * Entry group header for the term list: whole-entry checkbox, glyph, switch, title, count, then view and the tool row, or a ⋯ menu on a phone.
      * @param {{row: Map, grp: object[]}} reg Checkbox registry, so a tick updates in place without a rebuild
      * @param {() => void} onChange Re-syncs the boxes; `onEntryChange` rebuilds the list, which the tools need
      */

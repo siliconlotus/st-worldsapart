@@ -21,3 +21,5 @@ eqDeep(entryStateParts({ content: '@@promote\nx', cooldown: 2, delay: 1, exclude
     ['promoted', 'cooldown 2', 'delay 1', 'non-recursable', 'prevent recursion', 'delay until recursion 2', 'ignore budget', 'scan depth 5'], 'the rest');
 eqDeep(entryStateParts({ matchWholeWords: null }, g), [], 'inherited whole words is not a part even when the global is on');
 eqDeep(entryStateParts({ sticky: 3 }, g, (s, ...v) => String.raw({ raw: s }, ...v).toUpperCase()), ['STICKY 3'], 'tag applied');
+eqDeep(entryStateParts({ delayUntilRecursion: true }, g), ['delay until recursion'], 'bare delay-until label');
+eqDeep(rangeOptions(0, { off: 'Off', max: 3 }).map(o => o.value), ['', '1', '2', '3', '0'], 'stored 0 beside Off');

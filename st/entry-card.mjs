@@ -9,7 +9,7 @@ export function arrangeCard(p) {
     const titleLine = document.createElement('span'); titleLine.className = 'wa-entry-titleline';
     titleLine.append(p.title, ...(p.dupMark ? [p.dupMark] : []), p.pencil);
     titleWrap.append(titleLine);
-    head.append(p.selBox, p.mode, p.onOff, titleWrap, ...(p.badge ? [p.badge] : []), ...(p.open ? [p.moreBtn] : []), p.chev);
+    head.append(p.selBox, p.mode, p.onOff, titleWrap, ...(p.badge && !p.open ? [p.badge] : []), ...(p.open ? [p.moreBtn] : []), p.chev);
     row.append(head);
     if (!p.open) return row;
 

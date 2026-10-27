@@ -336,8 +336,12 @@ export function onContextMenu(el, fn) {
     let timer = 0, held = false, x0 = 0, y0 = 0;
     const swallow = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); drop(); };   // the release after a hold clicks whatever is under the finger
     const drop = () => { window.removeEventListener('click', swallow, true); window.removeEventListener('pointerdown', drop, true); };   // no click came (Android): a later tap is real
-    el.addEventListener('contextmenu', ev => { clearTimeout(timer); if (held) { held = false; ev.preventDefault(); return; } fn(ev); });   // Android fires its own on a hold: one menu, not two
+    el.addEventListener('contextmenu', ev => {
+        if (ev.target.closest('input, textarea')) return;   // a field keeps its native menu
+        clearTimeout(timer); if (held) { held = false; ev.preventDefault(); return; } fn(ev);   // Android fires its own on a hold: one menu, not two
+    });
     el.addEventListener('pointerdown', ev => {
+        if (ev.target.closest('input, textarea')) return;   // a field keeps its native menu
         held = false; clearTimeout(timer);
         if (ev.pointerType !== 'touch' || !ev.isPrimary) return;
         x0 = ev.clientX; y0 = ev.clientY;

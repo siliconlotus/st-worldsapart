@@ -3,12 +3,12 @@ import { hasPromoteDecorator } from './matcher.mjs';
 
 const plain = (s, ...v) => String.raw({ raw: s }, ...v);
 
-/** Longest first so the flex wrap packs chips into fewer lines; ties keep input order. */
+/** The keys longest first, ties in input order. */
 export function packByLength(keys) {
     return keys.map((k, i) => [k, i]).sort((a, b) => b[0].length - a[0].length || a[1] - b[1]).map(x => x[0]);
 }
 
-/** Options for a bounded select. `off` and `any` are the labels of the '' and 'any' options when wanted; a `value` beyond `max` is appended so an existing value is never changed by rendering. */
+/** The `{value, label}` options of a bounded select: `off` and `any` label the '' and 'any' options when given, and a `value` outside the range is appended as its own option. */
 export function rangeOptions(value, { off = null, any = null, max }) {
     const out = [];
     if (off != null) out.push({ value: '', label: off });
@@ -19,7 +19,7 @@ export function rangeOptions(value, { off = null, any = null, max }) {
     return out;
 }
 
-/** What is set on an entry, as short human parts: the card's Advanced summary and the row's tooltips read the same list. `??`, not `||`: null inherits the global, false is an entry override. */
+/** What is set on an entry, as short human-readable parts. */
 export function entryStateParts(e, { caseGlobal, wholeGlobal }, t = plain) {
     const parts = [];
     if (Number(e.sticky) > 0) parts.push(t`sticky ${Number(e.sticky)}`);
