@@ -641,6 +641,8 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-studio-nav { display: none; }
 .wa-studio-explorer { padding-left: 0; }
 .wa-tabs { flex-wrap: wrap; }
+.wa-tab { line-height: 1.15; }
+.wa-tab .wa-tab-count { display: block; margin-left: 0; }   /* the selection count under the label, not beside it */
 .wa-tab-status { flex: 1 1 100%; margin: 0 0 4px; }
 .wa-studio-exphead .menu_button { width: auto; }
 .wa-term-row { flex-wrap: wrap; padding-left: 4px; }
