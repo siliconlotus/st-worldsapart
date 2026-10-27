@@ -3247,9 +3247,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const runFlag = f => labFlagOverride[f] ?? own(f);
         const caseFlag = flag('Aa', t`Case`, () => (labRun ? runFlag('caseSensitive') : labCase), v => { if (labRun) { labFlagOverride.caseSensitive = v; rerunLab(); } else labCase = v; });
         const wholeFlag = flag('[ab]', t`Whole words`, () => (labRun ? runFlag('wholeWords') : labWhole), v => { if (labRun) { labFlagOverride.wholeWords = v; rerunLab(); } else labWhole = v; });
-        opts.append(caseFlag, wholeFlag, flag('fa-link-slash', t`Skip vector`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); }));
+        const vecFlag = flag('fa-link-slash', t`Skip vector`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); });
+        opts.append(caseFlag, wholeFlag, vecFlag);
         // Lit when on; a ± badge where the run's entries differ and nothing is forced yet.
         const renderFlagState = () => {
+            vecFlag.classList.toggle('wa-on', labSkipVector);
             for (const [b, f, typed] of [[caseFlag, 'caseSensitive', labCase], [wholeFlag, 'wholeWords', labWhole]]) {
                 const state = labRun ? runFlag(f) : typed;
                 b.classList.toggle('wa-on', state === true);
