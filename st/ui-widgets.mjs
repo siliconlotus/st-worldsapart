@@ -60,7 +60,7 @@ const buildCtxPanel = (items, x, y, depth, mount, refresh = null) => {
 export const showCtxMenu = (items, x, y, mount = document.body, refresh = null) => {
     closeCtx();
     buildCtxPanel(items, x, y, 0, mount, refresh);
-    document.addEventListener('pointerdown', ctxDown, true);   // pointerdown, not mousedown: the release after a long press fires a compat mousedown on the element, which would close the menu it just opened
+    document.addEventListener('pointerdown', ctxDown, true);   // pointerdown, not mousedown: a compat mousedown follows a long press
     document.addEventListener('keydown', ctxKey, true);
     window.addEventListener('scroll', closeCtx, true);
 };
@@ -317,22 +317,28 @@ let studioStyled = false;
 /** Below this the Studio's three panes do not fit side by side; the stylesheet and the nav's opening state read the same value. */
 export const PHONE_QUERY = '(max-width: 600px)';
 
-/** `fn(ev)` on right-click, and on a touch held still for half a second, since iOS fires no contextmenu. `ev` carries
- *  target, clientX/Y and preventDefault either way. The release after a hold would click the element: swallowed. */
+/** `fn(ev)` on right-click, and on a touch held still for half a second; `ev` carries target, clientX/Y and preventDefault either way. */
 export function onContextMenu(el, fn) {
     let timer = 0, held = false, x0 = 0, y0 = 0;
-    el.addEventListener('contextmenu', ev => { clearTimeout(timer); if (held) { ev.preventDefault(); return; } fn(ev); });   // Android fires its own on a hold: one menu, not two
+    const swallow = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); drop(); };   // the release after a hold clicks whatever is under the finger
+    const drop = () => { window.removeEventListener('click', swallow, true); window.removeEventListener('pointerdown', drop, true); };   // no click came (Android): a later tap is real
+    el.addEventListener('contextmenu', ev => { clearTimeout(timer); if (held) { held = false; ev.preventDefault(); return; } fn(ev); });   // Android fires its own on a hold: one menu, not two
     el.addEventListener('pointerdown', ev => {
-        if (ev.pointerType !== 'touch') return;
-        held = false; x0 = ev.clientX; y0 = ev.clientY;
+        held = false; clearTimeout(timer);
+        if (ev.pointerType !== 'touch' || !ev.isPrimary) return;
+        x0 = ev.clientX; y0 = ev.clientY;
         el.style.webkitTouchCallout = 'none'; el.style.userSelect = 'none';   // the hold must not select the text or raise the copy sheet
         const { target, clientX, clientY } = ev;
-        timer = setTimeout(() => { held = true; fn({ target, clientX, clientY, preventDefault() {} }); }, 500);
+        timer = setTimeout(() => {
+            held = true;
+            window.addEventListener('click', swallow, true); window.addEventListener('pointerdown', drop, true);
+            fn({ target, clientX, clientY, preventDefault() {} });
+        }, 500);
     });
     el.addEventListener('pointermove', ev => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) clearTimeout(timer); });   // a scroll is not a hold
-    el.addEventListener('pointerup', () => clearTimeout(timer));
-    el.addEventListener('pointercancel', () => clearTimeout(timer));
-    el.addEventListener('click', ev => { if (held) { held = false; ev.stopPropagation(); ev.preventDefault(); } }, true);
+    const end = () => { clearTimeout(timer); el.style.webkitTouchCallout = el.style.userSelect = ''; };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
 }
 export function ensureStudioStyle() {
     if (studioStyled) return;
@@ -591,6 +597,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-book-tool, .wa-term-act, .wa-kw-del, .wa-chevron, .wa-undo-dismiss, .wa-sugg-add, .wa-mode { padding: 0.5em; }
 .wa-kw { padding: 0.25em 10px; }
 .wa-ctx-item { padding: 10px 14px; }
+.wa-chevron { width: auto; }
 }`;
     document.head.append(style);
 }
