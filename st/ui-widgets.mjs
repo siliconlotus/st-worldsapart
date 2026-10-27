@@ -328,7 +328,7 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
 }
 
 let studioStyled = false;
-/** Below this the Studio's three panes do not fit side by side; the stylesheet and the nav's opening state read the same value. */
+/** The breakpoint the stylesheet and the explorer's `phone()` share. */
 export const PHONE_QUERY = '(max-width: 600px)';
 
 /** `fn(ev)` on right-click, and on a touch held still for half a second; `ev` carries target, clientX/Y and preventDefault either way. */
@@ -641,6 +641,19 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-term-row { flex-wrap: wrap; padding-left: 4px; }
 .wa-term-why { flex: 1 1 100%; margin-left: 1rem; white-space: normal; }
 dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !important; height: 100dvh !important; max-height: 100dvh !important; margin: 0; inset: 0; border-radius: 0; }
+.wa-card-bar { min-height: 44px; gap: 8px; padding: 0 4px; }
+.wa-card-bar .wa-entry-title { font-weight: bold; }
+.wa-card-bar .wa-chevron { margin-left: auto; }
+.wa-card-bar .wa-tool.fa-ellipsis { margin-left: auto; }
+.wa-card-bar .wa-tool.fa-ellipsis + .wa-chevron { margin-left: 0; }
+.wa-card-body { padding: 6px 4px 12px; display: flex; flex-direction: column; gap: 10px; }
+.wa-card-preview { position: relative; cursor: pointer; padding: 6px 36px 6px 8px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2)); }
+.wa-card-preview-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.92em; opacity: 0.85; white-space: pre-wrap; }
+.wa-card-preview-pen { position: absolute; right: 8px; top: 6px; opacity: 0.65; font-size: 1.2em; }
+.wa-card-body .wa-kw-para { margin-left: 0; }
+.wa-card-body .wa-kw-sec { border-top: none; padding-top: 0; }
+.wa-fold.wa-fold-adv > .wa-adv-grid { margin: 0; border: none; background: transparent; }
+.wa-fold[data-fold="secondary"] > .wa-kw-sec, .wa-fold[data-fold="suggestions"] > .wa-kw-para { padding: 0 10px 8px; margin: 0; }
 }
 /* Touch: a finger-sized box around each small control. */
 @media (pointer: coarse) {

@@ -9,6 +9,7 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
 import { editEntryText, ensureStudioStyle, makeSortControl, makeSwitch, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { arrangeCard } from './entry-card.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
@@ -18,7 +19,7 @@ import { chatUser, createScanScope, macroMap, usableMessages, validateSmartKey }
 import { attachedBooks, classifyBookChats, findOrphanBindings } from '../extension/bindings.mjs';
 import { WA_METADATA_KEY, WI_LOGIC, countChatHits, dropTags, hasLatch, hasPromoteDecorator, isRegexKey, latchBook, latchKey, rekeyLatches, secondaryKeys, splitKeys, usableKeys, wholeWordAdvice, withPromote } from '../extension/matcher.mjs';
 import { entryFlags, labMessages, labScan, runBook, windowTip } from '../extension/lab.mjs';
-import { entryStateParts, rangeOptions } from '../extension/entry-form.mjs';
+import { entryStateParts, packByLength, rangeOptions } from '../extension/entry-form.mjs';
 import { addSecondary, addVariant, blockTarget, deleteKey, hasKey, keyHolders, kwNorm, planUidReindex, renameKeyOn, replaceKey } from '../extension/keyedit.mjs';
 
 // Fixed, not theme variables: severity is read by hue.
@@ -208,6 +209,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     };
 
     let navCollapsed = false;   // view state for this session, like `tab`; the rail keeps the way back visible
+    const phone = () => matchMedia(PHONE_QUERY).matches;   // the card layout; the stylesheet reads the same query
     const root = document.createElement('div');
     root.className = 'wa-studio';
     const nav = document.createElement('div'); nav.className = 'wa-studio-nav';
@@ -414,10 +416,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         data.entries = u.entries;
         if (u.originalData) data.originalData = u.originalData;
         // A renumber's per-uid view state goes back to the uids it came from, as the entries do.
-        if (u.uidBack) for (const set of [entryOpen, expanded, tall, advOpen, secOpen, foldOpen]) {
-            const moved = [...set].filter(uid => u.uidBack.has(uid));
-            for (const uid of moved) set.delete(uid);
-            for (const uid of moved) set.add(u.uidBack.get(uid));
+        if (u.uidBack) {
+            for (const set of [entryOpen, expanded, tall, advOpen, secOpen]) {
+                const moved = [...set].filter(uid => u.uidBack.has(uid));
+                for (const uid of moved) set.delete(uid);
+                for (const uid of moved) set.add(u.uidBack.get(uid));
+            }
+            foldOpen.clear();
         }
         selectedEntries.clear(); lastSel = null; sugg.clear();
         save(); suggest = null; if (scan) rebuildScan(); renderExplorer();
@@ -950,6 +955,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const renderEntry = (e, mount) => {
         const flagged = scan ? new Map(scan.classifyEntry(e).map(r => [r.key, r])) : null;   // null = not scanned yet
         const open = entryOpen.has(e.uid);
+        const card = phone();
         const row = document.createElement('div'); row.className = 'wa-entry';
 
         // --- Level 1 header ---
@@ -971,6 +977,12 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         });
         // A hand-built selection retires the Reselect offer.
         selBox.addEventListener('change', () => { lastSel = null; selBox.checked ? selectedEntries.add(e.uid) : selectedEntries.delete(e.uid); refreshBulkBar(); });
+        // A phone keeps one entry open: opening this one closes and repaints the others.
+        const toggleOpen = () => {
+            if (open) { entryOpen.delete(e.uid); renderEntry(e); return; }
+            if (phone()) { const others = [...entryOpen]; entryOpen.clear(); entryOpen.add(e.uid); for (const uid of others) { const x = data?.entries?.[uid]; if (x) renderEntry(x); } renderEntry(e); return; }
+            entryOpen.add(e.uid); renderEntry(e);
+        };
         const chev = document.createElement('i');
         chev.className = 'fa-solid fa-chevron-right wa-chevron' + (open ? ' wa-open' : '');
         chev.title = open ? t`Collapse entry. Shift-click for all entries.` : t`Expand entry. Shift-click for all entries.`;
@@ -983,7 +995,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 for (const x of others) anyOtherOpen ? entryOpen.delete(x.uid) : entryOpen.add(x.uid);
                 renderExplorer(); return;
             }
-            open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e);
+            toggleOpen();
         });
         // A glyph at rest; the menu carries the words, as the Studio's other menus do.
         const modeOpts = [['keyword', '🟢', t`Keyword`], ['constant', '🔵', t`Constant`], ['vector', '🔗', t`Vector`]];
@@ -1099,12 +1111,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         titleLine.append(title, ...(dupMark ? [dupMark] : []), pencil);   // the pencil stays at the end of the title, not the row
         titleWrap.append(titleLine);
         if (open) { meta.classList.add('wa-entry-meta-sub'); titleWrap.append(meta); }
-        h.append(selBox, chev, mode, onOff, titleWrap, ...(open ? [] : [meta]));
         // Collapsed-line badge: flagged-key count tinted by the worst flag; counts problems, not warnings (yellow, green).
         const counted = flagged ? [...flagged.values()].filter(v => scan.severityOf(v) === SEVERE) : [];
         // Refused secondaries count too, as severe: the entry gates on fewer keys than written. A dead one is neutral, as a dead primary is.
         const secBad = scan ? scan.unusableKeysOf(e).filter(r => scan.severityOf(r) === SEVERE).length : 0;
-        if (counted.length + secBad) {
+        const badgeEl = counted.length + secBad ? (() => {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
             badge.textContent = t`${counted.length + secBad} flagged`;
             let worst = secBad ? SEVERE : '';
@@ -1125,29 +1136,31 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (softer) tip.push(t`${softer} more are warnings, not counted here.`);
             tip.push(t`Expand to see which.`);
             badge.title = tip.join(' ');
-            h.append(badge);
-        }
-        h.addEventListener('click', () => { open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e); });
+            return badge;
+        })() : null;
+        h.addEventListener('click', toggleOpen);
         onContextMenu(h, ev => { ev.preventDefault(); showEntryMenu(e, ev.clientX, ev.clientY); });
-        row.append(h);
-
-        if (!open) {   // level-1 collapsed: title line only
+        const headParts = { row, head: h, selBox, chev, mode, onOff, title, pencil, dupMark, badge: badgeEl, open };
+        const rowHead = () => { h.append(selBox, chev, mode, onOff, titleWrap, ...(open ? [] : [meta])); if (badgeEl) h.append(badgeEl); row.append(h); };
+        const mountRow = () => {
             const old = rowEls.get(e.uid);
             if (old && old.isConnected) old.replaceWith(row); else mount?.append(row);
             rowEls.set(e.uid, row);
             return row;
-        }
+        };
 
-        h.append(buildEntryTools(e, renderEntry));
+        if (!open) {   // level-1 collapsed: title line only
+            if (card) arrangeCard(headParts); else rowHead();
+            return mountRow();
+        }
 
         const boltBtn = tool('fa-bolt', false, t`TF-IDF keyword suggestions`, () => suggestTfidf(e, boltBtn));
         const llmBtn = tool('fa-wand-magic-sparkles', false, t`Local-model keyword suggestions`, () => suggestLlm(e, llmBtn));
 
-        const body = document.createElement('div'); body.className = 'wa-entry-body';
-
         // Keyword paragraph: chips coloured by verdict, click-to-edit, ✕ deletes, ➕ adds, then the suggestion chips.
         const para = document.createElement('div'); para.className = 'wa-kw-para';
-        for (const key of (Array.isArray(e.key) ? e.key : [])) {
+        const keys = Array.isArray(e.key) ? e.key : [];
+        for (const key of (card ? packByLength(keys) : keys)) {
             const v = flagged?.get(key);
             let annot = '';
             const item = document.createElement('span'); item.className = 'wa-kw-item';   // chip + reason wrap as one
@@ -1185,6 +1198,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             para.append(item);
         }
         // Candidate chips: ➕ takes the term as-is, clicking the text rewords it first; either commits on the spot.
+        const suggItems = [];   // the suggestion chips, then the bolt and llm tools
         const g = sugg.get(e.uid);
         if (g) for (const [kind, terms] of [['tfidf', g.tfidf], ['llm', g.llm]]) for (const term of terms) {
             if (hasKey(e, term)) continue;
@@ -1198,7 +1212,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             st.addEventListener('click', () => inlineInput(st, (nv, ok) => {
                 if (ok && nv && nv !== term) acceptEdited(e, term, nv); else renderEntry(e);
             }, { value: term }));
-            chip.append(take, st); para.append(chip);
+            chip.append(take, st); suggItems.push(chip);
         }
         const add = document.createElement('i'); add.className = 'fa-solid fa-plus wa-tool'; add.title = t`Add a key`;
         add.addEventListener('click', () => inlineInput(add, (nv, ok) => {
@@ -1206,15 +1220,18 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (ok && nv && !hasKey(e, nv)) { if (!Array.isArray(e.key)) e.key = []; e.key.push(nv); save(); }
             renderEntry(e);
         }, { placeholder: t`keyword` }));
-        para.append(add, boltBtn, llmBtn);   // manual + first, then the suggestion triggers
+        para.append(add);
+        suggItems.push(boltBtn, llmBtn);
 
         // --- Secondary keys: a tray under the keys it gates, folded to its heading while the entry has none. A refused or dead key is
         // painted (unusableKeysOf) and nothing else, a gate not being a trigger.
         const secKeys = Array.isArray(e.keysecondary) ? e.keysecondary : [];
-        const secShown = secKeys.length > 0 || secOpen.has(e.uid);
+        // On a phone an empty tray is built whole inside a fold, which hides it while closed.
+        const secInFold = card && !secKeys.length;
+        const secShown = secKeys.length > 0 || secInFold || secOpen.has(e.uid);
         const sec = document.createElement('div');
         sec.className = 'wa-kw-para wa-kw-sec';
-        if (!secKeys.length) {
+        if (!secKeys.length && !secInFold) {
             const fold = document.createElement('span'); fold.className = 'wa-sec-fold';
             fold.title = t`How the secondary keys gate the primaries above. They never activate on their own.`;
             const chev = document.createElement('i'); chev.className = 'fa-solid fa-chevron-right wa-chevron' + (secShown ? ' wa-open' : '');
@@ -1283,6 +1300,31 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             }, { placeholder: t`secondary key` }));
             sec.append(addSec);
         }
+        const cnt = n => Object.assign(document.createElement('span'), { className: 'wa-fold-sub', textContent: String(n) });
+        const secFold = secInFold ? foldDetails(e.uid, 'secondary', [t`Secondary keys`, cnt(0)], sec) : null;
+
+        if (card) {
+            const moreBtn = tool('fa-ellipsis', false, t`Entry actions`, () => { const r = moreBtn.getBoundingClientRect(); showEntryMenu(e, r.left, r.bottom + 2); });
+            const onPreviewTap = () => editEntryText(e, v => { e.content = v; save(); suggest = null; renderEntry(e); });
+            const isAdvOpen = advOpen.has(e.uid);
+            arrangeCard({
+                ...headParts, moreBtn,
+                previewText: String(e.content ?? '').trim(), onPreviewTap,
+                chips: para, suggItems, secFold, sec,
+                suggFold: el => foldDetails(e.uid, 'suggestions', [t`Suggestions`, cnt(suggItems.length - 2)], el),
+                advSummaryParts: entryStateParts(e, { caseGlobal: !!world_info_case_sensitive, wholeGlobal: !!world_info_match_whole_words }, t),
+                // Setting a details' open fires toggle too, so only a change of state counts.
+                advOpen: isAdvOpen, onAdvToggle: on => { if (on === advOpen.has(e.uid)) return; on ? advOpen.add(e.uid) : advOpen.delete(e.uid); if (on) renderEntry(e); },
+                tray: isAdvOpen ? buildAdvancedTray(e, renderEntry, { layout: 'grid' }) : null,
+            });
+            return mountRow();
+        }
+        // --- row arrangement (desktop) ---
+        rowHead();
+        h.append(buildEntryTools(e, renderEntry));
+        add.before(...suggItems.slice(0, -2));   // the suggestion chips sit before the add control, the triggers after it
+        para.append(boltBtn, llmBtn);
+        const body = document.createElement('div'); body.className = 'wa-entry-body';
 
         // --- Level 2: text section ---
         const textSec = document.createElement('div'); textSec.className = 'wa-text-sec';
