@@ -3142,6 +3142,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 + 'border-style:dashed;background-color:transparent;cursor:default;';
         const hayWrap = document.createElement('div');
         hayWrap.style.cssText = 'flex:3 1 0;position:relative;display:flex;min-height:0;overflow:hidden;margin:5px 0;';
+        hayWrap.className = 'wa-lab-hay';
         // Outside hayRead, which scrolls: a child of it would scroll away from the text.
         const hayToggle = document.createElement('i');
         hayToggle.style.cssText = 'position:absolute;top:5px;right:9px;cursor:pointer;opacity:0.85;padding:3px 5px;border-radius:4px;'
@@ -3228,6 +3229,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const opts = document.createElement('div');
         // One line above the keys, which is what the flags and the window apply to; the labels shrink, wrapping their own text.
         opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:2px 0;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
+        opts.className = 'wa-lab-opts';
         const flag = (label, get, set) => {
             const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
             const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();

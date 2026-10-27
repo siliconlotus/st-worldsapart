@@ -662,9 +662,11 @@ dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !
 .wa-phone-row .wa-phone-menu { flex: 0 0 44px; margin: 0; width: 44px; }
 .wa-studio-fixed .wa-undo-bar { margin: 0 0 6px; }
 .wa-lab-body { flex-direction: column; overflow-y: auto; }
-.wa-lab-body > * { flex: 0 0 auto !important; min-height: 12em; }
+.wa-lab-body > * { flex: 0 0 auto !important; }
+.wa-lab-hay { flex: 0 0 14em !important; }
+.wa-lab-opts { flex-wrap: wrap; }
 .wa-lab-tools { flex-wrap: wrap; }
-/* Cleanup keeps its rail: a row above the list, six to eight squares across. */
+/* Cleanup's rail: a row above the list. */
 .wa-studio-body { flex-direction: column; }
 .wa-studio-entries { min-height: 0; }
 .wa-rail { flex-direction: row; flex-wrap: wrap; order: -1; padding: 0 0 6px; }
