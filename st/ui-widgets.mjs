@@ -631,7 +631,7 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-text-edit-dlg .popup-body, .wa-text-edit-dlg .popup-content { display: flex; flex-direction: column; min-height: 0; }
 .wa-text-edit-dlg .popup-content { flex: 1 1 auto; }
 .wa-text-edit-dlg { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
-/* Phone: the nav pane is not drawn; the explorer header draws a book select in its place (entry-card.mjs). */
+/* Phone: the nav pane is not drawn. */
 @media ${PHONE_QUERY} {
 .wa-studio-nav { display: none; }
 .wa-studio-explorer { padding-left: 0; }
@@ -642,7 +642,6 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-term-why { flex: 1 1 100%; margin-left: 1rem; white-space: normal; }
 dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !important; height: 100dvh !important; max-height: 100dvh !important; margin: 0; inset: 0; border-radius: 0; }
 .wa-card-bar { min-height: 44px; gap: 8px; padding: 0 4px; }
-.wa-card-bar .wa-entry-title { font-weight: bold; }
 .wa-card-bar .wa-chevron { margin-left: auto; }
 .wa-card-bar .wa-tool.fa-ellipsis { margin-left: auto; }
 .wa-card-bar .wa-tool.fa-ellipsis + .wa-chevron { margin-left: 0; }

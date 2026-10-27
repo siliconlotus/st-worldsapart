@@ -980,7 +980,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // A phone keeps one entry open: opening this one closes and repaints the others.
         const toggleOpen = () => {
             if (open) { entryOpen.delete(e.uid); renderEntry(e); return; }
-            if (phone()) { const others = [...entryOpen]; entryOpen.clear(); entryOpen.add(e.uid); for (const uid of others) { const x = data?.entries?.[uid]; if (x) renderEntry(x); } renderEntry(e); return; }
+            if (phone()) { const others = [...entryOpen]; entryOpen.clear(); entryOpen.add(e.uid); for (const uid of others) { const x = data?.entries?.[uid]; if (x && rowEls.get(uid)?.isConnected) renderEntry(x); } renderEntry(e); return; }
             entryOpen.add(e.uid); renderEntry(e);
         };
         const chev = document.createElement('i');
@@ -1226,12 +1226,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // --- Secondary keys: a tray under the keys it gates, folded to its heading while the entry has none. A refused or dead key is
         // painted (unusableKeysOf) and nothing else, a gate not being a trigger.
         const secKeys = Array.isArray(e.keysecondary) ? e.keysecondary : [];
-        // On a phone an empty tray is built whole inside a fold, which hides it while closed.
-        const secInFold = card && !secKeys.length;
-        const secShown = secKeys.length > 0 || secInFold || secOpen.has(e.uid);
+        // On a phone the tray is built whole inside a fold, which hides it while closed.
+        const secShown = secKeys.length > 0 || card || secOpen.has(e.uid);
         const sec = document.createElement('div');
         sec.className = 'wa-kw-para wa-kw-sec';
-        if (!secKeys.length && !secInFold) {
+        if (!secKeys.length && !card) {
             const fold = document.createElement('span'); fold.className = 'wa-sec-fold';
             fold.title = t`How the secondary keys gate the primaries above. They never activate on their own.`;
             const chev = document.createElement('i'); chev.className = 'fa-solid fa-chevron-right wa-chevron' + (secShown ? ' wa-open' : '');
@@ -1301,7 +1300,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             sec.append(addSec);
         }
         const cnt = n => Object.assign(document.createElement('span'), { className: 'wa-fold-sub', textContent: String(n) });
-        const secFold = secInFold ? foldDetails(e.uid, 'secondary', [t`Secondary keys`, cnt(0)], sec) : null;
+        const secFold = card ? foldDetails(e.uid, 'secondary', [t`Secondary keys`, cnt(secKeys.length)], sec) : null;
+        if (secFold) secFold.querySelector('summary').title = t`How the secondary keys gate the primaries above. They never activate on their own.`;
 
         if (card) {
             const moreBtn = tool('fa-ellipsis', false, t`Entry actions`, () => { const r = moreBtn.getBoundingClientRect(); showEntryMenu(e, r.left, r.bottom + 2); });
@@ -1310,7 +1310,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             arrangeCard({
                 ...headParts, moreBtn,
                 previewText: String(e.content ?? '').trim(), onPreviewTap,
-                chips: para, suggItems, secFold, sec,
+                chips: para, suggItems, secFold,
                 suggFold: el => foldDetails(e.uid, 'suggestions', [t`Suggestions`, cnt(suggItems.length - 2)], el),
                 advSummaryParts: entryStateParts(e, { caseGlobal: !!world_info_case_sensitive, wholeGlobal: !!world_info_match_whole_words }, t),
                 // Setting a details' open fires toggle too, so only a change of state counts.
@@ -3690,6 +3690,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const entry = Object.values(data?.entries ?? {}).find(e => String(e.uid) === String(uid));
         if (!entry) return;
         tab = 'explorer';
+        if (phone()) entryOpen.clear();
         entryOpen.add(entry.uid);
         renderExplorer();
         const row = rowEls.get(entry.uid);

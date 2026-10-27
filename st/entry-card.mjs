@@ -22,8 +22,7 @@ export function arrangeCard(p) {
     pv.append(txt, pen);
     pv.addEventListener('click', p.onPreviewTap);
     body.append(pv, p.chips);
-    // Secondary keys: a fold while the entry has none, the tray itself once it has.
-    if (p.secFold) body.append(p.secFold); else body.append(p.sec);
+    body.append(p.secFold);
     const sugg = document.createElement('div'); sugg.className = 'wa-kw-para'; sugg.append(...p.suggItems);
     body.append(p.suggFold(sugg));
     const adv = document.createElement('details'); adv.className = 'wa-fold wa-fold-adv'; adv.open = p.advOpen;
