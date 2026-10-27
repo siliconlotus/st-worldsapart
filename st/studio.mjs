@@ -9,7 +9,7 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
 import { editEntryText, ensureStudioStyle, makeSortControl, makeSwitch, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
-import { arrangeCard } from './entry-card.mjs';
+import { arrangeCard, buildPhoneHeader } from './entry-card.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
@@ -1680,8 +1680,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         latchWarn(latches.failed);
         if (undoTimer) clearTimeout(undoTimer);
         pendingUndo = { books, forgotten, latches: latches.dropped, chatId };
-        undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; renderBooks(); }, 30000);
-        renderBooks();
+        undoTimer = setTimeout(() => { pendingUndo = null; undoTimer = null; paintUndo(); }, 30000);
+        paintUndo();
     };
     const delBook = async () => {
         if (!await Popup.show.confirm(t`Delete lorebook “${selected}”?`, t`This deletes the entire book and every entry in it.`)) return;
@@ -1990,7 +1990,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     // --- Shared header controls: the search box and type filter read and write the same state on every tab ---
     const buildSearchBox = onChange => {
-        const wrap = document.createElement('span'); wrap.style.cssText = 'position:relative;display:inline-flex;align-items:stretch;';   // stretch: the icon-only button takes the input's height
+        const wrap = document.createElement('span'); wrap.className = 'wa-search'; wrap.style.cssText = 'position:relative;display:inline-flex;align-items:stretch;';   // stretch: the icon-only button takes the input's height
         const search = document.createElement('input'); search.type = 'search'; search.className = 'text_pole wa-filter';
         search.placeholder = t`Search…`; search.value = searchQuery;
         search.style.cssText = 'width:11em;border-top-left-radius:0;border-bottom-left-radius:0;';
@@ -3585,7 +3585,13 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         pane.style.cssText = 'flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;min-height:0;';
         explorer.append(pane);
         if (tab === 'lab') { renderLabView(pane); return; }
-        if (!selected) { pane.innerHTML = `<div style="opacity:0.6;padding:8px;">${escapeHtml(t`Select a lorebook on the left.`)}</div>`; return; }
+        if (!selected) {
+            const note = `<div style="opacity:0.6;padding:8px;">${escapeHtml(phone() ? t`Select a lorebook above.` : t`Select a lorebook on the left.`)}</div>`;
+            if (!phone()) { pane.innerHTML = note; return; }
+            renderExplorerView(pane);   // for the book select; the list then holds the note
+            pane.querySelector('.wa-studio-entries').innerHTML = note;
+            return;
+        }
         // Cleanup is async (paints a note, then blocks) and repaints itself; nothing awaits it.
         if (tab === 'cleanup') { renderCleanupView(pane); return; }
         renderExplorerView(pane);
@@ -3648,25 +3654,49 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         suggestAllLlmBtn.addEventListener('click', () => suggestAllLlm(suggestAllLlmBtn));
         // Typing re-filters in place (applyFilter), not the header, so the input keeps focus.
         const searchWrap = buildSearchBox(() => applyFilter());
-        const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
-        const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
-        row1.append(label, filterWrap, sortBtn, searchWrap);
         const newBtn = document.createElement('button');
         newBtn.type = 'button'; newBtn.className = 'menu_button';
         newBtn.innerHTML = '<i class="fa-solid fa-plus"></i>';
         newBtn.title = t`New entry`;
         newBtn.addEventListener('click', () => newEntry());
-        // The actions stand in a rail beside the list: the rows leave that width empty, and a row above the list does not.
-        const rail = document.createElement('div'); rail.className = 'wa-rail';
         const cog = trayBtn(); cog.style.width = ''; cog.style.padding = '';   // the rail's square sizing, not the header button's; the open-state colour stays
-        rail.append(scanBtn, newBtn, suggestAllBtn, suggestAllLlmBtn, expandBtn, cog);
-        head.append(row1);
         const fixed = document.createElement('div'); fixed.className = 'wa-studio-fixed';
-        bulkEl = renderBulkBar();
-        fixed.append(head, bulkEl);   // the trays live in the cog popup, never inline
         const list = document.createElement('div'); list.className = 'wa-studio-entries';
         const body = document.createElement('div'); body.className = 'wa-studio-body';
-        body.append(list, rail);
+        if (phone()) {
+            const allOpenNow = () => entries.length > 0 && entries.every(x => entryOpen.has(x.uid));
+            const menuItems = () => [
+                { label: t`Key audit`, icon: 'fa-solid fa-stethoscope', fn: () => scanBtn.click() },
+                { label: t`New entry`, icon: 'fa-solid fa-plus', fn: () => newBtn.click() },
+                { label: t`Suggest all`, icon: 'fa-solid fa-bolt', fn: () => suggestAllBtn.click() },
+                { label: t`Suggest all (LLM)`, icon: 'fa-solid fa-wand-magic-sparkles', fn: () => suggestAllLlmBtn.click() },
+                { label: allOpenNow() ? t`Collapse all` : t`Expand all`, icon: 'fa-solid fa-arrows-up-down', fn: () => expandBtn.click() },
+                { label: t`Tool settings`, icon: 'fa-solid fa-gear', fn: () => cog.click() },
+                { label: t`Rename lorebook`, icon: 'fa-solid fa-pen', fn: () => renameBook() },
+                { label: t`Duplicate lorebook`, icon: 'fa-solid fa-copy', fn: () => dupBook() },
+                { label: t`Delete lorebook`, icon: 'fa-solid fa-trash-can', fn: () => delBook(), danger: true },
+            ];
+            const names = [...world_names].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
+            head.append(buildPhoneHeader({
+                books: names, selected, attached: new Set(attachedBookNames()), orphans: orphans ? orphans.chatCount + orphans.cardCount : 0,
+                onPick: v => { if (v === '\u001Forphans') { orphanView = true; renderBooks(); renderExplorer(); } else if (v !== selected) openBook(v); },
+                search: searchWrap, filterBtn: filterWrap, sortBtn, menuItems, openMenu: (items, x, y) => showCtxMenu(items, x, y, ctxMount()),
+            }));
+            bulkEl = renderBulkBar();
+            fixed.append(head, buildUndoBar(), bulkEl);
+            body.append(list);
+        } else {
+            const rowStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+            const row1 = document.createElement('div'); row1.style.cssText = rowStyle;
+            row1.append(label, filterWrap, sortBtn, searchWrap);
+            // The actions stand in a rail beside the list: the rows leave that width empty, and a row above the list does not.
+            const rail = document.createElement('div'); rail.className = 'wa-rail';
+            rail.append(scanBtn, newBtn, suggestAllBtn, suggestAllLlmBtn, expandBtn, cog);
+            head.append(row1);
+            bulkEl = renderBulkBar();
+            fixed.append(head, bulkEl);   // the trays live in the cog popup, never inline
+            body.append(list, rail);
+        }
         pane.append(fixed, body);
         // Repaints just the entry list and the count for the current filter + search.
         const applyFilter = () => {
@@ -3715,6 +3745,30 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         renderExplorer();
     };
 
+    /** The deleted-book undo bar: in the nav head, or on a phone above the list; empty with nothing to undo. */
+    const buildUndoBar = () => {
+        if (!pendingUndo) return document.createDocumentFragment();
+        const bar = document.createElement('div'); bar.className = 'wa-undo-bar';
+        const top = document.createElement('div'); top.className = 'wa-undo-top';
+        const txt = document.createElement('span'); txt.className = 'wa-undo-text';
+        txt.innerHTML = '<i class="fa-solid fa-trash-can-arrow-up"></i> '; txt.append(document.createTextNode(t`Deleted`));
+        const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-undo-dismiss'; x.title = t`Dismiss`;
+        x.addEventListener('click', () => { clearUndo(); paintUndo(); });
+        top.append(txt, x);
+        const label = pendingUndo.books.length === 1 ? pendingUndo.books[0].name : t`${pendingUndo.books.length} lorebooks`;
+        const name = document.createElement('div'); name.className = 'wa-undo-name'; name.textContent = label; name.title = pendingUndo.books.map(b => b.name).join(', ');
+        const undoBtn = document.createElement('button'); undoBtn.type = 'button'; undoBtn.className = 'menu_button wa-undo-btn'; undoBtn.textContent = t`Undo`;
+        undoBtn.addEventListener('click', restoreBook);
+        bar.append(top, name, undoBtn);
+        return bar;
+    };
+    /** Repaints the undo bar wherever it stands, without rebuilding the entry list. */
+    const paintUndo = () => {
+        renderBooks();
+        explorer.querySelector('.wa-undo-bar')?.remove();
+        if (phone()) explorer.querySelector('.wa-studio-exphead')?.after(buildUndoBar());
+    };
+
     const renderBooks = () => {
         nav.innerHTML = '';
         nav.classList.toggle('wa-nav-wide', bookBulkMode && !navCollapsed);   // widen to show full titles while selecting
@@ -3748,21 +3802,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         head.append(headRow);
         nav.append(head);
 
-        if (pendingUndo) {
-            const bar = document.createElement('div'); bar.className = 'wa-undo-bar';
-            const top = document.createElement('div'); top.className = 'wa-undo-top';
-            const txt = document.createElement('span'); txt.className = 'wa-undo-text';
-            txt.innerHTML = '<i class="fa-solid fa-trash-can-arrow-up"></i> '; txt.append(document.createTextNode(t`Deleted`));
-            const x = document.createElement('i'); x.className = 'fa-solid fa-xmark wa-undo-dismiss'; x.title = t`Dismiss`;
-            x.addEventListener('click', () => { clearUndo(); renderBooks(); });
-            top.append(txt, x);
-            const label = pendingUndo.books.length === 1 ? pendingUndo.books[0].name : t`${pendingUndo.books.length} lorebooks`;
-            const name = document.createElement('div'); name.className = 'wa-undo-name'; name.textContent = label; name.title = pendingUndo.books.map(b => b.name).join(', ');
-            const undoBtn = document.createElement('button'); undoBtn.type = 'button'; undoBtn.className = 'menu_button wa-undo-btn'; undoBtn.textContent = t`Undo`;
-            undoBtn.addEventListener('click', restoreBook);
-            bar.append(top, name, undoBtn);
-            head.append(bar);
-        }
+        head.append(buildUndoBar());
 
         const names = [...world_names].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
 
@@ -3841,10 +3881,14 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         consumeSelection();   // recoverable from the bar, same as any other clear
     });
 
+    const mq = matchMedia(PHONE_QUERY);
+    const onLayoutChange = () => { renderBooks(); renderExplorer(); };
+    mq.addEventListener('change', onLayoutChange);
     const pop = new Popup(root, POPUP_TYPE.TEXT, '', { wide: true, okButton: false, allowVerticalScrolling: false });
     pop.buttonControls.style.display = 'none';   // hiding the OK button alone leaves the row's padding
     closeBtn.addEventListener('click', () => pop.complete(POPUP_RESULT.AFFIRMATIVE));
     await pop.show();
+    mq.removeEventListener('change', onLayoutChange);
     clearUndo(); clearEntryUndo();   // drop the pending timers/snapshots when Studio closes
     if (dirty && selected) reloadEditor(selected);
     return '';

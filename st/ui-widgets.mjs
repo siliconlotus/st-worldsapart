@@ -653,6 +653,14 @@ dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !
 .wa-card-body .wa-kw-sec { border-top: none; padding-top: 0; }
 .wa-fold.wa-fold-adv > .wa-adv-grid { margin: 0; border: none; background: transparent; }
 .wa-fold[data-fold="secondary"] > .wa-kw-sec, .wa-fold[data-fold="suggestions"] > .wa-kw-para { padding: 0 10px 8px; margin: 0; }
+.wa-phone-head { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; }
+.wa-phone-head .wa-book-select { width: 100%; height: 38px; margin: 0; }
+.wa-phone-head .wa-search { display: flex; width: 100%; }
+.wa-phone-head .wa-search input { flex: 1 1 auto; width: auto; }
+.wa-phone-row { display: flex; gap: 6px; }
+.wa-phone-row > * { flex: 1 1 0; min-width: 0; }
+.wa-phone-row .wa-phone-menu { flex: 0 0 44px; margin: 0; width: 44px; }
+.wa-studio-fixed .wa-undo-bar { margin: 0 0 6px; }
 }
 /* Touch: a finger-sized box around each small control. */
 @media (pointer: coarse) {
