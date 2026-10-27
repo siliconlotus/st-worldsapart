@@ -2416,7 +2416,12 @@ function ensureDeliveryPanel() {
 .wa-delivery-tokens { flex: 0 0 auto; margin-left: auto; opacity: 0.55; font-variant-numeric: tabular-nums; }
 .wa-delivery-budget { padding: 4px 5px; opacity: 0.7; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-delivery-empty { opacity: 0.6; padding: 4px; }
-.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }`;
+.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
+/* ST's phone layout (its own breakpoint) runs the send form along the bottom edge: the trigger rides above it. */
+@media (max-width: 1000px) {
+.wa-delivery-trigger { bottom: calc(var(--bottomFormBlockSize, 50px) + 10px); }
+.wa-delivery-panel { bottom: calc(var(--bottomFormBlockSize, 50px) + 46px); }
+}`;
     document.head.append(style);
 
     deliveryTrigger = document.createElement('div');

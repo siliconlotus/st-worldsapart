@@ -15,7 +15,7 @@ export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢
 let ctxPanels = [];   // open panels, root at 0; a submenu at depth d replaces anything deeper
 const closeCtx = () => {
     for (const m of ctxPanels) m.remove(); ctxPanels = [];
-    document.removeEventListener('mousedown', ctxDown, true);
+    document.removeEventListener('pointerdown', ctxDown, true);
     document.removeEventListener('keydown', ctxKey, true);
     window.removeEventListener('scroll', closeCtx, true);
 };
@@ -60,7 +60,7 @@ const buildCtxPanel = (items, x, y, depth, mount, refresh = null) => {
 export const showCtxMenu = (items, x, y, mount = document.body, refresh = null) => {
     closeCtx();
     buildCtxPanel(items, x, y, 0, mount, refresh);
-    document.addEventListener('mousedown', ctxDown, true);
+    document.addEventListener('pointerdown', ctxDown, true);   // pointerdown, not mousedown: the release after a long press fires a compat mousedown on the element, which would close the menu it just opened
     document.addEventListener('keydown', ctxKey, true);
     window.addEventListener('scroll', closeCtx, true);
 };
@@ -314,6 +314,26 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
 }
 
 let studioStyled = false;
+/** Below this the Studio's three panes do not fit side by side; the stylesheet and the nav's opening state read the same value. */
+export const PHONE_QUERY = '(max-width: 600px)';
+
+/** `fn(ev)` on right-click, and on a touch held still for half a second, since iOS fires no contextmenu. `ev` carries
+ *  target, clientX/Y and preventDefault either way. The release after a hold would click the element: swallowed. */
+export function onContextMenu(el, fn) {
+    let timer = 0, held = false, x0 = 0, y0 = 0;
+    el.addEventListener('contextmenu', ev => { clearTimeout(timer); if (held) { ev.preventDefault(); return; } fn(ev); });   // Android fires its own on a hold: one menu, not two
+    el.addEventListener('pointerdown', ev => {
+        if (ev.pointerType !== 'touch') return;
+        held = false; x0 = ev.clientX; y0 = ev.clientY;
+        el.style.webkitTouchCallout = 'none'; el.style.userSelect = 'none';   // the hold must not select the text or raise the copy sheet
+        const { target, clientX, clientY } = ev;
+        timer = setTimeout(() => { held = true; fn({ target, clientX, clientY, preventDefault() {} }); }, 500);
+    });
+    el.addEventListener('pointermove', ev => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) clearTimeout(timer); });   // a scroll is not a hold
+    el.addEventListener('pointerup', () => clearTimeout(timer));
+    el.addEventListener('pointercancel', () => clearTimeout(timer));
+    el.addEventListener('click', ev => { if (held) { held = false; ev.stopPropagation(); ev.preventDefault(); } }, true);
+}
 export function ensureStudioStyle() {
     if (studioStyled) return;
     studioStyled = true;
@@ -554,7 +574,24 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-adv-warn { display: flex; align-items: center; gap: 5px; margin-top: 5px; padding: 4px 6px; border-radius: 4px; font-size: 0.8em;
     background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
     border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
-.wa-adv-warn i { color: var(--golden, #e0a86c); }`;
+.wa-adv-warn i { color: var(--golden, #e0a86c); }
+/* Phone: the nav pane is not drawn; the explorer header draws a book select in its place (entry-card.mjs). */
+@media ${PHONE_QUERY} {
+.wa-studio-nav { display: none; }
+.wa-studio-explorer { padding-left: 0; }
+.wa-tabs { flex-wrap: wrap; }
+.wa-tab-status { flex: 1 1 100%; margin: 0 0 4px; }
+.wa-studio-exphead .menu_button { width: auto; }
+.wa-term-row { flex-wrap: wrap; padding-left: 4px; }
+.wa-term-why { flex: 1 1 100%; margin-left: 1rem; white-space: normal; }
+}
+/* Touch: a finger-sized box around each small control. */
+@media (pointer: coarse) {
+.wa-tool { height: 2.2em; min-width: 2.2em; }
+.wa-book-tool, .wa-term-act, .wa-kw-del, .wa-chevron, .wa-undo-dismiss, .wa-sugg-add, .wa-mode { padding: 0.5em; }
+.wa-kw { padding: 0.25em 10px; }
+.wa-ctx-item { padding: 10px 14px; }
+}`;
     document.head.append(style);
 }
 

@@ -8,7 +8,7 @@ import { escapeHtml, getCharaFilename, getSanitizedFilename } from '../../../../
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
@@ -1117,7 +1117,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             h.append(badge);
         }
         h.addEventListener('click', () => { open ? entryOpen.delete(e.uid) : entryOpen.add(e.uid); renderEntry(e); });
-        h.addEventListener('contextmenu', ev => { ev.preventDefault(); showEntryMenu(e, ev.clientX, ev.clientY); });
+        onContextMenu(h, ev => { ev.preventDefault(); showEntryMenu(e, ev.clientX, ev.clientY); });
         row.append(h);
 
         if (!open) {   // level-1 collapsed: title line only
@@ -1168,7 +1168,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 e.key.splice(e.key.indexOf(key), 1); save(); renderEntry(e);
             });
             chip.append(del);
-            chip.addEventListener('contextmenu', ev => { ev.preventDefault(); showKwMenu(key, ev.clientX, ev.clientY); });
+            onContextMenu(chip, ev => { ev.preventDefault(); showKwMenu(key, ev.clientX, ev.clientY); });
             item.append(chip);
             if (annot) { const r = document.createElement('span'); r.className = 'wa-kw-reason'; r.textContent = `(${annot})`; item.append(r); }   // reason outside the chip
             para.append(item);
@@ -2034,7 +2034,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const why = document.createElement('span'); why.className = 'wa-term-why';
         why.textContent = r.why === 'ignored' ? t`ignored` : (r.why ?? '');   // muted, whatever the flag: the term's own colour carries the state
         if (r.message) why.title = r.message;
-        if (onContext) row.addEventListener('contextmenu', ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
+        if (onContext) onContextMenu(row, ev => { ev.preventDefault(); onContext(e, r, ev.clientX, ev.clientY); });
         row.append(cb, name);
         if (onEdit) {
             name.style.cursor = 'pointer';
@@ -2840,7 +2840,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     /** A digest line jumps to its hit in `textEl`. The offset may land inside a span that starts earlier — an overlap folds
      *  to one mark — so the mark that contains it is the target, not one that begins at it. */
     /** Right-click a key block that came from an entry: the operations, on that entry's book. */
-    const bindKwMenu = digestEl => digestEl.addEventListener('contextmenu', ev => {
+    const bindKwMenu = digestEl => onContextMenu(digestEl, ev => {
         const block = ev.target.closest('details[data-k][data-world]');
         if (!block) return;
         ev.preventDefault();
