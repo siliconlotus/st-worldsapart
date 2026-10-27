@@ -651,6 +651,10 @@ dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !
 .wa-card-bar .wa-entry-titlewrap { min-width: 3em; }
 .wa-card-bar .wa-tool.fa-ellipsis { margin-left: auto; }
 .wa-card-bar .wa-tool.fa-ellipsis + .wa-chevron { margin-left: 0; }
+/* A rename in progress takes a line of its own under the bar's controls. */
+.wa-card-bar:has(.wa-entry-titlewrap input) { flex-wrap: wrap; }
+.wa-card-bar .wa-entry-titlewrap:has(input) { flex: 1 1 100%; order: 1; min-width: 0; }
+.wa-card-bar .wa-entry-titlewrap input { flex: 1 1 0; min-width: 0; }
 .wa-card-body { padding: 6px 4px 12px; display: flex; flex-direction: column; gap: 10px; }
 .wa-card-preview { position: relative; cursor: pointer; padding: 6px 36px 6px 8px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2)); }
 .wa-card-preview-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.92em; opacity: 0.85; white-space: pre-wrap; }
