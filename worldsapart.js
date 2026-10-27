@@ -2413,8 +2413,8 @@ function ensureDeliveryPanel() {
 .wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 /* ST's phone layout (its own breakpoint) runs the send form along the bottom edge: the trigger rides above it. */
 @media (max-width: 1000px) {
-.wa-delivery-trigger { bottom: calc(var(--bottomFormBlockSize, 50px) + 10px); }
-.wa-delivery-panel { bottom: calc(var(--bottomFormBlockSize, 50px) + 46px); }
+.wa-delivery-trigger { left: max(10px, env(safe-area-inset-left)); bottom: calc(var(--bottomFormBlockSize, 50px) + 10px + env(safe-area-inset-bottom, 0px)); }
+.wa-delivery-panel { left: max(10px, env(safe-area-inset-left)); bottom: calc(var(--bottomFormBlockSize, 50px) + 46px + env(safe-area-inset-bottom, 0px)); }
 }`;
     document.head.append(style);
 

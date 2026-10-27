@@ -671,14 +671,19 @@ dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !
 .wa-studio-entries { min-height: 0; }
 .wa-rail { flex-direction: row; flex-wrap: wrap; order: -1; padding: 0 0 6px; }
 .wa-rail .menu_button { width: 2.3em; height: 2.3em; }
+dialog.popup:has(.wa-studio) { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
 }
-/* Touch: a finger-sized box around each small control. */
+/* Touch: the whole band is the target, tools are squares with a gap, hover-only hints show always. */
 @media (pointer: coarse) {
+.wa-book-row, .wa-term-row, .wa-ctx-item { min-height: 2.5em; }
+.wa-entry-head { min-height: 2.5em; }
+.wa-entry-tools { gap: 4px; }
 .wa-tool { height: 2.2em; min-width: 2.2em; }
-.wa-book-tool, .wa-term-act, .wa-kw-del, .wa-chevron, .wa-undo-dismiss, .wa-sugg-add, .wa-mode { padding: 0.5em; }
-.wa-kw { padding: 0.25em 10px; }
-.wa-ctx-item { padding: 10px 14px; }
-.wa-chevron { width: auto; }
+.wa-book-tool, .wa-term-act, .wa-kw-del, .wa-chevron, .wa-undo-dismiss, .wa-sugg-add, .wa-mode, .wa-studio-close { padding: 0.5em; }
+.wa-kw { padding: 0.3em 10px; }
+.wa-studio-exphead .menu_button, .wa-filter, .wa-search input { min-height: 2.6em; }
+.wa-kw-text, .wa-meta-edit { border-bottom: 1px dotted currentColor; }
+.wa-sugg-text { text-decoration: underline dotted; }
 }`;
     document.head.append(style);
 }
