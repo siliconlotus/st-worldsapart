@@ -389,6 +389,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
     padding: 4px 7px; border-radius: 4px; font-size: 1.15em;
     background: none; border: none; color: inherit; line-height: 1; }
 .wa-studio-close:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
+dialog.popup:has(.wa-studio) { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
 /* renderMessageHtml's output, coloured as .mes_text colours a message. <q>'s auto-quotes are off: the quote characters
    are in the text already. */
 .wa-marked q { color: var(--SmartThemeQuoteColor); }
@@ -462,7 +463,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .wa-off { opacity: 0.45; }
 .wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 6em; flex: 1 1 auto; }
 .wa-entry-titleline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wa-entry-titleline .wa-entry-title { flex: 0 1 auto; }
 .wa-entry-meta-sub { white-space: normal; overflow: visible; }
@@ -671,7 +672,9 @@ dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !
 .wa-studio-entries { min-height: 0; }
 .wa-rail { flex-direction: row; flex-wrap: wrap; order: -1; padding: 0 0 6px; }
 .wa-rail .menu_button { width: 2.3em; height: 2.3em; }
-dialog.popup:has(.wa-studio) { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+}
+@media (max-width: 1000px) {
+dialog.popup:has(.wa-studio) { width: calc(100dvw - 2em); max-width: calc(100dvw - 2em); }
 }
 /* Touch: the whole band is the target, tools are squares with a gap, hover-only hints show always. */
 @media (pointer: coarse) {
@@ -681,9 +684,11 @@ dialog.popup:has(.wa-studio) { padding-left: max(14px, env(safe-area-inset-left)
 .wa-tool { height: 2.2em; min-width: 2.2em; }
 .wa-book-tool, .wa-term-act, .wa-kw-del, .wa-chevron, .wa-undo-dismiss, .wa-sugg-add, .wa-mode, .wa-studio-close { padding: 0.5em; }
 .wa-kw { padding: 0.3em 10px; }
-.wa-studio-exphead .menu_button, .wa-filter, .wa-search input { min-height: 2.6em; }
-.wa-kw-text, .wa-meta-edit { border-bottom: 1px dotted currentColor; }
-.wa-sugg-text { text-decoration: underline dotted; }
+.wa-studio-exphead .menu_button, .wa-filter { min-height: 3.33em; }
+.wa-kw-text { border-bottom: 1px dotted currentColor; }
+.wa-meta-edit, .wa-sugg-text { text-decoration: underline dotted; }
+.wa-chevron { width: auto; }
+.wa-kw-del { min-width: 2em; justify-content: center; display: inline-flex; }
 }`;
     document.head.append(style);
 }
