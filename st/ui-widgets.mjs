@@ -507,7 +507,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; margin: 0 -0.1em; }   /* the crown and the lettered tools: the scale leaves the box its full width; the margin takes back what the glyph gave up */
 .wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tool.wa-badge { position: relative; }
-.wa-tool.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
+.wa-tool.wa-badge::after, .wa-lab-flag.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
     font-size: 0.6em; font-style: normal; font-weight: bold; line-height: 1.4; padding: 0 3px;
     border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 30%, var(--SmartThemeBlurTintColor));
     color: var(--SmartThemeBodyColor); }
@@ -636,6 +636,11 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-text-edit-dlg .popup-body, .wa-text-edit-dlg .popup-content { display: flex; flex-direction: column; min-height: 0; }
 .wa-text-edit-dlg .popup-content { flex: 1 1 auto; }
 .wa-text-edit-dlg { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+/* The Lab's flag chips: the strip's glyph and a word, lit when on, a ± badge where a run's entries differ. */
+.wa-lab-flag { position: relative; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 3px 10px; border-radius: 11px; cursor: pointer; opacity: 0.75;
+    font: inherit; font-size: 0.9em; color: inherit; background: transparent; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); }
+.wa-lab-flag .wa-lab-glyph { font-weight: bold; }
+.wa-lab-flag.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); border-color: currentColor; background: color-mix(in srgb, currentColor 12%, transparent); }
 /* A run entry's gate: the operator chip square-cornered so it reads apart from the key chips after it. */
 .wa-lab-gate { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0 6px; opacity: 0.85; }
 .wa-lab-op { border-radius: 3px; font-weight: 600; font-size: 0.8em; letter-spacing: 0.02em; }
@@ -720,6 +725,7 @@ dialog.popup:has(.wa-studio) .popup-content { overflow: visible; }
 .wa-meta-edit, .wa-sugg-text { text-decoration: underline dotted; }
 .wa-chevron { width: auto; }
 .wa-lab-tool, .wa-lab-haybtn { padding: 8px 10px; font-size: 1em; }
+.wa-lab-flag { min-height: 2.2em; }
 .wa-lab-hay textarea { padding-right: 6em; }   /* clear of the corner buttons */
 .wa-kw-del { min-width: 2em; justify-content: center; display: inline-flex; }
 }`;

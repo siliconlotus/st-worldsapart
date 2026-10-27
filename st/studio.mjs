@@ -3231,32 +3231,32 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // One line above the keys, which is what the flags and the window apply to; the labels shrink, wrapping their own text.
         opts.style.cssText = 'display:flex;align-items:center;gap:14px;padding:2px 0;flex:0 0 auto;opacity:0.8;font-size:0.9em;';
         opts.className = 'wa-lab-opts';
-        const flag = (label, get, set) => {
-            const l = document.createElement('label'); l.style.cssText = 'display:flex;gap:4px;align-items:center;cursor:pointer;';
-            const c = document.createElement('input'); c.type = 'checkbox'; c.checked = get();
-            c.addEventListener('change', () => { set(c.checked); repaint(); });
-            l.append(c, document.createTextNode(label));
-            return l;
+        // A chip per flag: the strip's glyph and a word, lit when on. In a run it starts as the entries' own setting; a tap
+        // forces one setting for every entry, and re-applying the book returns to theirs.
+        const flag = (glyph, label, get, set) => {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'wa-lab-flag';
+            const g = document.createElement('span'); g.className = 'wa-lab-glyph';
+            if (glyph.startsWith('fa-')) g.innerHTML = `<i class="fa-solid ${glyph}"></i>`; else g.textContent = glyph;
+            b.append(g, document.createTextNode(label));
+            b.addEventListener('click', () => { set(!(get() ?? false)); repaint(); });
+            return b;
         };
-        const caseFlag = flag(t`Case sensitive`, () => labCase, v => { if (labRun) { labFlagOverride.caseSensitive = v; rerunLab(); } else labCase = v; });
-        const wholeFlag = flag(t`Match whole words`, () => labWhole, v => { if (labRun) { labFlagOverride.wholeWords = v; rerunLab(); } else labWhole = v; });
-        opts.append(caseFlag, wholeFlag, flag(t`Skip vector entries`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); }));
-        // Typed keys: the boxes are the typed flags. A run: each box is the entries' own flag, indeterminate where they differ,
-        // and an override where one is set, marked as drift so a toggle reads as the experiment it is.
+        // In a run `get` is the forced setting, else the entries' own, else null where they differ (a tap then forces on).
+        const defaults = { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words };
+        const own = f => { const vals = new Set(labRunEntries.map(e => entryFlags(e, defaults)[f])); return vals.size === 1 ? [...vals][0] : null; };
+        const runFlag = f => labFlagOverride[f] ?? own(f);
+        const caseFlag = flag('Aa', t`Case`, () => (labRun ? runFlag('caseSensitive') : labCase), v => { if (labRun) { labFlagOverride.caseSensitive = v; rerunLab(); } else labCase = v; });
+        const wholeFlag = flag('[ab]', t`Whole words`, () => (labRun ? runFlag('wholeWords') : labWhole), v => { if (labRun) { labFlagOverride.wholeWords = v; rerunLab(); } else labWhole = v; });
+        opts.append(caseFlag, wholeFlag, flag('fa-link-slash', t`Skip vector`, () => labSkipVector, v => { labSkipVector = v; rerunLab(); }));
+        // Lit when on; a ± badge where the run's entries differ and nothing is forced yet.
         const renderFlagState = () => {
-            const defaults = { caseSensitive: world_info_case_sensitive, wholeWords: world_info_match_whole_words };
-            const own = f => { const vals = new Set(labRunEntries.map(e => entryFlags(e, defaults)[f])); return vals.size === 1 ? [...vals][0] : null; };
-            for (const [l, f, typed] of [[caseFlag, 'caseSensitive', labCase], [wholeFlag, 'wholeWords', labWhole]]) {
-                const c = l.querySelector('input');
-                if (!labRun) { c.indeterminate = false; c.checked = typed; l.style.color = ''; l.title = ''; continue; }
-                const as = own(f), forced = labFlagOverride[f];
-                c.indeterminate = as === null && forced === undefined;
-                c.checked = forced ?? as ?? false;
-                const drift = forced !== undefined && forced !== as;
-                l.style.color = drift ? '#d9b74a' : '';
-                l.title = drift
-                    ? (as === null ? t`Forced for every entry in the run; each entry has its own setting.` : (as ? t`Overriding: the entry has this on.` : t`Overriding: the entry has this off.`))
-                    : (as === null ? t`As each entry has it; entries in this run differ. Toggle to force one setting.` : t`As the entry has it. Toggle to test the other setting on this run.`);
+            for (const [b, f, typed] of [[caseFlag, 'caseSensitive', labCase], [wholeFlag, 'wholeWords', labWhole]]) {
+                const state = labRun ? runFlag(f) : typed;
+                b.classList.toggle('wa-on', state === true);
+                b.classList.toggle('wa-badge', state === null);
+                if (state === null) b.dataset.badge = '±'; else delete b.dataset.badge;
+                b.title = !labRun ? '' : labFlagOverride[f] !== undefined ? t`Forced for every entry in the run; re-apply the book to return to each entry's own setting.`
+                    : (state === null ? t`Entries in this run differ. Tap to force one setting.` : t`As the entries have it. Tap to force the other setting.`);
             }
         };
         // Its own line above the haystack; redrawn on every repaint, since the typed keys decide which tokens show.
