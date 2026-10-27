@@ -2925,11 +2925,11 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 + `<small style="opacity:0.6;"> ${escapeHtml(rows.length === 1 ? t`${rows.length} key` : t`${rows.length} keys`)}`
                 + ` · ${escapeHtml(caseSensitive ? t`case-sensitive` : t`case-insensitive`)} · ${escapeHtml(wholeWords ? t`whole words` : t`substring`)}</small>`;
             const bookLine = entry.world ? `<div><small style="opacity:0.45;">${escapeHtml(entry.world)}</small></div>` : '';
-            // The gate the rows were filtered through, named under the entry: a "filtered" tally has no visible cause without it.
+            // The gate the rows were filtered through, under the entry: the operator as a square chip, then its keys.
             const gate = entryGate(entry);
             const gateLine = gate
-                ? `<div style="margin:2px 0 6px;"><small style="opacity:0.7;">${escapeHtml(t`Secondary keys`)} — ${escapeHtml(LOGIC_OPTS.find(o => o[0] === String(gate.logic))?.[1] ?? '')} ${escapeHtml(LOGIC_LABEL[gate.logic] ?? '')}:</small> `
-                    + gate.keys.map(k => `<span class="wa-kw wa-kw-wrap" style="opacity:0.8;">${keyChipText(k)}</span>`).join(' ') + '</div>'
+                ? `<div class="wa-lab-gate"><span class="wa-kw wa-lab-op" title="${escapeHtml(LOGIC_LABEL[gate.logic] ?? '')}">${escapeHtml(LOGIC_OPTS.find(o => o[0] === String(gate.logic))?.[1] ?? '')}</span>`
+                    + gate.keys.map(k => `<span class="wa-kw wa-kw-wrap">${keyChipText(k)}</span>`).join(' ') + '</div>'
                 : '';
             return `<details open style="margin-bottom:8px;"><summary style="cursor:pointer;">${title}${bookLine}</summary>`
                 + `<div style="margin-left:10px;">${gateLine}${rows.map(r => labKeyHtml(r, labInk(Math.max(0, keyList.indexOf(r.key))), entry)).join('')}</div></details>`;

@@ -636,6 +636,9 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-text-edit-dlg .popup-body, .wa-text-edit-dlg .popup-content { display: flex; flex-direction: column; min-height: 0; }
 .wa-text-edit-dlg .popup-content { flex: 1 1 auto; }
 .wa-text-edit-dlg { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+/* A run entry's gate: the operator chip square-cornered so it reads apart from the key chips after it. */
+.wa-lab-gate { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0 6px; opacity: 0.85; }
+.wa-lab-op { border-radius: 3px; font-weight: 600; font-size: 0.8em; letter-spacing: 0.02em; }
 /* The Lab's tool icons and the text box's corner buttons. */
 .wa-lab-tool { cursor: pointer; padding: 2px 4px; opacity: 0.7; }
 .wa-lab-haybtns { position: absolute; top: 5px; right: 9px; display: flex; gap: 4px; z-index: 1; }
