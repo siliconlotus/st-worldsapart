@@ -2652,7 +2652,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             else if (!groups.length) list.append(emptyNote(cleanupShowAll ? t`The visible entries have no keys at all.` : t`No flagged keys in the visible entries — “Show all keys” lists the rest.`));
             else for (const g of groups) {
                 list.append(termGroupHeader(g.entry, g.rows, cleanupChecks, reg, sync, repaint));
-                if (advOpen.has(g.entry.uid)) list.append(buildAdvancedTray(g.entry, repaint));
+                if (advOpen.has(g.entry.uid) && !phone()) list.append(buildAdvancedTray(g.entry, repaint));
                 for (const r of g.rows) list.append(termRow(g.entry, r, cleanupChecks, reg, sync,
                     (e, row, x, y) => showKwMenu(row.term, x, y), repaint));
             }
@@ -3300,6 +3300,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         const tools = document.createElement('span');
         tools.style.cssText = 'display:flex;gap:10px;align-items:center;flex:0 0 auto;align-self:flex-end;padding:6px 0 2px;';
+        tools.className = 'wa-lab-tools';
         opts.append(winLabel);
         // After every const above it is declared: this runs while the Lab is still being built.
         panes.append(macroRow, hayWrap, opts, keyWrap, gateBox, bookList);
@@ -3419,6 +3420,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         growKeys();   // the pane keeps its text across a tab switch, so it is not always empty on the first paint
         const body = document.createElement('div');
         body.style.cssText = 'flex:1 1 auto;display:flex;gap:10px;padding:0 8px 8px;min-height:0;';
+        body.className = 'wa-lab-body';
         body.append(panes, right);
         pane.append(body);
     };
