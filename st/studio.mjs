@@ -2095,6 +2095,20 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const view = document.createElement('i'); view.className = 'fa-solid fa-file-lines wa-term-act';
         view.title = t`View this entry's text`;
         view.addEventListener('click', () => showEntryText(e));
+        if (phone()) {
+            head.classList.add('wa-card-bar');
+            const more = tool('fa-ellipsis', false, t`Entry actions`, () => {
+                const r = more.getBoundingClientRect();
+                const acts = extraActs.map(f => f(e));   // the extra actions are icons with a title and a click: carry them as items
+                showCtxMenu([
+                    { label: t`View this entry's text`, icon: 'fa-solid fa-file-lines', fn: () => showEntryText(e) },
+                    ...acts.map(a => ({ label: a.title, fn: () => a.click() })),
+                    { label: t`Open in Explorer`, icon: 'fa-solid fa-folder-open', fn: () => revealEntry({ world: selected, uid: e.uid }) },
+                ], r.left, r.bottom + 2, ctxMount());
+            });
+            head.append(glyph, onOff, title, meta, more);
+            return head;
+        }
         head.append(glyph, onOff, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
         return head;
     };
