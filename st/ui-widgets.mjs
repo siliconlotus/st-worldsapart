@@ -3,7 +3,7 @@
 import { escapeHtml } from '../../../../utils.js';
 import { markExcerptText } from '../extension/matcher.mjs';
 import { DOMPurify } from '../../../../../lib.js';
-import { Popup, POPUP_TYPE } from '../../../../popup.js';
+import { Popup, POPUP_RESULT, POPUP_TYPE } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from '../extension/sort.mjs';
 import { runState } from '../extension/state.mjs';
@@ -199,6 +199,20 @@ export function showEntryText(entry) {
     vp.dlg.style.setProperty('width', 'calc(var(--sheldWidth, 90vw) * 0.5)', 'important');
     vp.dlg.style.setProperty('max-width', 'calc(100dvw - 2em)', 'important');
     vp.show();
+}
+
+/** The entry text in a popup that fills the screen, editable; `onSave(text)` runs on Save when the text changed. */
+export async function editEntryText(entry, onSave) {
+    const wrap = document.createElement('div');
+    wrap.className = 'wa-text-edit';
+    const head = document.createElement('div'); head.className = 'wa-text-edit-head';
+    head.append(Object.assign(document.createElement('span'), { textContent: wiGlyph(entry) }), Object.assign(document.createElement('b'), { textContent: wiTitleOf(entry) }));
+    const ta = document.createElement('textarea'); ta.className = 'text_pole wa-text-edit-area'; ta.value = String(entry.content ?? '');
+    wrap.append(head, ta);
+    const p = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: t`Save`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: false });
+    p.dlg.classList.add('wa-text-edit-dlg');
+    const res = await p.show();
+    if (res === POPUP_RESULT.AFFIRMATIVE && ta.value !== String(entry.content ?? '')) onSave(ta.value);
 }
 
 /** A tag, an HTML comment or a character entity. A range like the markdown ones, so one a span overlaps can be shown as
@@ -465,6 +479,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-full-pop { position: absolute; top: 7px; right: 7px; z-index: 1; cursor: pointer; opacity: 0.5;
     padding: 2px 5px; border-radius: 4px; font-size: 0.85em; background: var(--black50a, rgba(0,0,0,0.45)); }
 .wa-full-pop:hover { opacity: 1; }
+.wa-full-out { position: absolute; top: 7px; right: 32px; z-index: 1; cursor: pointer; opacity: 0.5; padding: 2px 5px; border-radius: 4px; font-size: 0.85em; background: var(--black50a, rgba(0,0,0,0.45)); }
+.wa-full-out:hover { opacity: 1; }
 textarea.wa-entry-full { display: block; width: 100%; box-sizing: border-box;
     font-size: 0.92em; line-height: 1.35; max-height: calc(1.35em * 8 + 16px); overflow-y: auto; resize: vertical;
     font-family: inherit; color: inherit; background: var(--black30a, rgba(0,0,0,0.2));
@@ -594,6 +610,13 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
     background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
     border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
 .wa-adv-warn i { color: var(--golden, #e0a86c); }
+/* The editable text popup: the textarea takes every pixel the dialog gives it, padded clear of a notch. */
+.wa-text-edit { display: flex; flex-direction: column; height: 100%; min-height: 0; text-align: left; }
+.wa-text-edit-head { display: flex; align-items: center; gap: 8px; padding: 2px 0 8px; flex: 0 0 auto; }
+textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; font-size: 1em; line-height: 1.4; }
+.wa-text-edit-dlg .popup-body, .wa-text-edit-dlg .popup-content { display: flex; flex-direction: column; min-height: 0; }
+.wa-text-edit-dlg .popup-content { flex: 1 1 auto; }
+.wa-text-edit-dlg { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
 /* Phone: the nav pane is not drawn; the explorer header draws a book select in its place (entry-card.mjs). */
 @media ${PHONE_QUERY} {
 .wa-studio-nav { display: none; }

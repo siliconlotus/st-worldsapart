@@ -8,7 +8,7 @@ import { escapeHtml, getCharaFilename, getSanitizedFilename } from '../../../../
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, makeSwitch, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { editEntryText, ensureStudioStyle, makeSortControl, makeSwitch, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
@@ -1298,6 +1298,9 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // The ranker rebuilds on the next ⚡; the scan is deliberately left last-scan.
         full.addEventListener('blur', () => { if (full.value !== String(e.content ?? '')) { e.content = full.value; save(); suggest = null; preview.textContent = firstLine(e); } });
         fullWrap.append(popBtn, full);
+        const outBtn = document.createElement('i'); outBtn.className = 'wa-full-out fa-solid fa-up-right-from-square'; outBtn.title = t`Edit in a window`;
+        outBtn.addEventListener('click', () => editEntryText(e, v => { e.content = v; save(); suggest = null; renderEntry(e); }));
+        fullWrap.append(outBtn);
         const syncText = () => { const on = expanded.has(e.uid); tchev.classList.toggle('wa-open', on); preview.style.display = on ? 'none' : ''; fullWrap.style.display = on ? '' : 'none'; if (on) autosize(); };
         thead.addEventListener('click', () => { expanded.has(e.uid) ? expanded.delete(e.uid) : expanded.add(e.uid); syncText(); });
         textSec.append(thead, fullWrap);
