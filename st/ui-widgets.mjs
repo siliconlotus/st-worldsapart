@@ -626,6 +626,7 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 .wa-studio-exphead .menu_button { width: auto; }
 .wa-term-row { flex-wrap: wrap; padding-left: 4px; }
 .wa-term-why { flex: 1 1 100%; margin-left: 1rem; white-space: normal; }
+dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !important; height: 100dvh !important; max-height: 100dvh !important; margin: 0; inset: 0; border-radius: 0; }
 }
 /* Touch: a finger-sized box around each small control. */
 @media (pointer: coarse) {
