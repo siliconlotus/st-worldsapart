@@ -340,6 +340,15 @@ export function onContextMenu(el, fn) {
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
 }
+
+/** A `wa-switch` checkbox. Clicks stop at the switch, so a switch on a row head never toggles the row. */
+export function makeSwitch({ checked, title = '', onChange }) {
+    const sw = document.createElement('input'); sw.type = 'checkbox'; sw.className = 'wa-switch'; sw.checked = !!checked;
+    if (title) sw.title = title;
+    sw.addEventListener('click', ev => ev.stopPropagation());
+    sw.addEventListener('change', () => onChange(sw.checked));
+    return sw;
+}
 export function ensureStudioStyle() {
     if (studioStyled) return;
     studioStyled = true;
@@ -347,6 +356,12 @@ export function ensureStudioStyle() {
     // --wa-severe is the audit's red, as a variable: the script side has it in SEVERITY_COLOR and a sheet cannot read that.
     style.textContent = `
 .wa-studio, .wa-ctx-menu, .wa-bulkbar { --wa-severe: #e06c6c; }
+/* The on/off switch; a checkbox underneath, so change handlers read it unchanged. ST paints its tick in ::before with a scaled box-shadow and a clip-path; every one of those is reset so the knob is what shows. */
+input.wa-switch { appearance: none; -webkit-appearance: none; display: inline-block; width: 34px; height: 18px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 28%, var(--SmartThemeBlurTintColor, #222)); position: relative; cursor: pointer; vertical-align: middle; margin: 0; flex: 0 0 auto; transition: background 0.15s; }
+input.wa-switch::before, input.wa-switch:checked::before { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--SmartThemeBodyColor, #fff); outline: 1px solid color-mix(in srgb, var(--SmartThemeBlurTintColor, #222) 60%, transparent); box-shadow: none; clip-path: none; transform: none; transition: left 0.15s; }
+input.wa-switch:checked { background: color-mix(in srgb, var(--SmartThemeQuoteColor, #7aa2f7) 70%, var(--SmartThemeBlurTintColor, #222)); }
+input.wa-switch:checked::before { left: 18px; }
+.worlds-apart-settings input.wa-switch { margin: 5px 0 0; }
 /* Focus has to land somewhere when a nested popup (Replace all…, a confirm) closes, and with no OK
    button left it falls to the dialog, then to whichever pane Chrome counts as focusable — it makes
    scroll containers focusable, so the nav or the entry list gets ringed. None of these are controls;
@@ -463,8 +478,6 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-chevron { width: 14px; text-align: center; opacity: 0.7; transition: transform 0.12s; cursor: pointer; }
 .wa-chevron.wa-open { transform: rotate(90deg); }
 .wa-entry-tools { display: flex; align-items: center; gap: 0; margin-left: auto; }
-/* One box for every tool, glyph centred. The power glyph fills its em box, so it gets a breath before Aa. */
-.wa-tool.fa-power-off { margin-right: 1px; }
 /* The crown and the percent sign draw to the top of their em box where the others leave headroom; a pixel down evens the row. */
 .wa-tool.fa-crown, .wa-tool.fa-percent { position: relative; top: 1px; }
 .wa-tool.fa-thumbtack { position: relative; top: 2px; }

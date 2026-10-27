@@ -8,7 +8,7 @@ import { escapeHtml, getCharaFilename, getSanitizedFilename } from '../../../../
 import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { runState, settings } from '../extension/state.mjs';
-import { ensureStudioStyle, makeSortControl, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
+import { ensureStudioStyle, makeSortControl, makeSwitch, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
 import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
@@ -735,7 +735,6 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             () => { e.content = withPromote(e.content, !promoted); save(); repaint(e); });
 
         tools.append(
-            tool('fa-power-off', !e.disable, e.disable ? t`Disabled — click to enable` : t`Active — click to disable`, () => { e.disable = !e.disable; save(); repaint(e); }),
             caseTool,
             wholeTool,
             promoteTool,
@@ -987,6 +986,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         };
         mode.addEventListener('click', ev => { ev.stopPropagation(); openModeMenu(); });
         mode.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openModeMenu(); } });
+        const onOff = makeSwitch({ checked: !e.disable, title: e.disable ? t`Disabled — switch on to enable` : t`Active — switch off to disable`, onChange: on => { e.disable = !on; save(); renderEntry(e); } });
         const title = document.createElement('span');
         title.className = 'wa-entry-title' + (e.disable ? ' wa-off' : '');
         title.textContent = wiTitleOf(e);
@@ -1088,7 +1088,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         titleLine.append(title, ...(dupMark ? [dupMark] : []), pencil);   // the pencil stays at the end of the title, not the row
         titleWrap.append(titleLine);
         if (open) { meta.classList.add('wa-entry-meta-sub'); titleWrap.append(meta); }
-        h.append(selBox, chev, mode, titleWrap, ...(open ? [] : [meta]));
+        h.append(selBox, chev, mode, onOff, titleWrap, ...(open ? [] : [meta]));
         // Collapsed-line badge: flagged-key count tinted by the worst flag; counts problems, not warnings (yellow, green).
         const counted = flagged ? [...flagged.values()].filter(v => scan.severityOf(v) === SEVERE) : [];
         // Refused secondaries count too, as severe: the entry gates on fewer keys than written. A dead one is neutral, as a dead primary is.
@@ -2009,6 +2009,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const glyph = document.createElement('span'); glyph.textContent = wiGlyph(e);
         glyph.title = e.constant ? t`Constant` : e.vectorized ? t`Vectorized` : t`Keyword`;
         glyph.style.cssText = 'flex:0 0 auto;font-size:0.85em;';
+        const onOff = makeSwitch({ checked: !e.disable, title: e.disable ? t`Disabled — switch on to enable` : t`Active — switch off to disable`, onChange: on => { e.disable = !on; save(); onEntryChange(e); } });
         const title = document.createElement('span'); title.textContent = wiTitleOf(e); title.title = wiTitleOf(e);
         title.style.cssText = `flex:0 1 auto;min-width:3em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${e.disable ? 'opacity:0.5;' : ''}`;
         const meta = document.createElement('span'); meta.className = 'wa-tab-count'; meta.style.flex = '0 0 auto';
@@ -2016,7 +2017,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const view = document.createElement('i'); view.className = 'fa-solid fa-file-lines wa-term-act';
         view.title = t`View this entry's text`;
         view.addEventListener('click', () => showEntryText(e));
-        head.append(glyph, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
+        head.append(glyph, onOff, title, meta, view, ...extraActs.map(f => f(e)), buildEntryTools(e, onEntryChange, { compact: true }));
         return head;
     };
     /** `onEdit` is the list's repaint; given, the term becomes click-to-edit and the row gains a delete, as the chips have. */
