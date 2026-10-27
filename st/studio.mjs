@@ -205,6 +205,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             if (!r.chatCount && !r.cardCount) return;
             orphans = r;
             renderBooks();
+            if (phone()) renderExplorer();
         } catch (err) { console.warn('[WA] orphan check', err); }
     };
 
@@ -3454,10 +3455,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         renderExplorer();
     };
 
+    const orphanCount = () => (orphans ? orphans.chatCount + orphans.cardCount : 0);
+    /** The phone book select's pick: a book name, or `'\u001Forphans'` for the orphan view. */
+    const onBookPick = v => { if (v === '\u001Forphans') { orphanView = true; renderBooks(); renderExplorer(); } else if (v !== selected || orphanView) openBook(v); };
+
     /** The orphaned-bindings list: each missing name with its nearest match, the two book-level repairs, the cards, and the tickable chats. */
     const renderOrphans = () => {
         explorer.innerHTML = '';
         explorer.append(closeBtn);
+        if (phone()) explorer.append(buildPhoneHeader({ books: [...world_names].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a)), selected: null, attached: new Set(attachedBookNames()), orphans: orphanCount(), onPick: onBookPick }));   // the select alone
         const wrap = document.createElement('div'); wrap.style.cssText = 'padding:10px 12px;max-width:780px;';
         const h = document.createElement('h3'); h.style.cssText = 'margin:0 0 10px;';
         h.innerHTML = '<i class="fa-solid fa-link-slash"></i> '; h.append(document.createTextNode(t`Orphaned bindings`));
@@ -3670,7 +3676,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
                 { label: t`New entry`, icon: 'fa-solid fa-plus', fn: () => newBtn.click() },
                 { label: t`Suggest all`, icon: 'fa-solid fa-bolt', fn: () => suggestAllBtn.click() },
                 { label: t`Suggest all (LLM)`, icon: 'fa-solid fa-wand-magic-sparkles', fn: () => suggestAllLlmBtn.click() },
-                { label: allOpenNow() ? t`Collapse all` : t`Expand all`, icon: 'fa-solid fa-arrows-up-down', fn: () => expandBtn.click() },
+                { label: allOpenNow() ? t`Collapse all` : t`Expand all`, icon: allOpenNow() ? 'fa-solid fa-down-left-and-up-right-to-center' : 'fa-solid fa-arrows-up-down', fn: () => expandBtn.click() },
                 { label: t`Tool settings`, icon: 'fa-solid fa-gear', fn: () => cog.click() },
                 { label: t`Rename lorebook`, icon: 'fa-solid fa-pen', fn: () => renameBook() },
                 { label: t`Duplicate lorebook`, icon: 'fa-solid fa-copy', fn: () => dupBook() },
@@ -3678,8 +3684,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             ];
             const names = [...world_names].sort((a, b) => sortAsc ? a.localeCompare(b) : b.localeCompare(a));
             head.append(buildPhoneHeader({
-                books: names, selected, attached: new Set(attachedBookNames()), orphans: orphans ? orphans.chatCount + orphans.cardCount : 0,
-                onPick: v => { if (v === '\u001Forphans') { orphanView = true; renderBooks(); renderExplorer(); } else if (v !== selected) openBook(v); },
+                books: names, selected, attached: new Set(attachedBookNames()), orphans: orphanCount(), onPick: onBookPick,
                 search: searchWrap, filterBtn: filterWrap, sortBtn, menuItems, openMenu: (items, x, y) => showCtxMenu(items, x, y, ctxMount()),
             }));
             bulkEl = renderBulkBar();
