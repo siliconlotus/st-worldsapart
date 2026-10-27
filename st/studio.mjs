@@ -1118,7 +1118,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const secBad = scan ? scan.unusableKeysOf(e).filter(r => scan.severityOf(r) === SEVERE).length : 0;
         const badgeEl = counted.length + secBad ? (() => {
             const badge = document.createElement('span'); badge.className = 'wa-entry-badge';
-            badge.textContent = t`${counted.length + secBad} flagged`;
+            badge.textContent = phone() ? String(counted.length + secBad) : t`${counted.length + secBad} flagged`;
             let worst = secBad ? SEVERE : '';
             for (const v of counted) {
                 const sev = scan.severityOf(v);

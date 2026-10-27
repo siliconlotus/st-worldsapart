@@ -463,7 +463,7 @@ dialog.popup:has(.wa-studio) { padding-left: max(14px, env(safe-area-inset-left)
 .wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .wa-off { opacity: 0.45; }
 .wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 6em; flex: 1 1 auto; }
+.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 10em; flex: 1 1 auto; }
 .wa-entry-titleline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wa-entry-titleline .wa-entry-title { flex: 0 1 auto; }
 .wa-entry-meta-sub { white-space: normal; overflow: visible; }
@@ -644,6 +644,7 @@ textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; fon
 dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !important; height: 100dvh !important; max-height: 100dvh !important; margin: 0; inset: 0; border-radius: 0; }
 .wa-card-bar { min-height: 44px; gap: 8px; padding: 0 4px; }
 .wa-card-bar .wa-chevron { margin-left: auto; }
+.wa-card-bar .wa-entry-titlewrap { min-width: 3em; }
 .wa-card-bar .wa-tool.fa-ellipsis { margin-left: auto; }
 .wa-card-bar .wa-tool.fa-ellipsis + .wa-chevron { margin-left: 0; }
 .wa-card-body { padding: 6px 4px 12px; display: flex; flex-direction: column; gap: 10px; }
