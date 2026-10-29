@@ -2,7 +2,6 @@
  "${0} (${1} already had it).": "${0} (${1} l’avaient déjà).",
  "${0} (${1} keys)": "${0} (${1} clés)",
  "${0} (click to edit)": "${0} (cliquer pour modifier)",
- "${0} (current chat)": "${0} (discussion en cours)",
  "${0} (open — switch away first)": "${0} (ouverte — changez d’abord de discussion)",
  "${0} Ask whoever runs this SillyTavern server to install it.": "${0} Demandez à la personne qui gère ce serveur SillyTavern de l’installer.",
  "${0} To install:": "${0} Pour l’installer :",

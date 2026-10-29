@@ -1178,7 +1178,6 @@ function renderWorldPriority() {
     const showTuning = !showOrder;
     $list.empty();
     scoped.forEach(({ cfg, i, world }) => {
-        const label = world === chatBook() ? t`${world} (current chat)` : world;
         const row = $(`
             <div class="flex-container alignItemsCenter flexnowrap wa-world-row" data-i="${i}" style="gap:4px;margin-bottom:2px;">
                 <div class="menu_button fa-solid fa-chevron-up wa-world-up ${showOrder ? '' : 'displayNone'}" title="Higher priority" data-i18n="[title]Higher priority"></div>
@@ -1188,7 +1187,7 @@ function renderWorldPriority() {
                 <label class="${showTuning ? '' : 'displayNone'}" title="Prompt-order offset for this book" data-i18n="[title]Prompt-order offset for this book">±<input type="number" class="text_pole wa-world-offset" style="width:4.5em;" step="1"></label>
                 <label title="Max dynamic entries from this book (0 = no cap)" data-i18n="[title]Max dynamic entries from this book (0 = no cap)">≤<input type="number" class="text_pole wa-world-cap" style="width:4em;" min="0" step="1"></label>
             </div>`);
-        row.find('.wa-world-name').text(label);
+        row.find('.wa-world-name').text(world);
         row.find('.wa-world-weight').val(cfg.weight);
         row.find('.wa-world-offset').val(cfg.offset);
         row.find('.wa-world-cap').val(cfg.cap ?? 0);
