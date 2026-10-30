@@ -1178,17 +1178,16 @@ function renderWorldPriority() {
     const showTuning = !showOrder;
     $list.empty();
     scoped.forEach(({ cfg, i, world }) => {
-        const label = cfg.world === 'chat' ? t`${world} (current chat)` : world;
         const row = $(`
             <div class="flex-container alignItemsCenter flexnowrap wa-world-row" data-i="${i}" style="gap:4px;margin-bottom:2px;">
                 <div class="menu_button fa-solid fa-chevron-up wa-world-up ${showOrder ? '' : 'displayNone'}" title="Higher priority" data-i18n="[title]Higher priority"></div>
                 <div class="menu_button fa-solid fa-chevron-down wa-world-down ${showOrder ? '' : 'displayNone'}" title="Lower priority" data-i18n="[title]Lower priority"></div>
-                <span class="flex1 wa-world-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                <span class="flex1 wa-world-name" style="min-width:0;overflow-wrap:anywhere;"></span>
                 <label class="${showTuning ? '' : 'displayNone'}" title="Relevance multiplier for this book" data-i18n="[title]Relevance multiplier for this book">×<input type="number" class="text_pole wa-world-weight" style="width:4em;" min="0" step="0.1"></label>
                 <label class="${showTuning ? '' : 'displayNone'}" title="Prompt-order offset for this book" data-i18n="[title]Prompt-order offset for this book">±<input type="number" class="text_pole wa-world-offset" style="width:4.5em;" step="1"></label>
                 <label title="Max dynamic entries from this book (0 = no cap)" data-i18n="[title]Max dynamic entries from this book (0 = no cap)">≤<input type="number" class="text_pole wa-world-cap" style="width:4em;" min="0" step="1"></label>
             </div>`);
-        row.find('.wa-world-name').text(label);
+        row.find('.wa-world-name').text(world);
         row.find('.wa-world-weight').val(cfg.weight);
         row.find('.wa-world-offset').val(cfg.offset);
         row.find('.wa-world-cap').val(cfg.cap ?? 0);
@@ -1345,9 +1344,12 @@ function charPriority() {
     return byChar[key];
 }
 
-/** Resolve one entry's book name, turning the `'chat'` sentinel into the live chat book. */
-function resolvedName(entry) {
-    return entry.world === 'chat' ? chatBook() : entry.world;
+/** Resolve one entry's book name, turning the `'chat'` sentinel into the live chat book; null for the sentinel when
+ *  `list` already names that book. */
+function resolvedName(entry, list) {
+    if (entry.world !== 'chat') return entry.world;
+    const book = chatBook();
+    return list.some(e => e.world === book) ? null : book;
 }
 
 /** The current character's priority entries attached to this chat, each with its storage index `i` and resolved book
@@ -1356,7 +1358,7 @@ function scopedPriority() {
     const list = charPriority();
     if (list == null) return null;
     return list
-        .map((cfg, i) => ({ cfg, i, world: resolvedName(cfg) }))
+        .map((cfg, i) => ({ cfg, i, world: resolvedName(cfg, list) }))
         .filter(x => x.world && runState.attachedWorlds.has(x.world));
 }
 
@@ -1380,7 +1382,7 @@ function ensureWorldConfigs(worlds) {
     const list = charPriority();
     if (list == null) return;                                  // no character — nowhere to store
     const book = chatBook();
-    const known = new Set(list.map(resolvedName).filter(Boolean));
+    const known = new Set(list.map(e => resolvedName(e, list)).filter(Boolean));
     const toAdd = [...worlds].filter(w => w != null && !known.has(w));
     if (!toAdd.length) return;
     // The chat's book is stored as the 'chat' sentinel, so the order survives switching chats.
@@ -1674,7 +1676,7 @@ async function rankOwnedScan(activated, args, skip) {
         isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry))
             || matcher.latchActive(entry, firedLatches(), scanLength()),
         isPromoted: entry => Boolean(entry?.waPromote),
-        priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
+        priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w, priorityList) })).filter(w => w.name),
         priorityMode,
         presentationOrder: settings().presentationOrder,
         presentationTiered: settings().presentationTiered,
@@ -1708,7 +1710,7 @@ async function rankOwnedScan(activated, args, skip) {
     const maxTotal = settings().maxTotalEntries;
     const maxDynamic = settings().maxDynamicEntries;
     const maxVectorEntries = settings().maxVectorEntries;
-    const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w), w.cap]).filter(([n]) => n));
+    const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w, priorityList), w.cap]).filter(([n]) => n));
 
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const { survivors, tokens, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
