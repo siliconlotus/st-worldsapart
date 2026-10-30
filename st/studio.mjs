@@ -3748,10 +3748,8 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     if (selected) await openBook(selected);
     else renderExplorer();
     checkOrphans();   // background; adds a nav row only if something is broken
-    // After the book is open: the Lab's run reads `data` for whichever attached book that is, and an entry reveal needs its
-    // book loaded and its row painted.
+    // After the book is open: the Lab's run reads `data` for whichever attached book that is.
     if (open?.lab) openLabTab();
-    else if (open?.entry) await revealEntry(open.entry);
 
     // Escape never closes the window: it swallows the <dialog>'s close and, if nothing else claimed it, drops the selection.
     root.addEventListener('keydown', ev => {
@@ -3765,7 +3763,10 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     const pop = new Popup(root, POPUP_TYPE.TEXT, '', { wide: true, okButton: false, allowVerticalScrolling: false });
     pop.buttonControls.style.display = 'none';   // hiding the OK button alone leaves the row's padding
     closeBtn.addEventListener('click', () => pop.complete(POPUP_RESULT.AFFIRMATIVE));
-    await pop.show();
+    // show() mounts the dialog before it returns; a reveal before that scrolls a detached row and does nothing.
+    const closed = pop.show();
+    if (open?.entry) await revealEntry(open.entry);
+    await closed;
     clearUndo(); clearEntryUndo();   // drop the pending timers/snapshots when Studio closes
     if (dirty && selected) reloadEditor(selected);
     return '';
