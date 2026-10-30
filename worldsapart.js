@@ -1178,17 +1178,16 @@ function renderWorldPriority() {
     const showTuning = !showOrder;
     $list.empty();
     scoped.forEach(({ cfg, i, world }) => {
-        const label = cfg.world === 'chat' ? t`${world} (current chat)` : world;
         const row = $(`
             <div class="flex-container alignItemsCenter flexnowrap wa-world-row" data-i="${i}" style="gap:4px;margin-bottom:2px;">
                 <div class="menu_button fa-solid fa-chevron-up wa-world-up ${showOrder ? '' : 'displayNone'}" title="Higher priority" data-i18n="[title]Higher priority"></div>
                 <div class="menu_button fa-solid fa-chevron-down wa-world-down ${showOrder ? '' : 'displayNone'}" title="Lower priority" data-i18n="[title]Lower priority"></div>
-                <span class="flex1 wa-world-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                <span class="flex1 wa-world-name" style="min-width:0;overflow-wrap:anywhere;"></span>
                 <label class="${showTuning ? '' : 'displayNone'}" title="Relevance multiplier for this book" data-i18n="[title]Relevance multiplier for this book">×<input type="number" class="text_pole wa-world-weight" style="width:4em;" min="0" step="0.1"></label>
                 <label class="${showTuning ? '' : 'displayNone'}" title="Prompt-order offset for this book" data-i18n="[title]Prompt-order offset for this book">±<input type="number" class="text_pole wa-world-offset" style="width:4.5em;" step="1"></label>
                 <label title="Max dynamic entries from this book (0 = no cap)" data-i18n="[title]Max dynamic entries from this book (0 = no cap)">≤<input type="number" class="text_pole wa-world-cap" style="width:4em;" min="0" step="1"></label>
             </div>`);
-        row.find('.wa-world-name').text(label);
+        row.find('.wa-world-name').text(world);
         row.find('.wa-world-weight').val(cfg.weight);
         row.find('.wa-world-offset').val(cfg.offset);
         row.find('.wa-world-cap').val(cfg.cap ?? 0);
@@ -1345,9 +1344,12 @@ function charPriority() {
     return byChar[key];
 }
 
-/** Resolve one entry's book name, turning the `'chat'` sentinel into the live chat book. */
-function resolvedName(entry) {
-    return entry.world === 'chat' ? chatBook() : entry.world;
+/** Resolve one entry's book name, turning the `'chat'` sentinel into the live chat book; null for the sentinel when
+ *  `list` already names that book. */
+function resolvedName(entry, list) {
+    if (entry.world !== 'chat') return entry.world;
+    const book = chatBook();
+    return list.some(e => e.world === book) ? null : book;
 }
 
 /** The current character's priority entries attached to this chat, each with its storage index `i` and resolved book
@@ -1356,7 +1358,7 @@ function scopedPriority() {
     const list = charPriority();
     if (list == null) return null;
     return list
-        .map((cfg, i) => ({ cfg, i, world: resolvedName(cfg) }))
+        .map((cfg, i) => ({ cfg, i, world: resolvedName(cfg, list) }))
         .filter(x => x.world && runState.attachedWorlds.has(x.world));
 }
 
@@ -1380,7 +1382,7 @@ function ensureWorldConfigs(worlds) {
     const list = charPriority();
     if (list == null) return;                                  // no character — nowhere to store
     const book = chatBook();
-    const known = new Set(list.map(resolvedName).filter(Boolean));
+    const known = new Set(list.map(e => resolvedName(e, list)).filter(Boolean));
     const toAdd = [...worlds].filter(w => w != null && !known.has(w));
     if (!toAdd.length) return;
     // The chat's book is stored as the 'chat' sentinel, so the order survives switching chats.
@@ -1674,7 +1676,7 @@ async function rankOwnedScan(activated, args, skip) {
         isArmedSticky: entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry))
             || matcher.latchActive(entry, firedLatches(), scanLength()),
         isPromoted: entry => Boolean(entry?.waPromote),
-        priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w) })).filter(w => w.name),
+        priorityList: priorityList.map(w => ({ ...w, name: resolvedName(w, priorityList) })).filter(w => w.name),
         priorityMode,
         presentationOrder: settings().presentationOrder,
         presentationTiered: settings().presentationTiered,
@@ -1708,7 +1710,7 @@ async function rankOwnedScan(activated, args, skip) {
     const maxTotal = settings().maxTotalEntries;
     const maxDynamic = settings().maxDynamicEntries;
     const maxVectorEntries = settings().maxVectorEntries;
-    const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w), w.cap]).filter(([n]) => n));
+    const bookCaps = new Map(priorityList.filter(w => w.cap > 0).map(w => [resolvedName(w, priorityList), w.cap]).filter(([n]) => n));
 
     if (maxTokens > 0 || maxTotal > 0 || maxDynamic > 0 || maxVectorEntries > 0 || bookCaps.size) {
         const { survivors, tokens, counted, dynamic, vector, skipped, dropped, budgeted, inPrompt } = await delivery.applyBudget({
@@ -2156,13 +2158,7 @@ const SETTINGS_HTML = `
 .worlds-apart-settings .checkbox_label input[type="checkbox"] { margin-left: 0; }
 .worlds-apart-settings .wa-section > .inline-drawer-content { padding-bottom: 10px; }
 .worlds-apart-settings { padding-bottom: 10px; }
-/* The enable state as a switch; still a checkbox underneath, so bind() reads it unchanged. */
 .worlds-apart-settings .checkbox_label:has(input.wa-switch) { align-items: center; }
-.worlds-apart-settings input.wa-switch { appearance: none; -webkit-appearance: none; display: inline-block; width: 34px; height: 18px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 28%, var(--SmartThemeBlurTintColor, #222)); position: relative; cursor: pointer; vertical-align: middle; margin: 5px 0 0; transition: background 0.15s; }
-/* ST paints its tick in ::before with a scaled box-shadow and a clip-path; every one of those is reset so the knob is what shows. */
-.worlds-apart-settings input.wa-switch::before, .worlds-apart-settings input.wa-switch:checked::before { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--SmartThemeBodyColor, #fff); outline: 1px solid color-mix(in srgb, var(--SmartThemeBlurTintColor, #222) 60%, transparent); box-shadow: none; clip-path: none; transform: none; transition: left 0.15s; }
-.worlds-apart-settings input.wa-switch:checked { background: color-mix(in srgb, var(--SmartThemeQuoteColor, #7aa2f7) 70%, var(--SmartThemeBlurTintColor, #222)); }
-.worlds-apart-settings input.wa-switch:checked::before { left: 18px; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
 .worlds-apart-settings small.opacity50p { display: block; margin: 0.15em 0 0.8em; }
@@ -2416,7 +2412,12 @@ function ensureDeliveryPanel() {
 .wa-delivery-tokens { flex: 0 0 auto; margin-left: auto; opacity: 0.55; font-variant-numeric: tabular-nums; }
 .wa-delivery-budget { padding: 4px 5px; opacity: 0.7; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-delivery-empty { opacity: 0.6; padding: 4px; }
-.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }`;
+.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
+/* ST's phone layout (its own breakpoint) runs the send form along the bottom edge: the trigger rides above it. */
+@media (max-width: 1000px) {
+.wa-delivery-trigger { left: max(10px, env(safe-area-inset-left)); bottom: calc(var(--bottomFormBlockSize, 50px) + 10px + env(safe-area-inset-bottom, 0px)); }
+.wa-delivery-panel { left: max(10px, env(safe-area-inset-left)); bottom: calc(var(--bottomFormBlockSize, 50px) + 46px + env(safe-area-inset-bottom, 0px)); }
+}`;
     document.head.append(style);
 
     deliveryTrigger = document.createElement('div');
