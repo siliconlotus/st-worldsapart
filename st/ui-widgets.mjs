@@ -3,7 +3,7 @@
 import { escapeHtml } from '../../../../utils.js';
 import { markExcerptText } from '../extension/matcher.mjs';
 import { DOMPurify } from '../../../../../lib.js';
-import { Popup, POPUP_TYPE } from '../../../../popup.js';
+import { Popup, POPUP_RESULT, POPUP_TYPE } from '../../../../popup.js';
 import { t, translate } from '../../../../i18n.js';
 import { wiTitleOf, TIER_DEFS, SORT_LABELS, SORT_MENU } from '../extension/sort.mjs';
 import { runState } from '../extension/state.mjs';
@@ -15,7 +15,7 @@ export const wiGlyph = e => e.constant ? '🔵' : (e.vectorized ? '🔗' : '🟢
 let ctxPanels = [];   // open panels, root at 0; a submenu at depth d replaces anything deeper
 const closeCtx = () => {
     for (const m of ctxPanels) m.remove(); ctxPanels = [];
-    document.removeEventListener('mousedown', ctxDown, true);
+    document.removeEventListener('pointerdown', ctxDown, true);
     document.removeEventListener('keydown', ctxKey, true);
     window.removeEventListener('scroll', closeCtx, true);
 };
@@ -60,7 +60,7 @@ const buildCtxPanel = (items, x, y, depth, mount, refresh = null) => {
 export const showCtxMenu = (items, x, y, mount = document.body, refresh = null) => {
     closeCtx();
     buildCtxPanel(items, x, y, 0, mount, refresh);
-    document.addEventListener('mousedown', ctxDown, true);
+    document.addEventListener('pointerdown', ctxDown, true);   // pointerdown, not mousedown: a compat mousedown follows a long press
     document.addEventListener('keydown', ctxKey, true);
     window.addEventListener('scroll', closeCtx, true);
 };
@@ -201,6 +201,20 @@ export function showEntryText(entry) {
     vp.show();
 }
 
+/** The entry text in a popup that fills the screen, editable; `onSave(text)` runs on Save when the text changed. */
+export async function editEntryText(entry, onSave) {
+    const wrap = document.createElement('div');
+    wrap.className = 'wa-text-edit';
+    const head = document.createElement('div'); head.className = 'wa-text-edit-head';
+    head.append(Object.assign(document.createElement('span'), { textContent: wiGlyph(entry) }), Object.assign(document.createElement('b'), { textContent: wiTitleOf(entry) }));
+    const ta = document.createElement('textarea'); ta.className = 'text_pole wa-text-edit-area'; ta.value = String(entry.content ?? '');
+    wrap.append(head, ta);
+    const p = new Popup(wrap, POPUP_TYPE.CONFIRM, '', { okButton: t`Save`, cancelButton: t`Cancel`, large: true, wide: true, allowVerticalScrolling: false });
+    p.dlg.classList.add('wa-text-edit-dlg');
+    const res = await p.show();
+    if (res === POPUP_RESULT.AFFIRMATIVE && ta.value !== String(entry.content ?? '')) onSave(ta.value);
+}
+
 /** A tag, an HTML comment or a character entity. A range like the markdown ones, so one a span overlaps can be shown as
  *  text instead of rendered: matching reads `&nbsp;` as six characters, and a mark on them needs somewhere to land. */
 const HTML_RANGE = /<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>|&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,30});/g;
@@ -314,6 +328,45 @@ export function renderMessageHtml(text, { spans = [], markSpan = null, showMarku
 }
 
 let studioStyled = false;
+/** The breakpoint the stylesheet and the explorer's `phone()` share. */
+export const PHONE_QUERY = '(max-width: 600px)';
+
+/** `fn(ev)` on right-click, and on a touch held still for half a second; `ev` carries target, clientX/Y and preventDefault either way. */
+export function onContextMenu(el, fn) {
+    let timer = 0, held = false, x0 = 0, y0 = 0;
+    const swallow = ev => { ev.stopImmediatePropagation(); ev.preventDefault(); drop(); };   // the release after a hold clicks whatever is under the finger
+    const drop = () => { window.removeEventListener('click', swallow, true); window.removeEventListener('pointerdown', drop, true); };   // no click came (Android): a later tap is real
+    el.addEventListener('contextmenu', ev => {
+        if (ev.target.closest('input, textarea')) return;   // a field keeps its native menu
+        clearTimeout(timer); if (held) { held = false; ev.preventDefault(); return; } fn(ev);   // Android fires its own on a hold: one menu, not two
+    });
+    el.addEventListener('pointerdown', ev => {
+        if (ev.target.closest('input, textarea')) return;   // a field keeps its native menu
+        held = false; clearTimeout(timer);
+        if (ev.pointerType !== 'touch' || !ev.isPrimary) return;
+        x0 = ev.clientX; y0 = ev.clientY;
+        el.style.webkitTouchCallout = 'none'; el.style.userSelect = 'none';   // the hold must not select the text or raise the copy sheet
+        const { target, clientX, clientY } = ev;
+        timer = setTimeout(() => {
+            held = true;
+            window.addEventListener('click', swallow, true); window.addEventListener('pointerdown', drop, true);
+            fn({ target, clientX, clientY, preventDefault() {} });
+        }, 500);
+    });
+    el.addEventListener('pointermove', ev => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) clearTimeout(timer); });   // a scroll is not a hold
+    const end = () => { clearTimeout(timer); el.style.webkitTouchCallout = el.style.userSelect = ''; };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+}
+
+/** A `wa-switch` checkbox. Clicks stop at the switch, so a switch on a row head never toggles the row. */
+export function makeSwitch({ checked, title = '', onChange }) {
+    const sw = document.createElement('input'); sw.type = 'checkbox'; sw.className = 'wa-switch'; sw.checked = !!checked;
+    if (title) sw.title = title;
+    sw.addEventListener('click', ev => ev.stopPropagation());
+    sw.addEventListener('change', () => onChange(sw.checked));
+    return sw;
+}
 export function ensureStudioStyle() {
     if (studioStyled) return;
     studioStyled = true;
@@ -321,6 +374,12 @@ export function ensureStudioStyle() {
     // --wa-severe is the audit's red, as a variable: the script side has it in SEVERITY_COLOR and a sheet cannot read that.
     style.textContent = `
 .wa-studio, .wa-ctx-menu, .wa-bulkbar { --wa-severe: #e06c6c; }
+/* The on/off switch; a checkbox underneath, so change handlers read it unchanged. ST paints its tick in ::before with a scaled box-shadow and a clip-path; every one of those is reset so the knob is what shows. */
+input.wa-switch { appearance: none; -webkit-appearance: none; display: inline-block; width: 34px; height: 18px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 28%, var(--SmartThemeBlurTintColor, #222)); position: relative; cursor: pointer; vertical-align: middle; margin: 0; flex: 0 0 auto; transition: background 0.15s; }
+input.wa-switch::before, input.wa-switch:checked::before { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--SmartThemeBodyColor, #fff); outline: 1px solid color-mix(in srgb, var(--SmartThemeBlurTintColor, #222) 60%, transparent); box-shadow: none; clip-path: none; transform: none; transition: left 0.15s; }
+input.wa-switch:checked { background: color-mix(in srgb, var(--SmartThemeQuoteColor, #7aa2f7) 70%, var(--SmartThemeBlurTintColor, #222)); }
+input.wa-switch:checked::before { left: 18px; }
+.worlds-apart-settings input.wa-switch { margin: 5px 0 0; }
 /* Focus has to land somewhere when a nested popup (Replace all…, a confirm) closes, and with no OK
    button left it falls to the dialog, then to whichever pane Chrome counts as focusable — it makes
    scroll containers focusable, so the nav or the entry list gets ringed. None of these are controls;
@@ -334,6 +393,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
     padding: 4px 7px; border-radius: 4px; font-size: 1.15em;
     background: none; border: none; color: inherit; line-height: 1; }
 .wa-studio-close:hover { opacity: 1; background: var(--white20a, rgba(255,255,255,0.1)); }
+dialog.popup:has(.wa-studio) { padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
 /* renderMessageHtml's output, coloured as .mes_text colours a message. <q>'s auto-quotes are off: the quote characters
    are in the text already. */
 .wa-marked q { color: var(--SmartThemeQuoteColor); }
@@ -407,7 +467,7 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-entry-title { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .wa-off { opacity: 0.45; }
 .wa-entry-meta { opacity: 0.45; font-size: 0.85em; white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.wa-entry-titlewrap { display: flex; flex-direction: column; min-width: 10em; flex: 1 1 auto; }
 .wa-entry-titleline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wa-entry-titleline .wa-entry-title { flex: 0 1 auto; }
 .wa-entry-meta-sub { white-space: normal; overflow: visible; }
@@ -424,6 +484,8 @@ dialog.popup:has(.wa-studio), .wa-studio-nav, .wa-studio-explorer, .wa-studio-en
 .wa-full-pop { position: absolute; top: 7px; right: 7px; z-index: 1; cursor: pointer; opacity: 0.5;
     padding: 2px 5px; border-radius: 4px; font-size: 0.85em; background: var(--black50a, rgba(0,0,0,0.45)); }
 .wa-full-pop:hover { opacity: 1; }
+.wa-full-out { position: absolute; top: 7px; right: 32px; z-index: 1; cursor: pointer; opacity: 0.5; padding: 2px 5px; border-radius: 4px; font-size: 0.85em; background: var(--black50a, rgba(0,0,0,0.45)); }
+.wa-full-out:hover { opacity: 1; }
 textarea.wa-entry-full { display: block; width: 100%; box-sizing: border-box;
     font-size: 0.92em; line-height: 1.35; max-height: calc(1.35em * 8 + 16px); overflow-y: auto; resize: vertical;
     font-family: inherit; color: inherit; background: var(--black30a, rgba(0,0,0,0.2));
@@ -437,8 +499,6 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-chevron { width: 14px; text-align: center; opacity: 0.7; transition: transform 0.12s; cursor: pointer; }
 .wa-chevron.wa-open { transform: rotate(90deg); }
 .wa-entry-tools { display: flex; align-items: center; gap: 0; margin-left: auto; }
-/* One box for every tool, glyph centred. The power glyph fills its em box, so it gets a breath before Aa. */
-.wa-tool.fa-power-off { margin-right: 1px; }
 /* The crown and the percent sign draw to the top of their em box where the others leave headroom; a pixel down evens the row. */
 .wa-tool.fa-crown, .wa-tool.fa-percent { position: relative; top: 1px; }
 .wa-tool.fa-thumbtack { position: relative; top: 2px; }
@@ -447,7 +507,7 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-tool-narrow { transform: scaleX(0.85); transform-origin: center; margin: 0 -0.1em; }   /* the crown and the lettered tools: the scale leaves the box its full width; the margin takes back what the glyph gave up */
 .wa-tool.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); }
 .wa-tool.wa-badge { position: relative; }
-.wa-tool.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
+.wa-tool.wa-badge::after, .wa-lab-flag.wa-badge::after { content: attr(data-badge); position: absolute; top: -3px; right: -4px;
     font-size: 0.6em; font-style: normal; font-weight: bold; line-height: 1.4; padding: 0 3px;
     border-radius: 8px; background: color-mix(in srgb, var(--SmartThemeQuoteColor) 30%, var(--SmartThemeBlurTintColor));
     color: var(--SmartThemeBodyColor); }
@@ -554,7 +614,121 @@ textarea.wa-entry-full.wa-tall { max-height: 62vh; }
 .wa-adv-warn { display: flex; align-items: center; gap: 5px; margin-top: 5px; padding: 4px 6px; border-radius: 4px; font-size: 0.8em;
     background: color-mix(in srgb, var(--golden, #e0a86c) 15%, transparent);
     border: 1px solid color-mix(in srgb, var(--golden, #e0a86c) 45%, transparent); }
-.wa-adv-warn i { color: var(--golden, #e0a86c); }`;
+.wa-adv-warn i { color: var(--golden, #e0a86c); }
+/* The card's tray: two-up cells, label above field; a switch cell is one line; Effects is a fold. */
+.wa-adv-grid { margin: 6px 0 2px; padding: 6px 8px 8px; border-radius: 5px; background: var(--black30a, rgba(0,0,0,0.15)); border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
+.wa-grp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; padding: 4px 2px 8px; }
+.wa-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 0.9em; }
+.wa-cell-l { font-size: 0.8em; opacity: 0.6; }
+.wa-cell input.text_pole, .wa-cell select.text_pole { width: 100%; height: 34px; margin: 0; box-sizing: border-box; }
+.wa-cell-sw { flex-direction: row; align-items: center; gap: 8px; min-height: 34px; line-height: 1.2; align-self: end; cursor: pointer; }
+.wa-fold { border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 6px; background: var(--black30a, rgba(0,0,0,0.1)); }
+.wa-fold > summary { cursor: pointer; padding: 9px 10px; font-weight: bold; font-size: 0.92em; list-style: none; display: flex; align-items: center; gap: 8px; }
+.wa-fold > summary::-webkit-details-marker { display: none; }
+.wa-fold > summary::before { content: '›'; display: inline-block; width: 12px; opacity: 0.6; transition: transform 0.12s; }
+.wa-fold[open] > summary::before { transform: rotate(90deg); }
+.wa-fold > .wa-grp { padding: 2px 10px 10px; }
+.wa-fold-sub { opacity: 0.55; font-weight: normal; font-size: 0.9em; margin-left: auto; }
+/* The editable text popup: the textarea takes every pixel the dialog gives it, padded clear of a notch. */
+.wa-text-edit { display: flex; flex-direction: column; height: 100%; min-height: 0; text-align: left; }
+.wa-text-edit-head { display: flex; align-items: center; gap: 8px; padding: 2px 0 8px; flex: 0 0 auto; }
+textarea.wa-text-edit-area { flex: 1 1 auto; min-height: 50vh; resize: none; font-size: 1em; line-height: 1.4; }
+.wa-text-edit-dlg .popup-body, .wa-text-edit-dlg .popup-content { display: flex; flex-direction: column; min-height: 0; }
+.wa-text-edit-dlg .popup-content { flex: 1 1 auto; }
+.wa-text-edit-dlg { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
+/* The Lab's flag chips: the strip's glyph and a word, lit when on, a ± badge where a run's entries differ. */
+.wa-lab-flag { position: relative; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 3px 10px; border-radius: 11px; cursor: pointer; opacity: 0.75;
+    font: inherit; font-size: 0.9em; color: inherit; background: transparent; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); }
+.wa-lab-flag .wa-lab-glyph { font-weight: bold; }
+.wa-lab-flag.wa-on { opacity: 1; color: var(--SmartThemeQuoteColor, #6ea8fe); border-color: currentColor; background: color-mix(in srgb, currentColor 12%, transparent); }
+/* A run entry's gate: the operator chip square-cornered so it reads apart from the key chips after it. */
+.wa-lab-gate { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 2px 0 6px; opacity: 0.85; }
+.wa-lab-op { border-radius: 3px; font-weight: 600; font-size: 0.8em; letter-spacing: 0.02em; }
+/* The Lab's tool icons and the text box's corner buttons. */
+.wa-lab-tool { cursor: pointer; padding: 2px 4px; opacity: 0.7; }
+.wa-lab-haybtns { position: absolute; top: 5px; right: 9px; display: flex; gap: 4px; z-index: 1; }
+.wa-lab-haybtn { cursor: pointer; padding: 3px 5px; border-radius: 4px; opacity: 0.85; font-size: 0.85em; background: var(--black70a, rgba(0,0,0,0.7)); }
+/* Phone: the nav pane is not drawn. */
+@media ${PHONE_QUERY} {
+.wa-studio-nav { display: none; }
+.wa-studio-explorer { padding-left: 0; }
+.wa-tabs { flex-wrap: wrap; }
+.wa-tab { line-height: 1.15; }
+.wa-tab .wa-tab-count { display: block; margin-left: 0; }   /* the selection count under the label, not beside it */
+.wa-tab-status { flex: 1 1 100%; margin: 0 0 4px; }
+.wa-studio-exphead .menu_button { width: auto; }
+.wa-term-row { flex-wrap: wrap; padding-left: 4px; }
+.wa-term-why { flex: 1 1 100%; margin-left: 1rem; white-space: normal; }
+dialog.popup.wa-text-edit-dlg { width: 100dvw; min-width: 0; max-width: 100dvw !important; height: 100dvh !important; max-height: 100dvh !important; margin: 0; inset: 0; border-radius: 0; }
+.wa-card-bar { min-height: 44px; gap: 8px; padding: 0 4px; }
+.wa-card-bar .wa-chevron { margin-left: auto; }
+.wa-card-bar .wa-entry-titlewrap { min-width: 3em; }
+.wa-card-bar .wa-tool.fa-ellipsis { margin-left: auto; }
+.wa-card-bar .wa-tool.fa-ellipsis + .wa-chevron { margin-left: 0; }
+/* A rename in progress takes a line of its own under the bar's controls. */
+.wa-card-bar:has(.wa-entry-titlewrap input) { flex-wrap: wrap; }
+.wa-card-bar .wa-entry-titlewrap:has(input) { flex: 1 1 100%; order: 1; min-width: 0; }
+.wa-card-bar .wa-entry-titlewrap input { flex: 1 1 0; min-width: 0; }
+.wa-card-body { padding: 6px 4px 12px; display: flex; flex-direction: column; gap: 10px; }
+.wa-card-preview { position: relative; cursor: pointer; padding: 6px 36px 6px 8px; border-left: 2px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.2)); }
+.wa-card-preview-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.92em; opacity: 0.85; white-space: pre-wrap; }
+.wa-card-preview-pen { position: absolute; right: 8px; top: 6px; opacity: 0.65; font-size: 1.2em; }
+.wa-card-body .wa-kw-para { margin-left: 0; }
+.wa-card-body .wa-kw-sec { border-top: none; padding-top: 0; }
+.wa-fold.wa-fold-adv > .wa-adv-grid { margin: 0; border: none; background: transparent; }
+.wa-fold[data-fold="secondary"] > .wa-kw-sec, .wa-fold[data-fold="suggestions"] > .wa-kw-para { padding: 0 10px 8px; margin: 0; }
+.wa-phone-head { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; }
+.wa-phone-head .wa-book-select { width: 100%; height: 38px; margin: 0; }
+.wa-phone-head .wa-search { width: 100%; }
+.wa-phone-head .wa-search input { flex: 1 1 0; min-width: 0; }
+.wa-phone-row { display: flex; gap: 6px; }
+.wa-phone-row > * { flex: 1 1 0; min-width: 0; }
+.wa-phone-row .wa-phone-menu { flex: 0 0 44px; margin: 0; width: 44px; }
+.wa-studio-fixed .wa-undo-bar { margin: 0 0 6px; }
+.wa-lab-body { flex-direction: column; overflow-y: auto; }
+.wa-lab-body > * { flex: 0 0 auto !important; }
+.wa-lab-hay { flex: 0 0 14em !important; }
+.wa-lab-opts { flex-wrap: wrap; }
+.wa-lab-tools { flex-wrap: wrap; }
+.wa-lab-tools { align-self: flex-start !important; padding: 0 0 6px !important; }
+/* Cleanup's rail: a row above the list. */
+.wa-studio-body { flex-direction: column; }
+.wa-studio-entries { min-height: 0; }
+.wa-rail { flex-direction: row; flex-wrap: wrap; order: -1; padding: 0 0 6px; }
+.wa-rail .menu_button { width: 2.3em; height: 2.3em; }
+}
+@media (max-width: 1000px) {
+dialog.popup:has(.wa-studio) { width: calc(100dvw - 2em); max-width: calc(100dvw - 2em); }
+}
+/* Phone: the Studio fills the screen and scrolls as one; no pane scrolls on its own, and the tab strip stays pinned. */
+@media ${PHONE_QUERY} {
+dialog.popup:has(.wa-studio) { width: 100dvw; min-width: 0; max-width: 100dvw !important; height: 100dvh !important; min-height: 0 !important; max-height: 100dvh !important; margin: 0; inset: 0; border-radius: 0; overflow-y: auto;
+    padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+dialog.popup:has(.wa-studio) .popup-body { height: auto; max-height: none; overflow: visible; }
+dialog.popup:has(.wa-studio) .popup-content { overflow: visible; }
+.wa-studio { height: auto; min-height: 100%; }
+.wa-studio-explorer, .wa-studio-entries, .wa-lab-body { overflow: visible; }
+.wa-studio-body { min-height: auto; }
+.wa-tabs { position: sticky; top: 0; z-index: 3; background: var(--SmartThemeBlurTintColor, var(--black70a, rgba(20,20,20,0.95))); }
+.wa-studio-exphead { position: static; }
+}
+/* Touch: the whole band is the target, tools are squares with a gap, hover-only hints show always. */
+@media (pointer: coarse) {
+.wa-book-row, .wa-term-row, .wa-ctx-item { min-height: 2.5em; }
+.wa-entry-head { min-height: 2.5em; }
+.wa-entry-tools { gap: 4px; }
+.wa-tool { height: 2.2em; min-width: 2.2em; }
+.wa-book-tool, .wa-term-act, .wa-kw-del, .wa-chevron, .wa-undo-dismiss, .wa-sugg-add, .wa-mode, .wa-studio-close { padding: 0.5em; }
+.wa-kw { padding: 0.3em 10px; }
+.wa-studio-exphead .menu_button, .wa-filter { min-height: 3.33em; }
+.wa-kw-text { border-bottom: 1px dotted currentColor; }
+.wa-meta-edit, .wa-sugg-text { text-decoration: underline dotted; }
+.wa-chevron { width: auto; }
+.wa-lab-tool, .wa-lab-haybtn { padding: 8px 10px; font-size: 1em; }
+.wa-lab-flag { min-height: 2.2em; }
+.wa-lab-hay textarea { padding-right: 6em; }   /* clear of the corner buttons */
+.wa-kw-del { min-width: 2em; justify-content: center; display: inline-flex; }
+}`;
     document.head.append(style);
 }
 

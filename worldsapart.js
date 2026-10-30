@@ -2158,13 +2158,7 @@ const SETTINGS_HTML = `
 .worlds-apart-settings .checkbox_label input[type="checkbox"] { margin-left: 0; }
 .worlds-apart-settings .wa-section > .inline-drawer-content { padding-bottom: 10px; }
 .worlds-apart-settings { padding-bottom: 10px; }
-/* The enable state as a switch; still a checkbox underneath, so bind() reads it unchanged. */
 .worlds-apart-settings .checkbox_label:has(input.wa-switch) { align-items: center; }
-.worlds-apart-settings input.wa-switch { appearance: none; -webkit-appearance: none; display: inline-block; width: 34px; height: 18px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--SmartThemeBodyColor, #fff) 28%, var(--SmartThemeBlurTintColor, #222)); position: relative; cursor: pointer; vertical-align: middle; margin: 5px 0 0; transition: background 0.15s; }
-/* ST paints its tick in ::before with a scaled box-shadow and a clip-path; every one of those is reset so the knob is what shows. */
-.worlds-apart-settings input.wa-switch::before, .worlds-apart-settings input.wa-switch:checked::before { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--SmartThemeBodyColor, #fff); outline: 1px solid color-mix(in srgb, var(--SmartThemeBlurTintColor, #222) 60%, transparent); box-shadow: none; clip-path: none; transform: none; transition: left 0.15s; }
-.worlds-apart-settings input.wa-switch:checked { background: color-mix(in srgb, var(--SmartThemeQuoteColor, #7aa2f7) 70%, var(--SmartThemeBlurTintColor, #222)); }
-.worlds-apart-settings input.wa-switch:checked::before { left: 18px; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle { font-size: 0.95em; opacity: 0.8; }
 .worlds-apart-settings .wa-section > .inline-drawer-toggle b { font-weight: 500; }
 .worlds-apart-settings small.opacity50p { display: block; margin: 0.15em 0 0.8em; }
@@ -2418,7 +2412,12 @@ function ensureDeliveryPanel() {
 .wa-delivery-tokens { flex: 0 0 auto; margin-left: auto; opacity: 0.55; font-variant-numeric: tabular-nums; }
 .wa-delivery-budget { padding: 4px 5px; opacity: 0.7; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
 .wa-delivery-empty { opacity: 0.6; padding: 4px; }
-.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }`;
+.wa-delivery-warning { padding: 4px 5px; color: #d9b74a; border-top: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); }
+/* ST's phone layout (its own breakpoint) runs the send form along the bottom edge: the trigger rides above it. */
+@media (max-width: 1000px) {
+.wa-delivery-trigger { left: max(10px, env(safe-area-inset-left)); bottom: calc(var(--bottomFormBlockSize, 50px) + 10px + env(safe-area-inset-bottom, 0px)); }
+.wa-delivery-panel { left: max(10px, env(safe-area-inset-left)); bottom: calc(var(--bottomFormBlockSize, 50px) + 46px + env(safe-area-inset-bottom, 0px)); }
+}`;
     document.head.append(style);
 
     deliveryTrigger = document.createElement('div');
