@@ -48,7 +48,11 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(v.zzunattested?.why, 'unattested (book)', 'dead, and says only that the book was checked');
     eq(v.glimmerwort?.why, 'unattested (book)', 'chat-only key reads dead when no chat was searched');
     eq(v.mother?.why, 'common word', 'the common list flags a generic word while no chat has been scanned');
+    // uid 22: three letters that land in "special", "official" and "social" and only once as the word. The short flag carries the
+    // same suggestion substring makes, measured over the book. FBI would be short and clean, and offered nothing.
     eq(v.CIA?.why, 'short (1/4 exact) — consider ? =CIA', 'a short key mostly inside longer words is offered the whole-word flag, measured over the book');
+    // uid 26: `=` in front of `/re/` lexes as a whole-word literal, which is legal and so not unusable, and which nobody means.
+    // The validator's warn is reported as `warning`, moderate, ahead of the dead verdict it explains.
     eq(v['? =/re/']?.flag, 'warning', 'a validator warn is an audit flag, ahead of the dead verdict it explains');
     eq(v['? =/re/']?.why, 'Literal regex', '...named by the validator\'s label, short enough for a chip');
     eq(v['? =/re/']?.message, 'Flag = makes this a literal; remove it if you want the expression, or use quotes to suppress this warning.', '...with the validator\'s sentence as the tooltip');
@@ -62,17 +66,26 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
     eq(flagOf('the Spire') !== 'fragment', true, 'a titular "the" before a capitalised word is a name, not a fragment');
     eq(flagOf('The Isle of Wight') !== 'fragment', true, '...in either case, and over a longer frame');
     eq(flagOf('the door'), 'fragment', '...where "the" before a lowercase word is the phrase fragment it looks like');
+    // uid 23: the shape test reads "of" as a function word and calls this a fragment; the book says "Isle of Wight", capitalised,
+    // so it is a name. uid 24 is the control: the same shape, and nothing in the book capitalises it.
     eq(v['isle of wight'], undefined, 'a lowercase locative the book writes capitalised is a name, not a fragment');
     eq(v['piece of cake']?.flag, 'fragment', '...where the same shape nothing capitalises is the phrase fragment it looks like');
     eq(v.mother?.sev !== RED, true, '...but unevidenced it is not severe');
+    // uid 19: "lamp-post" as typed appears in no entry text and no chat message; only the space form does, in its own content.
+    // Minor: the key fires, but never on the form the author wrote.
     eq(v['lamp-post']?.why, 'book uses it only un-hyphenated', 'the key matches, but never on the form the author typed');
     eq(v['lamp-post']?.sev, 'minor', '...which is advisory: the flag says rewrite or drop, not that it is broken');
     // Six messages, one hit: under the chat-common share, so the variant verdict is what remains.
     const lamp = countChatHits(['lamp-post'], ['the lamp post flickers at the corner', 'a', 'b', 'c', 'd', 'e'], { scope: createScanScope() });
     eq(verdicts({ messagesWith: lamp.messagesWith, typedWith: lamp.typedWith, messages: lamp.messages })['lamp-post']?.why,
         'chat uses it only un-hyphenated', '...and the chat is cited over the book, being what the model writes');
+    // uid 20: a regex is fold-exempt, so this ASCII apostrophe matches only itself, where the plain key Cap'n matches the whole
+    // family. The audit suggests the class; it does not rewrite the pattern, the fold-exemption being the author's.
     eq(v["/Cap'n \\w+/"]?.why, `will not match curly form, consider ['${ORTHO_FAMILIES.find(f => f.ascii === "'").pair}]`,
         'a regex key is told its quote matches only itself, and is offered the curly pair');
+    // uid 21: the content writes the pair with an en-dash, which this pattern cannot reach, so the key is dead. The hyphen flags
+    // only because the book holds what the en-dash form WOULD have matched, and that evidence outranks unattested: the pattern is
+    // mis-written, not dead. A range marker would not be swapped.
     eq(v['/Bose-Einstein \\w+/']?.why, 'book uses en-dash, consider [-\u2013]',
         'the hyphen flags on evidence, and the evidence outranks the dead verdict it explains');
     // Chat outranks the book as the citation: the alternates are scanned as ordinary keys so the count exists.
@@ -102,6 +115,8 @@ eq(msgs.length, 11, 'the hidden message is dropped, as core and WA both drop it'
 
 // --- the vectorized entries (uids 28-30): a cast of three each, sharing at most one name with the chat
 {
+    // uids 28-30 have no key but 30's, so only the similarity route reaches 28 and 29. Each names a cast of three: 28 (Thornwick,
+    // Hesper, Jorund) and 30 (Ottoline, Idony, Leofric) each share one name with the chat; 29 (Corliss, Brannoch, Tamsin) shares none.
     eq(verdicts(undefined).Ottoline, undefined, 'the one keyed vector entry holds its key in its own text');
     eq(verdicts(chatRate()).Ottoline, undefined, '...and the chat uses it in 1 of 11 messages, under the share');
     const book = buildNameDf(entries);
@@ -150,10 +165,15 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     const opts = { messageDepth: 20, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
 
     // core's \W reads é as a boundary (upstream-st.md #1); WA does not.
+    // uid 8 is the group's FALSE WINNER: whole-word `caf` against chat "café" matches in core and not in WA, so the prune
+    // deletes it and the group goes EMPTY for the turn. uid 9, the CLEAN LOSER, matches under both matchers and loses the
+    // group to uid 8's override; it is not promoted when the false winner is deleted (ruled).
     eq(countKey('caf', 'the café by the bistro', false, true, NEUTRAL), 0, 'whole-word caf does not match café under WA');
     eq(countKey('caf', 'the café by the bistro', false, false, NEUTRAL), 1, 'substring caf would — the flag is the divergence');
 
     const adds = activationAdds(Object.values(data.entries), windowFor, { ...opts, scope: NEUTRAL }).map(e => e.uid);
+    // uid 7: core reads `?` as a literal and can never activate this; WA's union force-activates it, both terms sharing one
+    // chat paragraph.
     eq(adds.includes(7), true, 'the SmartKeys-only entry is union-activated — only WA can do this');
     eq(adds.includes(9), true, 'the clean loser matches and is union-activated');
     eq(adds.includes(8), false, 'the false winner does not match under WA — never added');
@@ -168,6 +188,20 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     const opts = { messageDepth: 20, fallbackDepth: 2, caseSensitiveDefault: false, wholeWordsDefault: false };
 
     const adds = activationAdds(Object.values(data.entries), windowFor, { ...opts, scope: NEUTRAL }).map(e => e.uid);
+    // uid 10 fires when "cold frame" is in the window, then core persists it 3 turns. On the turns the key has LEFT the window
+    // WA scores it 0, and the sticky exemption (args.timedEffects) keeps it out of lastPruned; a regression there silently
+    // deletes sticky entries.
+    // uid 11 fires on "first light", then core suppresses re-fires for 2 messages. Core checks cooldown BEFORE external
+    // activations, so even the union force cannot break it; while cooling it never activates and the prune has nothing to judge.
+    // uid 12 fires on "workshop" from the chat; its content carries "duskmoth", uid 13's only key, so with recursion on it
+    // drags uid 13 in on the RECURSION pass.
+    // uid 13: "duskmoth" is in NO chat message. It activates on the recursion pass, where the prune never judges (INITIAL only):
+    // WA's chat-window verdict would be a reject, which is why the pass gate is load-bearing. It must never appear in lastPruned.
+    // uid 14: "midnight" IS in the chat and WA DOES emit it: the takeover blanks core's matcher, so declining to emit would
+    // mean no route in at all. Core refuses it on the initial pass (both delay gates are checked before the external-activation
+    // branch) and the emit stands for the whole scan. With world_info_recursive off nothing may admit it: uid 27 gives the book
+    // a second delay level, so core forces a RECURSION pass once the scan ends (upstream-st.md #19) and WA ends that pass.
+    // uid 27 is disabled and never activates; core reads the delay levels before its disable check, so it still counts.
     eq(adds.includes(10), true, 'sticky entry: key in window, union adds it (persistence is core\'s)');
     eq(adds.includes(11), true, 'cooldown entry: union adds; core gates cooldown BEFORE external activations, so a force cannot break it');
     eq(adds.includes(12), true, 'recursion source activates from chat');
@@ -190,21 +224,31 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
     const keysOf = (uid, win) => keywordScore(data.entries[uid], win(20, data.entries[uid]), undefined, { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).score;
     const pass1 = withExtraTexts(windowFor, [data.entries['12'].content], 'paragraph');
     const pass2 = withExtraTexts(windowFor, [data.entries['12'].content, data.entries['13'].content], 'paragraph');
+    // uid 16: "vellumwing" is in no chat message and in no entry uid 12 reaches, only uid 13's content, which enters the buffer
+    // on the SECOND pass. Its stage-3 keys score is divided by 1 + 2.
     eq(keysOf('16', windowFor), 0, 'depth-2 target scores 0 against chat alone');
     eq(keysOf('16', pass1), 0, 'and 0 at pass 1 — uid 13 has not been admitted yet, so its content is not in the buffer');
     eq(keysOf('16', pass2) > 0, true, 'it becomes scorable only at pass 2, which is what makes its depth 2');
 
     // excludeRecursion: the premise the hand-applied scoring exclusion rests on. The exclusion itself is in
     // worldsapart.js and unreachable from node — it is the install-sentinel eyeball.
+    // uid 17: "gloamvetch" is in no chat message, only in uid 12's content, so the buffer carries its key. Core suppresses it on
+    // the recursion pass; stage 3 is WA's own loop with core not in it, so the exclusion is applied there by hand. It must
+    // score keys 0 against the chat AND against the buffer.
     eq(keysOf('17', windowFor), 0, 'non-recursable entry has no chat evidence');
     eq(keysOf('17', pass1) > 0, true, 'the buffer DOES carry its key — so scoring must exclude it by hand, or credit it');
 
-    // preventRecursion: uid 16's content is the only place uid 18's key appears, and it never enters the buffer.
+    // uid 18: "sedgewhistle" is in no chat message and only in uid 16's content, and uid 16 is preventRecursion, so that content
+    // never enters the buffer. It must never activate, at any depth.
     eq(/sedgewhistle/i.test(data.entries['16'].content), true, 'uid 18\'s key lives in uid 16\'s content');
     eq(msgs.some(m => /sedgewhistle/i.test(m)), false, 'and in no chat message, so uid 16 is its only possible route');
     eq(keysOf('18', pass2), 0, 'uid 18 stays unscorable: preventRecursion keeps uid 16 out of every later buffer');
 
-    // uid 15's three secondaries are one of each kind: usable, negation-only, malformed.
+    // uid 15 is gated under AND_ALL. `morning` is an ordinary positive secondary and is present. `? -zzunattested` is
+    // NEGATION-ONLY: fatal as a primary, since it would fire on absence alone, and legitimate as a secondary, which never fires
+    // by itself; the term appears only in the hidden message, which both matchers drop, so the condition holds. `? "moon` is
+    // UNUSABLE (stray quote) and is dropped before the logic runs; were it evaluated as never-matching, AND_ALL could never be
+    // satisfied and the entry would be silently dead. So uid 15 activating is what certifies the drop.
     eq(adds.includes(15), true, 'AND_ALL gate passes: the usable secondaries hold and the malformed one is dropped');
 
     const gated = (text) => keywordScore(data.entries['15'], [text], undefined, { scope: NEUTRAL, k1: 1.2, caseSensitiveDefault: false, wholeWordsDefault: false }).score > 0;
@@ -218,6 +262,8 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
 {
     const row = r => `${r.key}:${r.flag}${r.code ? `:${r.code}` : ''}`;
     const s = _pruneScan(data, OPTS, new Set(), { scope: createScanScope() });
+    // uid 15's `morning` is in no entry's text, so it reads unattested (book) until a chat is scanned; the negation-only
+    // secondary is listed in neither state.
     eq(s.unusableKeysOf(data.entries['15']).map(row).join(','), 'morning:unattested,? "moon:unusable:stray-quote',
         'without a chat the positive secondary is unattested by the book and the malformed one carries the validator\'s code; the negation-only one is neither');
     const [dead, bad] = s.unusableKeysOf(data.entries['15']);
@@ -229,6 +275,8 @@ console.log('ok   sentinel: every audit verdict matches its written-down answer'
 
     const c = _pruneScan(data, OPTS, new Set(), { scope: createScanScope(), chatScan: chatRate() });
     eq(c.unusableKeysOf(data.entries['15']).map(row).join(','), '? "moon:unusable:stray-quote', 'the chat attests the positive secondary');
+    // uid 25 is gated under AND_ANY and its one secondary appears nowhere: in no entry and in no message. The primary sits in
+    // its own text and is clean, so nothing on the primary row says the gate can never open.
     eq(c.unusableKeysOf(data.entries['25']).map(r => `${r.key}:${c.reasonOf(r).label}`).join(','), 'zzghostgate:unattested (book/chat)',
         'a secondary in no entry and no message stays unattested once the chat is scanned, and says the chat was checked');
 }
