@@ -155,7 +155,8 @@ const markExcerpt = ex => (ex && typeof ex === 'object'
 /** The key-hit lines under a grading row's title: key, count, and the excerpt with the matched span coloured. */
 export const keyHitsHtml = why => (why ?? []).map(w => {
     // A title attribute is plain text, so the tooltip marks spans with markExcerptText's guillemets, not colour.
-    const all = (w.contexts ?? []).filter(Boolean);
+    // A negated SmartKey leaf that never occurred is an excerpt with no `text`.
+    const all = (w.contexts ?? []).filter(ex => ex?.text !== undefined);
     const tip = all.length > 1
         ? ` title="${escapeHtml(all.map(markExcerptText).join('\n'))}"`
         : '';
@@ -166,7 +167,7 @@ export const keyHitsHtml = why => (why ?? []).map(w => {
         : `<span style="color:var(--SmartThemeQuoteColor, #6ea8fe);font-weight:600;">${escapeHtml(w.key)}</span>`;
     return `<br><small style="opacity:0.75;text-align:left;">${label}`
         + `${Number.isFinite(w.count) ? ` <span style="color:var(--SmartThemeEmColor, #d9a441);font-weight:600;">${w.count}</span>` : ''}`
-        + `${w.excerpt ? ` <span style="opacity:0.6;cursor:${all.length > 1 ? 'help' : 'default'};"${tip}>${markExcerpt(w.excerpt)}</span>` : ''}</small>`;
+        + `${w.excerpt?.text !== undefined ? ` <span style="opacity:0.6;cursor:${all.length > 1 ? 'help' : 'default'};"${tip}>${markExcerpt(w.excerpt)}</span>` : ''}</small>`;
 }).join('');
 
 /** The fold under a grading row, as HTML: the entry's keys, then its text. Reads `waKeys`/`waSecondary` when `key`
