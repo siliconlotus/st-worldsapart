@@ -302,7 +302,7 @@
  "Effects": "Effets",
  "Embed: ${0} · ${1}": "Vectorisation : ${0} · ${1}",
  "Embedded ${0} chunks for \"${1}\" in ${2}s.": "${0} morceaux vectorisés pour « ${1} » en ${2} s.",
- "Embedding ${0} chunks for \"${1}\". A large embedding model can make the first sync of a big book take several minutes.": "Vectorisation de ${0} morceaux pour « ${1} ». Avec un gros modèle de vectorisation, la première synchronisation d’un grand livre peut prendre plusieurs minutes.",
+ "Embedding \"${0}\": ${1} of ${2} chunks.": "Vectorisation de « ${0} » : ${1} morceaux sur ${2}.",
  "Enabled": "Activé",
  "English": "Anglais",
  "Entries scoring below this are dropped. Recommend 0.1-0.2: higher drops more, including entries you may want. Lower lets more irrelevant ones through. 0 = none.": "Les entrées notées en dessous sont écartées. Conseillé : 0,1-0,2. Plus haut écarte davantage, y compris des entrées que vous pourriez vouloir. Plus bas laisse passer plus d’entrées hors sujet. 0 = aucune coupe.",

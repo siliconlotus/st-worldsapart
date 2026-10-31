@@ -136,6 +136,8 @@ const QUERY_TIMEOUT_MS = 10_000;
 const EMBED_TIMEOUT_MS = 300_000;
 /** How long an embed may take before a toast says what it is waiting on: above the stock embedder's own query time (E10), so a routine wait says nothing. */
 const SLOW_EMBED_MS = 10_000;
+/** Chunks per `/insert`; a sync with more than this shows its progress from the start. */
+const INSERT_BATCH = 25;
 
 /** A fetch signal ending at `ms` or at `stop` (the generation's Stop), whichever is first. */
 const until = (ms, stop) => (stop ? AbortSignal.any([AbortSignal.timeout(ms), stop]) : AbortSignal.timeout(ms));
@@ -411,7 +413,7 @@ async function queryCollections(args, stop = null) {
 /** Unit Separator — see CLAUDE.md. The same literal grading.mjs's rowKey and studio.mjs's rowId join with. */
 const US = '';
 
-/** Chunks a book's entries and brings its vector collection in sync with them. A Stop ends the wait on the server, never the embed.
+/** Chunks a book's entries and brings its vector collection in sync with them. A Stop sends no further batch; the server finishes the one in flight.
  *  @param {AbortSignal} [stop] the generation's Stop
  *  @returns {Promise<{collectionId: string, owners: Map<number, string[]>}>} owners: chunk hash -> `${world}.${uid}` */
 async function syncWorld(world, entries, stop = null) {
@@ -468,19 +470,27 @@ async function syncWorld(world, entries, stop = null) {
 
     if (newItems.length) {
         console.log(`WorldsApart: embedding ${newItems.length} new chunks for "${world}"`);
-        let announced = false;
-        const slow = setTimeout(() => {
-            announced = true;
-            toastr.info(t`Embedding ${newItems.length} chunks for "${world}". A large embedding model can make the first sync of a big book take several minutes.`, 'WorldsApart', { timeOut: 15000 });
-        }, SLOW_EMBED_MS);
+        let done = 0;
+        let toast = null;
+        const progress = () => {
+            const text = t`Embedding "${world}": ${done} of ${newItems.length} chunks.`;
+            if (toast) toast.find('.toast-message').text(text);
+            else toast = toastr.info(text, 'WorldsApart', { timeOut: 0, extendedTimeOut: 0 });
+        };
+        if (newItems.length > INSERT_BATCH) progress();
+        const slow = setTimeout(progress, SLOW_EMBED_MS);
         const started = Date.now();
         try {
-            await vectorPost('insert', { collectionId, items: newItems }, EMBED_TIMEOUT_MS, stop);
+            for (; done < newItems.length; done += INSERT_BATCH) {
+                if (toast) progress();
+                await vectorPost('insert', { collectionId, items: newItems.slice(done, done + INSERT_BATCH) }, EMBED_TIMEOUT_MS, stop);
+            }
         } finally {
             clearTimeout(slow);
+            if (toast) toastr.clear(toast);
         }
         const secs = Math.round((Date.now() - started) / 1000);
-        if (announced) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'WorldsApart', { timeOut: 5000 });
+        if (toast) toastr.success(t`Embedded ${newItems.length} chunks for "${world}" in ${secs}s.`, 'WorldsApart', { timeOut: 5000 });
     }
 
     if (staleHashes.length) {
