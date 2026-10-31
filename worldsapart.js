@@ -2258,7 +2258,7 @@ const SETTINGS_HTML = `
                     <div id="wa_remove_orphans" class="menu_button" style="display:none;width:auto;padding:0.3em 0.8em;" title="Deletes the collections no lorebook claims. Ones built under another source or model are kept." data-i18n="Remove unclaimed collections…;[title]Deletes the collections no lorebook claims. Ones built under another source or model are kept.">Remove unclaimed collections…</div>
 
                     <label class="checkbox_label" for="wa_drop_unavailable">
-                    <input id="wa_drop_unavailable" type="checkbox"><span data-i18n="Hide entries from later in the chat">Hide entries from later in the chat</span> <span class="fa-solid fa-circle-question note-link-span" title="On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn." data-i18n="[title]On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn."></span>
+                    <input id="wa_drop_unavailable" type="checkbox"><span data-i18n="Hide STMB entries from later in the chat">Hide STMB entries from later in the chat</span> <span class="fa-solid fa-circle-question note-link-span" title="On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn." data-i18n="[title]On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn."></span>
                     </label>
                 </div>
             </div>
@@ -2620,7 +2620,7 @@ async function initBody() {
     const presentationMount = document.querySelector('#wa_presentation_order_mount');
     const tierMount = document.querySelector('#wa_tier_editor_mount');
     let tierEditor = null;
-    const tierState = () => { $('#wa_tier_state').text(settings().presentationTiered ? t`Tiered grouping is on: the prompt groups entries by these tiers.` : t`Tiered grouping is off: this order applies in the Studio only.`); };
+    const tierState = () => { $('#wa_tier_state').text(settings().presentationTiered ? t`Tiered grouping is on: the prompt groups entries by these tiers.` : t`Tiered grouping is off: this order applies to sorting in the Studio only.`); };
     if (presentationMount) presentationMount.append(makeSortControl({
         getSort: () => normPresentation(settings().presentationOrder),
         setSort: k => { settings().presentationOrder = k; saveSettingsDebounced(); },
