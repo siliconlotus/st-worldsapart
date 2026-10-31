@@ -1517,6 +1517,14 @@ function recordCoreSet(activated, args, how) {
     };
 }
 
+/** Runs Vector Storage's World Info activation on `chat` (message objects), as its generation interceptor would; true when it ran. */
+async function vectorStorageActivations(chat) {
+    if (!extension_settings.vectors?.enabled_world_info || typeof globalThis.vectors_rearrangeChat !== 'function') return false;
+    // A copy: an interceptor may rearrange what it is handed.
+    try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); return true; }
+    catch (error) { console.warn('WorldsApart: Vector Storage declined, so the scan runs without its activations —', error); return false; }
+}
+
 /** What ST core selects for this turn with WA standing down: `inCoreProbe` makes onEntriesLoaded return before it blinds
  *  core's keys or takes the budget, so checkWorldInfo reads the authored entries, and it suppresses re-entry via
  *  WORLDINFO_SCAN_DONE. Nothing is saved and restored here: getSortedEntries hands every caller a fresh structuredClone,
@@ -1529,11 +1537,7 @@ async function coreSelection() {
     let vectorsRan = false;
     runState.inCoreProbe = true;
     try {
-        // A copy: an interceptor may rearrange what it is handed.
-        if (viaVectors && typeof globalThis.vectors_rearrangeChat === 'function') {
-            try { await globalThis.vectors_rearrangeChat([...chat], getMaxPromptTokens(), null, 'normal'); vectorsRan = true; }
-            catch (error) { console.warn('WorldsApart: Vector Storage declined the probe, core will answer on keywords alone —', error); }
-        }
+        vectorsRan = await vectorStorageActivations(chat);
         // Strings, as `checkWorldInfo` takes them; `vectors_rearrangeChat` above wanted message objects.
         core = await checkWorldInfo(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
     } finally {
@@ -1962,6 +1966,8 @@ async function dryRun(verbose = false, command = null) {
             console.info('WorldsApart: dry run stopped before its scan');
             return '';
         }
+        // Relevance off: Vector Storage's interceptor is what activates vectorized entries in a generation.
+        if (!runState.relevanceRun) await vectorStorageActivations(chat);
 
         await getWorldInfoPrompt(forWI(chat), getMaxPromptTokens(), true, { ...scanSources(), trigger: 'normal' });
 
