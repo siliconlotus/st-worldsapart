@@ -566,6 +566,7 @@
  "Recursive scanning": "Analyse récursive",
  "Relevance cutoff": "Seuil de pertinence",
  "Relevance multiplier for this book": "Multiplicateur de pertinence pour ce livre",
+ "Relevance ranking is off, so there is no ranking to capture.": "Le classement par pertinence est désactivé : il n’y a aucun classement à capturer.",
  "Reload the Connection Manager profile list": "Recharger la liste des profils du gestionnaire de connexions",
  "Removes the key everywhere it appears in this book.": "Retire la clé partout où elle apparaît dans ce livre.",
  "Removes the key everywhere it appears there.": "Retire la clé partout où elle y apparaît.",

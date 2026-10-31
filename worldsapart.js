@@ -988,12 +988,19 @@ async function selectAndActivate(chat, token, stop = null) {
     runState.waForced = [];
 
     let winners = [];
-    try {
-        winners = await similarityActivations(chat, stop);
-    } catch (error) {
-        // A Stop is the user's, not a failure: the return below ends the run.
-        if (error?.name !== 'AbortError') reportFailure(t`similarity activation failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
+    if (!settings().relevance) {
+        // similarityActivations clears these itself; with relevance off nothing else does.
         runState.lastScores.clear();
+        runState.lastQuery = '';
+        runState.lastQueryChat = [];
+    } else {
+        try {
+            winners = await similarityActivations(chat, stop);
+        } catch (error) {
+            // A Stop is the user's, not a failure: the return below ends the run.
+            if (error?.name !== 'AbortError') reportFailure(t`similarity activation failed`, t`Only vector entries which have active keywords were included in this turn, and scoring excluded embedding similarity.`, error);
+            runState.lastScores.clear();
+        }
     }
     // A generation's Stop also supersedes it; a slash command's Stop only aborts the signal.
     if (superseded() || stop?.aborted) return;
@@ -1143,7 +1150,11 @@ function onEntriesLoaded(loaded) {
 
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
     // The forced copies too: core budgets the copy it was handed, not its own entry.
-    if (settings().enabled && runState.waOwnsScan && !runState.generationIsDryRun) takeBudget([...entries, ...runState.waForced]);
+    if (settings().enabled && runState.waOwnsScan && !runState.generationIsDryRun) {
+        if (settings().relevance) takeBudget([...entries, ...runState.waForced]);
+        // WA's forced copies are never constant, so core's own entries are the whole population here.
+        else if (settings().alwaysIncludeConstants) delivery.holdConstants(entries);
+    }
 
     if (!settings().enabled) {
         return;
@@ -1466,9 +1477,21 @@ async function feedScanLoop(args) {
             e.waTriggerDepth = runState.waRecursionDepth;
         }
         // Core has already loaded this scan's entries, so onEntriesLoaded will not reach these.
-        takeBudget(adds);
+        if (settings().relevance) takeBudget(adds);
         dbg(`WorldsApart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
+    }
+}
+
+/** Relevance off: core's budget decided `activated`, and WA records it as delivered. */
+function deliverCoreSet(activated) {
+    runState.lastLayoutOrder = [];
+    runState.lastSkipped = [];
+    runState.lastBudget = null;
+    runState.lastPromptOrder = delivery.coreRows(activated);
+    if (!runState.quietScan) {
+        recordLatches(runState.lastPromptOrder.map(r => r.item.entry));
+        renderDeliveryPanel(runState.lastPromptOrder);
     }
 }
 
@@ -1584,6 +1607,7 @@ async function rankOwnedScan(activated, args, skip) {
     // Only the feed above is a per-loop job. Scoring, selection and delivery write what the last loop writes again — and core reads
     // `order` back in its inclusion-group prio sort, so the rewrite must not stand while the scan is still running.
     if (!isLastLoop(args)) return;
+    if (!settings().relevance) { deliverCoreSet(activated); return; }
 
     if (activated.size === 0) {
         skip('core activated nothing');
@@ -1995,6 +2019,7 @@ function whySelected(item, block) {
     if (isDurable({ block })) {
         return 'always-on';
     }
+    if (!settings().relevance) return 'activated (relevance off)';
     // A promoted row still won its place on a signal: the author waived the cut, not the scoring.
     const parts = [
         Number.isFinite(item.eCredit) ? `E[credit] ${item.eCredit.toFixed(3)}` : null,
@@ -2788,9 +2813,16 @@ async function initBody() {
         aliases: [...(props.aliases ?? []), props.name.replace(/^wa-/, 'wa=')],
     }));
 
+    /** A capture command needs a ranking to capture. */
+    const needsRelevance = run => (...args) => {
+        if (settings().relevance) return run(...args);
+        toastr.warning(t`Relevance ranking is off, so there is no ranking to capture.`, 'WorldsApart');
+        return '';
+    };
+
     addWaCommand({
         name: 'wa-versus',
-        callback: async (named) => { await versusCore(named); return ''; },
+        callback: needsRelevance(async (named) => { await versusCore(named); return ''; }),
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many of WA\u2019s ranked entries to carry beyond the two delivered sets, for grading depth', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '30' }),
         ],
@@ -2829,7 +2861,7 @@ async function initBody() {
 
     addWaCommand({
         name: 'wa-grade',
-        callback: gradeScene,
+        callback: needsRelevance(gradeScene),
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'sample name, used as the filename', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'scene-<date>' }),
             SlashCommandNamedArgument.fromProps({ name: 'candidates', description: 'how many activated entries to surface for grading (the cliff is switched off for the run, so the sample can assess every cutoff mode offline)', typeList: [ARGUMENT_TYPE.NUMBER], defaultValue: '20' }),
@@ -2841,7 +2873,7 @@ async function initBody() {
 
     addWaCommand({
         name: 'wa-super-grade',
-        callback: superGradeScene,
+        callback: needsRelevance(superGradeScene),
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({ name: 'name', description: 'base sample name; each arm gets "<name>--<arm>.json"', typeList: [ARGUMENT_TYPE.STRING], defaultValue: 'chat-msgN' }),
             SlashCommandNamedArgument.fromProps({ name: 'arms', description: 'which arms to capture, comma-separated (default: all)', typeList: [ARGUMENT_TYPE.STRING], enumList: Object.keys(POOL_ARMS) }),
