@@ -49,7 +49,7 @@ import { Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 
 import { chunkEntry } from './extension/chunking.mjs';
 import { buildContentIndex, scoreContent, indexFingerprint, entryKey } from './extension/content-lexical.mjs';
-import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, isMemory, fitKey, queryPrefix, postDates, UNFITTED_FALLBACK } from './extension/relevance.mjs';
+import { buildNameDf, properNames, properShared, properDensity, scoreRelevance, keysStandInForText, isMemory, fitKey, queryPrefix, postDates, UNFITTED_FALLBACK } from './extension/relevance.mjs';
 
 /** Base of the rewritten `order` sequence, parked above any authored value and ST's default of 100. */
 const ORDER_BASE = 99000;
@@ -682,6 +682,9 @@ async function scoreRelevanceColumn(items, windowFor, entries = null) {
         const population = (fit.standardise === 'pooled' ? items : rows).filter(it => !layout.isConstant(it.entry)).map(col);
         const eCredit = scoreRelevance(fit, rows.map(col), population);
         rows.forEach((it, i) => { it.eCredit = eCredit[i]; it.eCreditTier = tier; });
+        if (runState.verboseRun && fit.features?.includes('text') && keysStandInForText(population)) {
+            console.log(`WorldsApart: ${tier} tier — the text column is flat this turn, so keys are scored in its slot`);
+        }
     }
 
     if (runState.verboseRun) {
