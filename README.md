@@ -39,6 +39,8 @@ The box will also ask you which branch you want; we use the same branch names as
 
 Updates stay on the channel you chose. SillyTavern checks at startup and tells you when one is waiting; it installs updates by itself only when SillyTavern's own version changes.
 
+That's all you need for the Lorebook Studio, SmartKeys and WA's matching. If you only want those, turn off **Relevance ranking** in WA's settings and skip the plugin section below; SillyTavern will handle the budget, selection, and insertion.
+
 **In multi-user setups, we strongly recommend installing for all users.** This prevents version drift weirdness for everyone, and also prevents a security issue if you install the plugin [(see below)](#multi-user-warning).
 
 ### Server plugin bootstrap
