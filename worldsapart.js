@@ -978,6 +978,8 @@ async function selectAndActivate(chat, token, stop = null) {
     // /wa-dry reaches here without the interceptor, so the replayed scan judges the chat it was handed.
     runState.scanChat = chat.slice();
 
+    runState.relevanceRun = settings().relevance;
+
     // waOwnsScan FALSE first: WA's own getSortedEntries calls below fire WORLDINFO_ENTRIES_LOADED, and the blanking must not eat the keys WA matches on.
     runState.waOwnsScan = false;
     runState.waMatched = new Set();
@@ -988,7 +990,7 @@ async function selectAndActivate(chat, token, stop = null) {
     runState.waForced = [];
 
     let winners = [];
-    if (!settings().relevance) {
+    if (!runState.relevanceRun) {
         // similarityActivations clears these itself; with relevance off nothing else does.
         runState.lastScores.clear();
         runState.lastQuery = '';
@@ -1008,6 +1010,11 @@ async function selectAndActivate(chat, token, stop = null) {
     let adds = [];
     try {
         adds = await keywordActivations(chat);
+        // Relevance off: constants are forced with the key matches so core's budget walk keeps `order` across both (eval/st-worldinfo.md).
+        if (!runState.relevanceRun) {
+            const matched = new Set(adds);
+            adds = (runState.waCandidates ?? []).filter(e => matched.has(e) || (e.constant && !e.disable));
+        }
     } catch (error) {
         // Total: waOwnsScan is set below regardless, so core does not match either.
         reportFailure(t`keyword activation failed`,
@@ -1151,9 +1158,8 @@ function onEntriesLoaded(loaded) {
     // Gated on WA actually cutting this generation: core's budget is the backstop on every path where onScanDone returns early.
     // The forced copies too: core budgets the copy it was handed, not its own entry.
     if (settings().enabled && runState.waOwnsScan && !runState.generationIsDryRun) {
-        if (settings().relevance) takeBudget([...entries, ...runState.waForced]);
-        // WA's forced copies are never constant, so core's own entries are the whole population here.
-        else if (settings().alwaysIncludeConstants) delivery.holdConstants(entries);
+        if (runState.relevanceRun) takeBudget([...entries, ...runState.waForced]);
+        else if (settings().alwaysIncludeConstants) delivery.holdConstants([...entries, ...runState.waForced]);
     }
 
     if (!settings().enabled) {
@@ -1477,7 +1483,7 @@ async function feedScanLoop(args) {
             e.waTriggerDepth = runState.waRecursionDepth;
         }
         // Core has already loaded this scan's entries, so onEntriesLoaded will not reach these.
-        if (settings().relevance) takeBudget(adds);
+        if (runState.relevanceRun) takeBudget(adds);
         dbg(`WorldsApart: activating ${adds.length} keyword-matched entr${adds.length === 1 ? 'y' : 'ies'} on scan loop ${args?.state?.loopCount} (${newTexts.length ? 'recursion text' : 'min-activations widening'})`);
         await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, adds);
     }
@@ -1574,13 +1580,13 @@ async function onScanDone(args) {
         return;
     }
 
-    // Past the gates the scan is WA's — the takeover has stashed core's keys and stood core's budget down — so a throw
+    // Past the gates the scan is WA's — the takeover has stashed core's keys and, with relevance on, stood core's budget down — so a throw
     // must not pass silently: nothing undecided ships, and the failure is loud on every turn it happens.
     try {
         await rankOwnedScan(activated, args, skip);
     } catch (error) {
         // Last loop only, as every other delete is: core re-activates what it no longer holds, and asks for one more loop.
-        if (isLastLoop(args)) delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
+        if (isLastLoop(args) && runState.relevanceRun) delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
         reportFailure(t`activation error`,
             t`Only constant and sticky entries were included. Try again.`,
             error, { loud: true });
@@ -1607,7 +1613,7 @@ async function rankOwnedScan(activated, args, skip) {
     // Only the feed above is a per-loop job. Scoring, selection and delivery write what the last loop writes again — and core reads
     // `order` back in its inclusion-group prio sort, so the rewrite must not stand while the scan is still running.
     if (!isLastLoop(args)) return;
-    if (!settings().relevance) { deliverCoreSet(activated); return; }
+    if (!runState.relevanceRun) { deliverCoreSet(activated); return; }
 
     if (activated.size === 0) {
         skip('core activated nothing');
