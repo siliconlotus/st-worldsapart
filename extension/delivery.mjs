@@ -27,6 +27,21 @@ export function dropUndecided(activated, isStickyArmed = () => false) {
 /** The `ignoreBudget` the author set. `??`, not `||`: a stashed `false` must beat the `true` onEntriesLoaded hands core. */
 export const authorIgnoreBudget = entry => Boolean(entry?.waIgnoreBudget ?? entry?.ignoreBudget);
 
+/** Relevance off: puts constants past core's budget, stashing the author's `ignoreBudget`; returns how many it held. */
+export function holdConstants(entries) {
+    let held = 0;
+    for (const entry of entries) {
+        if (!entry || !isConstant(entry)) continue;
+        entry.waIgnoreBudget ??= Boolean(entry.ignoreBudget);   // `??=`, not `=`: a second load would stash the `true` set below
+        entry.ignoreBudget = true;
+        held++;
+    }
+    return held;
+}
+
+/** Core's shipped map as delivery-panel rows, in core's order. */
+export const coreRows = activated => [...activated].map(([key, entry]) => ({ item: { key, entry }, block: isConstant(entry) ? 'constant' : 'dynamic' }));
+
 /**
  * Applies the entry caps and the token budget to `walk`, which must lead with the durable blocks. The populations
  * nest (vector ⊆ capped ⊆ all, plus per-book); any cap at 0 is off; ignoreBudget entries are neither capped nor counted.

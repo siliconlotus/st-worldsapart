@@ -21,6 +21,12 @@ eq(s.worldPriorityByChar && Array.isArray(s.worldPriorityByChar) === false && ty
 ensureSettings(store);
 eq(s.messageDepth, 25, 're-init on a coerced store is stable');
 eq(defaultSettings.debugLog, false, 'debugLog ships off: the per-generation table and token counting are opt-in');
+eq(defaultSettings.relevance, true, 'relevance ranking ships on');
+eq(defaultSettings.alwaysIncludeConstants, true, 'constants are always included by default when relevance is off');
+const offStore = { worldsApart: { relevance: 'false', alwaysIncludeConstants: 0 } };
+ensureSettings(offStore);
+eq(settings().relevance, true, 'a relevance spelled as a string falls back to the default');
+eq(settings().alwaysIncludeConstants, true, '...and so does a numeric alwaysIncludeConstants');
 
 // --- what a clean keeps: the settings a user built up go only when named
 {

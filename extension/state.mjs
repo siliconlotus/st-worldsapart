@@ -6,6 +6,8 @@ const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
+    relevance: true, // off: WA activates by key only; core selects, budgets and orders (docs/matching-architecture.md, *The pipeline*)
+    alwaysIncludeConstants: true, // relevance off: constants get ignoreBudget so core's budget cannot drop them
     chunkSize: 1750, // characters, not tokens; changing it re-embeds every collection
     chunkMode: 'paragraph', // 'paragraph' | 'length' (chunking.mjs splitRecursive)
     llmProfile: '', // Connection Manager profile id for WA's own generation calls; '' = the current API
