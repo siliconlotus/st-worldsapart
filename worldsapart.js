@@ -335,7 +335,7 @@ function renderPluginSetup() {
         return;
     }
     const absent = t`⚠ Server plugin not installed — activation by similarity runs on ST's own vector search, without mean-centering or server-side pooling.`;
-    alert.append(banner(line(absent, AMBER)));
+    if (settings().relevance) alert.append(banner(line(absent, AMBER)));
     if (!isAdmin()) {
         box.append($('<div></div>').text(t`${absent} Ask whoever runs this SillyTavern server to install it.`));
         return;
@@ -2221,6 +2221,9 @@ const SETTINGS_HTML = `
 .worlds-apart-settings .wa-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
 .worlds-apart-settings .wa-row label { margin: 0; }
 .worlds-apart-settings .wa-row input { width: 6em; flex: 0 0 auto; }
+.worlds-apart-settings.wa-relevance-off .wa-relevance-only { display: none; }
+.worlds-apart-settings:not(.wa-relevance-off) .wa-relevance-off-only { display: none; }
+.worlds-apart-settings .wa-two-state { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
 </style>
 <div class="worlds-apart-settings">
     <div class="inline-drawer">
@@ -2236,15 +2239,23 @@ const SETTINGS_HTML = `
                 </label>
                 <small id="wa_version" style="opacity:0.55;margin-left:6px;"></small>
             </div>
+            <label class="checkbox_label" for="wa_relevance">
+                <input id="wa_relevance" type="checkbox" class="wa-switch"><span data-i18n="Relevance ranking">Relevance ranking</span>
+            </label>
+            <label class="wa-two-state wa-relevance-off-only" for="wa_always_constants">
+                <span data-i18n="ST constant behavior">ST constant behavior</span>
+                <input id="wa_always_constants" type="checkbox" class="wa-switch">
+                <span data-i18n="Constants always included">Constants always included</span>
+            </label>
             <label class="checkbox_label" for="wa_studio_on_wi_button">
                 <input id="wa_studio_on_wi_button" type="checkbox"><span data-i18n="World Info button opens the Studio">World Info button opens the Studio</span>
             </label>
-            <label><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not."></span></label>
-            <div id="wa_presentation_order_mount" style="margin-top:4px;"></div>
+            <label class="wa-relevance-only"><span data-i18n="Prompt insertion order">Prompt insertion order</span> <span class="fa-solid fa-circle-question note-link-span" title="The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not." data-i18n="[title]The order selected entries take in the prompt. A base sort, with optional tier grouping. This setting is saved. The Studio's sort views are not."></span></label>
+            <div id="wa_presentation_order_mount" class="wa-relevance-only" style="margin-top:4px;"></div>
 
             <div class="wa-row"><label for="wa_message_depth" data-i18n="Message depth">Message depth</label><input id="wa_message_depth" type="number" class="text_pole" min="1" max="20" step="1"></div>
 
-            <div class="inline-drawer wa-section">
+            <div class="inline-drawer wa-section wa-relevance-only">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b><span data-i18n="Tier precedence">Tier precedence</span> <span class="fa-solid fa-circle-question note-link-span" title="With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio." data-i18n="[title]With tier grouping on, an entry joins the first tier it matches, top to bottom. Untick a tier to skip it. Shared with the Studio."></span></b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
@@ -2286,22 +2297,22 @@ const SETTINGS_HTML = `
                     <option value="permissive" data-i18n="Permissive: whole-word matches allow apostrophes and hyphens">Permissive: whole-word matches allow apostrophes and hyphens</option>
                     </select>
 
-                    <div id="wa_embed_info" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension." data-i18n="[title]Set the embedding model in the Vector Storage extension."></div>
+                    <div id="wa_embed_info" class="opacity50p wa-relevance-only" style="margin:0.4em 0;font-size:0.85em;" title="Set the embedding model in the Vector Storage extension." data-i18n="[title]Set the embedding model in the Vector Storage extension."></div>
 
-                    <label id="wa_mean_centered_label"><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
-                    <div id="wa_plugin_setup" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
+                    <label id="wa_mean_centered_label" class="wa-relevance-only"><span data-i18n="Mean-centered search">Mean-centered search</span> <span class="fa-solid fa-circle-question note-link-span" title="Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed." data-i18n="[title]Subtracts the collection's average vector before comparing, so wording every entry shares stops dominating similarity. Automatic when the server plugin is installed."></span></label>
+                    <div id="wa_plugin_setup" class="wa-relevance-only" style="margin:0.4em 0;font-size:0.85em;opacity:0.75;"></div>
 
                     <div id="wa_find_orphans" class="menu_button" style="width:auto;padding:0.3em 0.8em;" title="Lists vector collections no current book claims. Nothing is deleted." data-i18n="Find unused vector collections…;[title]Lists vector collections no current book claims. Nothing is deleted.">Find unused vector collections…</div>
                     <div id="wa_orphans_out" class="opacity50p" style="margin:0.4em 0;font-size:0.85em;"></div>
                     <div id="wa_remove_orphans" class="menu_button" style="display:none;width:auto;padding:0.3em 0.8em;" title="Deletes the collections no lorebook claims. Ones built under another source or model are kept." data-i18n="Remove unclaimed collections…;[title]Deletes the collections no lorebook claims. Ones built under another source or model are kept.">Remove unclaimed collections…</div>
 
-                    <label class="checkbox_label" for="wa_drop_unavailable">
+                    <label class="checkbox_label wa-relevance-only" for="wa_drop_unavailable">
                     <input id="wa_drop_unavailable" type="checkbox"><span data-i18n="Hide STMB entries from later in the chat">Hide STMB entries from later in the chat</span> <span class="fa-solid fa-circle-question note-link-span" title="On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn." data-i18n="[title]On a branch from an earlier point, scene summaries written after that point are hidden. No effect at the latest turn."></span>
                     </label>
                 </div>
             </div>
 
-            <div class="inline-drawer wa-section">
+            <div class="inline-drawer wa-section wa-relevance-only">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <b data-i18n="Selection &amp; budget">Selection &amp; budget</b>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
@@ -2644,6 +2655,14 @@ async function initBody() {
     $('#wa_studio').on('click', () => { lorebookStudio(chatBook()); });
 
     bind('#wa_enabled', 'enabled', 'checked');
+    bind('#wa_relevance', 'relevance', 'checked');
+    bind('#wa_always_constants', 'alwaysIncludeConstants', 'checked');
+    const applyRelevance = () => {
+        $('.worlds-apart-settings').toggleClass('wa-relevance-off', !settings().relevance);
+        renderPluginSetup();
+    };
+    $('#wa_relevance').on('change', applyRelevance);
+    applyRelevance();
     bind('#wa_studio_on_wi_button', 'studioOnWiButton', 'checked');
     // Capture phase, so it runs before core's jQuery doNavbarIconClick on the same element and can stop it.
     document.querySelector('#WI-SP-button .drawer-toggle')?.addEventListener('click', ev => {
