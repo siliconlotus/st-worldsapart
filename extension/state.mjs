@@ -6,6 +6,8 @@ const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
+    relevance: true, // off: WA activates by key only; core selects, budgets and orders (docs/matching-architecture.md, *The pipeline*)
+    alwaysIncludeConstants: true, // relevance off: constants get ignoreBudget so core's budget cannot drop them
     chunkSize: 1750, // characters, not tokens; changing it re-embeds every collection
     chunkMode: 'paragraph', // 'paragraph' | 'length' (chunking.mjs splitRecursive)
     llmProfile: '', // Connection Manager profile id for WA's own generation calls; '' = the current API
@@ -117,6 +119,7 @@ export const runState = {
     waRecursionTexts: [],         // every pass's recursion-eligible entry content so far; the rematch window is chat + these
     waMinSkew: 0,                 // min-activation passes core has scheduled; widens WA's window one message per pass
     waCandidates: null,           // candidate entries fetched at intercept (live keys); null = no owned scan state
+    relevanceRun: true,           // settings().relevance as the armed run read it; the gates read this, so a mid-run toggle cannot split a scan
     waForced: [],                 // the copies WA force-activated for this scan; core's budget reads these, not its own entries
     verboseRun: false,            // true during a /wa-debug run
     dryRunInProgress: false,      // true during either slash-command run

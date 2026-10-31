@@ -1,6 +1,6 @@
 // Checks the nested entry caps: vector ⊆ dynamic ⊆ all.
-import { applyBudget, dropUndecided } from '../extension/delivery.mjs';
-import { eq } from '../eval/lib/metrics.mjs';
+import { applyBudget, dropUndecided, holdConstants, coreRows } from '../extension/delivery.mjs';
+import { eq, eqDeep } from '../eval/lib/metrics.mjs';
 
 const mk = (key, tokens, opts = {}) => ({ key, tokens, entry: { ...opts } });
 
@@ -280,3 +280,19 @@ eq(walkOrder({ sticky: stick, constant: cons, results: [] }).map(x => x.key).joi
     eq([...activated.keys()].join(','), 'c,a,s', 'dropUndecided deletes the undecided rows, unreadable ones included');
     eq(dropUndecided(new Map()), 0, 'an empty activation map has nothing to keep');
 }
+
+// --- relevance off: core budgets everything but the constants
+const kc = { constant: true, ignoreBudget: false };
+const ka = { content: '@@activate\nx', decorators: ['@@activate'] };
+const kd = { ignoreBudget: true };
+const kn = {};
+eq(holdConstants([kc, ka, kd, kn, null]), 2, 'holds the constant flag and @@activate, nothing else');
+eqDeep([kc.ignoreBudget, ka.ignoreBudget], [true, true], 'held constants ignore the budget');
+eqDeep([kc.waIgnoreBudget, ka.waIgnoreBudget], [false, false], 'the author\'s value is stashed');
+eqDeep([kd.ignoreBudget, kd.waIgnoreBudget, kn.ignoreBudget], [true, undefined, undefined], 'a dynamic entry is left as authored');
+holdConstants([kc]);
+eq(kc.waIgnoreBudget, false, 'a second load does not stash the true it set');
+
+const coreMap = new Map([['b.2', { world: 'b', uid: 2, order: 5 }], ['b.1', { world: 'b', uid: 1, order: 1, constant: true }]]);
+eqDeep(coreRows(coreMap).map(r => [r.item.key, r.block]), [['b.1', 'constant'], ['b.2', 'dynamic']], 'core\'s map becomes panel rows in prompt order');
+eqDeep(coreRows(new Map()), [], 'an empty scan delivers nothing');
