@@ -39,8 +39,10 @@ export function holdConstants(entries) {
     return held;
 }
 
-/** Core's shipped map as delivery-panel rows, in core's order. */
-export const coreRows = activated => [...activated].map(([key, entry]) => ({ item: { key, entry }, block: isConstant(entry) ? 'constant' : 'dynamic' }));
+/** Core's shipped map as delivery-panel rows, in prompt order. */
+export const coreRows = activated => [...activated]
+    .sort(([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0))
+    .map(([key, entry]) => ({ item: { key, entry }, block: isConstant(entry) ? 'constant' : 'dynamic' }));
 
 /**
  * Applies the entry caps and the token budget to `walk`, which must lead with the durable blocks. The populations

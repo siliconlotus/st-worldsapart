@@ -293,6 +293,6 @@ eqDeep([kd.ignoreBudget, kd.waIgnoreBudget, kn.ignoreBudget], [true, undefined, 
 holdConstants([kc]);
 eq(kc.waIgnoreBudget, false, 'a second load does not stash the true it set');
 
-const coreMap = new Map([['b.1', { world: 'b', uid: 1, constant: true }], ['b.2', { world: 'b', uid: 2 }]]);
-eqDeep(coreRows(coreMap).map(r => [r.item.key, r.block]), [['b.1', 'constant'], ['b.2', 'dynamic']], 'core\'s map becomes panel rows in core\'s order');
+const coreMap = new Map([['b.2', { world: 'b', uid: 2, order: 5 }], ['b.1', { world: 'b', uid: 1, order: 1, constant: true }]]);
+eqDeep(coreRows(coreMap).map(r => [r.item.key, r.block]), [['b.1', 'constant'], ['b.2', 'dynamic']], 'core\'s map becomes panel rows in prompt order');
 eqDeep(coreRows(new Map()), [], 'an empty scan delivers nothing');

@@ -1,5 +1,5 @@
 // worldsapart.js — the ST-coupled half: hooks WORLDINFO_ENTRIES_LOADED, generate_interceptor and
-// WORLDINFO_SCAN_DONE to take World Info selection, ranking and budget over from core.
+// WORLDINFO_SCAN_DONE to take World Info activation, and with relevance on its selection, ranking and budget, over from core.
 
 import {
     eventSource,
@@ -1122,8 +1122,8 @@ function takeBudget(entries) {
     }
 }
 
-/** Blinds core's keyword matcher on a scan WA owns — keys stashed on `waKeys`/`waSecondary`, then blanked — and takes
- *  the budget off core. REASSIGN `key`, never mutate it: the array is loadWorldInfo's cache. */
+/** Blinds core's keyword matcher on a scan WA owns — keys stashed on `waKeys`/`waSecondary`, then blanked — and, with relevance on,
+ *  takes the budget off core. REASSIGN `key`, never mutate it: the array is loadWorldInfo's cache. */
 function onEntriesLoaded(loaded) {
     if (runState.inCoreProbe) return;   // the exemption is lifted on purpose mid-probe
     const entries = Object.values(loaded ?? {}).filter(Array.isArray).flat();
@@ -1490,7 +1490,7 @@ async function feedScanLoop(args) {
 }
 
 /** Relevance off: core's budget decided `activated`, and WA records it as delivered. */
-function deliverCoreSet(activated) {
+async function deliverCoreSet(activated) {
     runState.lastLayoutOrder = [];
     runState.lastSkipped = [];
     runState.lastBudget = null;
@@ -1499,6 +1499,7 @@ function deliverCoreSet(activated) {
         recordLatches(runState.lastPromptOrder.map(r => r.item.entry));
         renderDeliveryPanel(runState.lastPromptOrder);
     }
+    if (settings().debugLog && !runState.dryRunInProgress && !runState.generationIsDryRun) await reportLayout(false, false);
 }
 
 /** Records what core selected while WA stood down — core's shipped set, WORLDINFO_SCAN_DONE firing after its budget loop. */
@@ -1613,7 +1614,7 @@ async function rankOwnedScan(activated, args, skip) {
     // Only the feed above is a per-loop job. Scoring, selection and delivery write what the last loop writes again — and core reads
     // `order` back in its inclusion-group prio sort, so the rewrite must not stand while the scan is still running.
     if (!isLastLoop(args)) return;
-    if (!runState.relevanceRun) { deliverCoreSet(activated); return; }
+    if (!runState.relevanceRun) { await deliverCoreSet(activated); return; }
 
     if (activated.size === 0) {
         skip('core activated nothing');
@@ -2103,7 +2104,7 @@ async function reportLayout(verbose = false, countTokens = true) {
             score: Number.isFinite(item.eCredit) ? Number(item.eCredit.toFixed(5)) : null,
             uid: entry.uid,
             // wiOrder is the entry's own WI `order`; waOrder is what WA wrote.
-            wiOrder: entry.waOriginalOrder,
+            wiOrder: entry.waOriginalOrder ?? entry.order,
             waOrder: entry.order,
             ...(verbose ? {
                 cosine: item.score !== undefined ? Number(item.score.toFixed(5)) : null,
