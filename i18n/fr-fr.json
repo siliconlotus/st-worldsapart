@@ -38,7 +38,7 @@
  "${0} hidden messages skipped": "${0} messages masqués ignorés",
  "${0} ignored": "${0} ignoré(s)",
  "${0} in ${1} collection(s), all claimed.": "${0} dans ${1} collection(s), toutes revendiquées.",
- "${0} in ${1} collections — ${2} unclaimed, ${3} on another source/model. Listed in the console; delete by hand from data/<user>/vectors/.": "${0} dans ${1} collections — ${2} sans livre, ${3} sur une autre source ou un autre modèle. Listées dans la console ; à supprimer à la main dans data/<user>/vectors/.",
+ "${0} in ${1} collections — ${2} unclaimed, ${3} on another source/model. Listed in the console.": "${0} dans ${1} collections — ${2} sans livre, ${3} sur une autre source ou un autre modèle. Listées dans la console.",
  "${0} is not a graded scene — skipped": "${0} n’est pas une scène notée — ignoré",
  "${0} judged in an earlier round (pre-filled — edit any you disagree with, untouched rows carry through as shown)": "${0} jugées lors d’un tour précédent (pré-remplies — modifiez celles avec lesquelles vous n’êtes pas d’accord, les autres sont reprises telles quelles)",
  "${0} key": "${0} clé",
@@ -934,5 +934,9 @@
  "What should WorldsApart remove?": "Que doit supprimer WorldsApart ?",
  "Anything left unticked is kept.": "Tout ce qui n’est pas coché est conservé.",
  "Remove": "Supprimer",
- "WorldsApart could not remove everything you chose. See the browser console.": "WorldsApart n’a pas pu supprimer tout ce que vous avez choisi. Consultez la console du navigateur."
+ "WorldsApart could not remove everything you chose. See the browser console.": "WorldsApart n’a pas pu supprimer tout ce que vous avez choisi. Consultez la console du navigateur.",
+ "Remove unclaimed collections?": "Supprimer les collections sans livre ?",
+ "This deletes ${0} of vector collections no lorebook claims, listed in the console. It cannot be undone.": "Cela supprime ${0} de collections vectorielles qu’aucun lorebook ne revendique, listées dans la console. C’est irréversible.",
+ "Remove unclaimed collections…": "Supprimer les collections sans livre…",
+ "Deletes the collections no lorebook claims. Ones built under another source or model are kept.": "Supprime les collections qu’aucun lorebook ne revendique. Celles construites sous une autre source ou un autre modèle sont conservées."
 }
