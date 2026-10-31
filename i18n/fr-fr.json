@@ -660,6 +660,7 @@
  "Show the lorebook list": "Afficher la liste des lorebooks",
  "SillyTavern could not get embeddings from ${0}.": "SillyTavern n’a pas pu vectoriser avec ${0}.",
  "SillyTavern shows a broken binding as no binding at all, so this cannot be seen — let alone fixed — from the character panel.": "SillyTavern affiche une liaison rompue comme une absence de liaison : cela ne se voit pas — et encore moins ne se répare — depuis le panneau du personnage.",
+ "SillyTavern's selection was used as it stood, and may be missing entries that recursion would have added. Try again.": "La sélection de SillyTavern a été utilisée telle quelle et peut manquer d’entrées que la récursion aurait ajoutées. Réessayez.",
  "Skip dates": "Ignorer les dates",
  "Skip keywords in over": "Ignorer les mots-clés présents dans plus de",
  "Skip short keywords": "Ignorer les mots-clés courts",

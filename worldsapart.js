@@ -1593,7 +1593,9 @@ async function onScanDone(args) {
         // Last loop only, as every other delete is: core re-activates what it no longer holds, and asks for one more loop.
         if (isLastLoop(args) && runState.relevanceRun) delivery.dropUndecided(activated, entry => Boolean(args?.timedEffects?.isEffectActive('sticky', entry)));
         reportFailure(t`activation error`,
-            t`Only constant and sticky entries were included. Try again.`,
+            runState.relevanceRun
+                ? t`Only constant and sticky entries were included. Try again.`
+                : t`SillyTavern's selection was used as it stood, and may be missing entries that recursion would have added. Try again.`,
             error, { loud: true });
     } finally {
         // After rankOwnedScan, which may end the loop by clearing `next`. The next scan to rank must arm afresh.
