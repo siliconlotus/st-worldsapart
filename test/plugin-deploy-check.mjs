@@ -108,6 +108,19 @@ try {
         eq(fs.existsSync(`${cfgOf(on.root)}.wa-backup`), false, 'already true: no backup is taken');
     } finally { on.cleanup(); }
 
+    // ST's Docker image: config.yaml is a relative link into the mounted config/.
+    const linked = deploySandbox({ prepare: root => {
+        fs.mkdirSync(path.join(root, 'config'));
+        fs.writeFileSync(path.join(root, 'config', 'config.yaml'), 'enableServerPlugins: false\n');
+        fs.symlinkSync(path.join('.', 'config', 'config.yaml'), cfgOf(root));
+    } });
+    try {
+        eq(linked.run.status, 0, 'a deploy over a linked config.yaml succeeds');
+        eq(lstat(cfgOf(linked.root))?.isSymbolicLink(), true, '...leaves the link a link');
+        eq(fs.readFileSync(path.join(linked.root, 'config', 'config.yaml'), 'utf8'), 'enableServerPlugins: true\n', '...patches the file it points to');
+        eq(fs.existsSync(path.join(linked.root, 'config', 'config.yaml.wa-backup')), true, '...and backs up beside that file');
+    } finally { linked.cleanup(); }
+
     const none = deploySandbox();
     try {
         eq(none.run.status === 0 && /no config\.yaml/.test(none.run.stdout), true, 'no config.yaml: a note, and the deploy still succeeds');
