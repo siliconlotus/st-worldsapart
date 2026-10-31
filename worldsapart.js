@@ -1364,6 +1364,43 @@ const keywordScore = (entry, text, keys = entry.key) => matcher.keywordScore(ent
     scope: runState.matchScope,
 });
 
+/** Matches each item's keys in its keyword window, recursion text included; `{keys, scanText, scored}` per item, in order. */
+function matchItemKeys(items, windowFor) {
+    // Keyword scoring only: the buffer is text WA injected, so it must not enter the window properNouns is counted over.
+    // excludeRecursion honoured here because core's gate is not in this loop — activation inherits it, scoring must not.
+    // An entry that fed the buffer must not match its OWN content there: that is the entry naming itself, not the
+    // conversation naming it, and core never self-matches because it activates an entry once.
+    const recursionTexts = runState.waRecursionTexts ?? [];
+    const keywordWindowFor = (depth, entry) => {
+        const others = entry?.excludeRecursion ? [] : recursionTexts.filter(x => x !== String(entry?.content ?? ''));
+        return others.length
+            ? matcher.withExtraTexts(windowFor, others, settings().matchWindow)(depth, entry)
+            : windowFor(depth, entry);
+    };
+
+    // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (docs/matching-architecture.md, *Scoring*).
+    const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
+    // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
+    const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
+        ? { ...entry, keysecondary: entry.waSecondary }
+        : entry;
+
+    applyMacros(items.map(it => it.entry));
+    // Registered before the loop, secondaries too, so the automaton is built once.
+    registerKeys(items.flatMap(it => {
+        const keys = scoreKeysOf(it.entry);
+        return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
+    }), runState.matchScope);
+
+    return items.map(item => {
+        // Per-entry scanDepth wins, as in core. Nullish, not `||`: 0 is core's authored "match nothing from chat".
+        const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
+        const scanText = keywordWindowFor(depth, item.entry);
+        const keys = scoreKeysOf(item.entry);
+        return { keys, scanText, scored: keywordScore(scoringView(item.entry), scanText, keys) };
+    });
+}
+
 /** Stable per-character (or per-group) key for the priority order; null with nothing selected. */
 function priorityKey() {
     const ctx = getContext();
@@ -1494,7 +1531,11 @@ async function deliverCoreSet(activated) {
     runState.lastLayoutOrder = [];
     runState.lastSkipped = [];
     runState.lastBudget = null;
-    runState.lastPromptOrder = delivery.coreRows(activated);
+    const rows = delivery.coreRows(activated);
+    // Hits only, for the panel's tooltip: no score is recorded with relevance off.
+    const { windowFor } = await scanWindowFor(runState.scanChat ?? getContext().chat ?? []);
+    matchItemKeys(rows.map(r => r.item), windowFor).forEach(({ scored }, i) => { rows[i].item.keywordHits = scored.hits; });
+    runState.lastPromptOrder = rows;
     if (!runState.quietScan) {
         recordLatches(runState.lastPromptOrder.map(r => r.item.entry));
         renderDeliveryPanel(runState.lastPromptOrder);
@@ -1672,38 +1713,10 @@ async function rankOwnedScan(activated, args, skip) {
         // Raw; the gate (matcher.usedMatchSources) runs where the attached books are in scope.
         runState.lastSources = sources;
         windowFor = built.windowFor;
-        // Keyword scoring only: the buffer is text WA injected, so it must not enter the window properNouns is counted over.
-        // excludeRecursion honoured here because core's gate is not in this loop — activation inherits it, scoring must not.
-        // An entry that fed the buffer must not match its OWN content there: that is the entry naming itself, not the
-        // conversation naming it, and core never self-matches because it activates an entry once.
-        const recursionTexts = runState.waRecursionTexts ?? [];
-        const keywordWindowFor = (depth, entry) => {
-            const others = entry?.excludeRecursion ? [] : recursionTexts.filter(x => x !== String(entry?.content ?? ''));
-            return others.length
-                ? matcher.withExtraTexts(windowFor, others, settings().matchWindow)(depth, entry)
-                : windowFor(depth, entry);
-        };
 
-        // Live keys, else the takeover's stash; every entry's keys are scored, vectorized included (docs/matching-architecture.md, *Scoring*).
-        const scoreKeysOf = entry => (entry.key?.length ? entry.key : (entry.waKeys ?? []));
-        // A local view, never a write-back: restoring keys on core's scan copies mid-scan hands core's next loop the keys the takeover blanked.
-        const scoringView = entry => (!entry.keysecondary?.length && entry.waSecondary?.length)
-            ? { ...entry, keysecondary: entry.waSecondary }
-            : entry;
-
-        applyMacros(items.map(it => it.entry));
-        // Registered before the loop, secondaries too, so the automaton is built once.
-        registerKeys(items.flatMap(it => {
-            const keys = scoreKeysOf(it.entry);
-            return keys.length ? [...keys, ...matcher.secondaryKeys(scoringView(it.entry))] : [];
-        }), runState.matchScope);
-
-        for (const item of items) {
-            // Per-entry scanDepth wins, as in core. Nullish, not `||`: 0 is core's authored "match nothing from chat".
-            const depth = Number(item.entry.scanDepth ?? (settings().messageDepth || world_info_depth));
-            const scanText = keywordWindowFor(depth, item.entry);
-            const scoreKeys = scoreKeysOf(item.entry);
-            const scored = keywordScore(scoringView(item.entry), scanText, scoreKeys);
+        const matched = matchItemKeys(items, windowFor);
+        for (const [i, item] of items.entries()) {
+            const { keys: scoreKeys, scanText, scored } = matched[i];
             // An entry reached at recursion pass d did not have the conversation name it (docs/matching-architecture.md, *Scoring*).
             item.keywordScore = scored.score / (1 + (Number(item.entry.waTriggerDepth) || 0));
             item.keywordHits = scored.hits;
