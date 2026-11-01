@@ -1527,11 +1527,18 @@ async function feedScanLoop(args) {
 }
 
 /** Relevance off: core's budget decided `activated`, and WA records it as delivered. */
-async function deliverCoreSet(activated) {
+async function deliverCoreSet(activated, maxTokens) {
     runState.lastLayoutOrder = [];
     runState.lastSkipped = [];
-    runState.lastBudget = null;
     const rows = delivery.coreRows(activated);
+    const costs = await Promise.all(rows.map(r => getTokenCountAsync(r.item.entry.content ?? '')));
+    // `ignoreBudget` as core read it: holdConstants has set it on every constant.
+    runState.lastBudget = maxTokens > 0 ? {
+        tokens: new Map(rows.map((r, i) => [r.item, costs[i]])),
+        budgeted: rows.reduce((a, r, i) => a + (r.item.entry.ignoreBudget ? 0 : costs[i]), 0),
+        inPrompt: costs.reduce((a, x) => a + x, 0),
+        maxTokens,
+    } : null;
     // Hits only, for the panel's tooltip: no score is recorded with relevance off.
     const { windowFor } = await scanWindowFor(runState.scanChat ?? getContext().chat ?? []);
     matchItemKeys(rows.map(r => r.item), windowFor).forEach(({ scored }, i) => { rows[i].item.keywordHits = scored.hits; });
@@ -1661,7 +1668,7 @@ async function rankOwnedScan(activated, args, skip) {
     // Only the feed above is a per-loop job. Scoring, selection and delivery write what the last loop writes again — and core reads
     // `order` back in its inclusion-group prio sort, so the rewrite must not stand while the scan is still running.
     if (!isLastLoop(args)) return;
-    if (!runState.relevanceRun) { await deliverCoreSet(activated); return; }
+    if (!runState.relevanceRun) { await deliverCoreSet(activated, args?.budget?.current); return; }
 
     if (activated.size === 0) {
         skip('core activated nothing');
