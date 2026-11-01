@@ -11,7 +11,7 @@ import { runState, settings } from '../extension/state.mjs';
 import { editEntryText, ensureStudioStyle, makeSortControl, makeSwitch, onContextMenu, PHONE_QUERY, pluginFallback, renderMessageHtml, showCtxMenu, showEntryText, wiGlyph } from './ui-widgets.mjs';
 import { arrangeCard, buildPhoneHeader } from './entry-card.mjs';
 import { SORT_FNS, SORT_LABELS, normPresentation, presentationBaseLabel, reconcileTiers, sortTiered, tierRank, wiTitleOf } from '../extension/sort.mjs';
-import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
+import { matchSearch as matchSearchOf, rankBySearch as rankBySearchOf, searchSpans, typeMatch as typeMatchOf } from '../extension/entry-filter.mjs';
 import { buildKeyPruneScan, llmKeyCandidates } from './keyword-tools.mjs';
 import { cleanupRows, FLAG_PRIORITY, KEY_CHAT_COMMON, MINOR, MODERATE, SEVERE, STUDIO_PRUNE_OPTS, substringProbes, flagProbes, orthoAlternates, pathProbes } from '../extension/keyword-audit.mjs';
 import { buildKeySuggest, classifyLlmCand, STUDIO_SUGGEST_OPTS } from '../extension/keyword-suggest.mjs';
@@ -1147,6 +1147,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             const old = rowEls.get(e.uid);
             if (old && old.isConnected) old.replaceWith(row); else mount?.append(row);
             rowEls.set(e.uid, row);
+            markSearch(row, e);
             return row;
         };
 
@@ -1352,11 +1353,28 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         // The ranker rebuilds on the next ⚡; the scan is deliberately left last-scan.
         full.addEventListener('blur', () => { if (full.value !== String(e.content ?? '')) { e.content = full.value; save(); suggest = null; preview.textContent = firstLine(e); } });
         fullWrap.append(popBtn, full);
+        // A textarea cannot carry highlights, so while the search lands in the text it shows read-only until clicked.
+        if (searchQuery.trim() && searchScope.entry && matchSearchOf(e, searchQuery, { entry: true }, searchScanScope())) {
+            const marked = document.createElement('div'); marked.className = 'wa-entry-marked' + (tall.has(e.uid) ? ' wa-tall' : '');
+            marked.textContent = String(e.content ?? '');
+            full.style.display = 'none';
+            // The editor opens at the clicked character and the same scroll; both views hold the same text.
+            marked.addEventListener('click', ev => {
+                const pos = document.caretPositionFromPoint?.(ev.clientX, ev.clientY);
+                const rng = pos ? null : document.caretRangeFromPoint?.(ev.clientX, ev.clientY);
+                const at = pos?.offsetNode === marked.firstChild ? pos.offset : rng?.startContainer === marked.firstChild ? rng.startOffset : null;
+                const top = marked.scrollTop;
+                marked.remove(); full.style.display = ''; autosize(); full.focus({ preventScroll: true });
+                if (at !== null) full.setSelectionRange(at, at);
+                full.scrollTop = top;
+            });
+            full.after(marked);
+        }
         const outBtn = document.createElement('i'); outBtn.className = 'wa-full-out fa-solid fa-up-right-from-square'; outBtn.title = t`Edit in a window`;
         outBtn.addEventListener('click', () => editEntryText(e, v => { e.content = v; save(); suggest = null; renderEntry(e); }));
         fullWrap.append(outBtn);
         const syncText = () => { const on = expanded.has(e.uid); tchev.classList.toggle('wa-open', on); preview.style.display = on ? 'none' : ''; fullWrap.style.display = on ? '' : 'none'; if (on) autosize(); };
-        thead.addEventListener('click', () => { expanded.has(e.uid) ? expanded.delete(e.uid) : expanded.add(e.uid); syncText(); });
+        thead.addEventListener('click', () => { expanded.has(e.uid) ? expanded.delete(e.uid) : expanded.add(e.uid); syncText(); if (expanded.has(e.uid)) { markSearch(row, e); scrollToHit(row.querySelector('.wa-entry-marked')); } });
         textSec.append(thead, fullWrap);
         body.append(textSec, para);   // entry text first, then keywords (reads more naturally)
         body.append(sec);   // the gate reads under the keys it gates
@@ -1367,10 +1385,15 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         const old = rowEls.get(e.uid);
         // Carry the editor's scrollTop over from the replaced row, read before syncText's autosize resets it.
         const st = old?.querySelector('.wa-entry-full')?.scrollTop ?? 0;
+        const markedTop = old?.querySelector('.wa-entry-marked')?.scrollTop;
         if (old && old.isConnected) old.replaceWith(row); else mount?.append(row);
         rowEls.set(e.uid, row);
+        markSearch(row, e);
         syncText();   // after mount, so an expanded editor's autosize sees a real scrollHeight
         if (st) full.scrollTop = st;
+        // A row with no predecessor was drawn by a list repaint, which a query change is, so it opens on the first hit.
+        const markedEl = row.querySelector('.wa-entry-marked');
+        if (markedEl) markedTop === undefined ? scrollToHit(markedEl) : (markedEl.scrollTop = markedTop);
         return row;
     };
 
@@ -1565,7 +1588,54 @@ export async function lorebookStudio(preferredBook = null, open = null) {
 
     // --- Book-level tools (explorer header) ---
     // The Explorer's state, bound to entry-filter.mjs's pure predicates.
-    const matchSearch = e => matchSearchOf(e, searchQuery, searchScope);
+    // Rebuilt when the query or the boundary setting changes; its macros are the query's own tokens.
+    let searchScan = { for: null, scope: null };
+    const searchScanScope = () => {
+        const key = `${searchQuery}\u001f${settings().wordBoundary}`;
+        if (searchScan.for !== key) searchScan = { for: key, scope: createScanScope({ macros: macroMap([searchQuery], stSubstitute), boundary: settings().wordBoundary }) };
+        return searchScan.scope;
+    };
+    const matchSearch = e => matchSearchOf(e, searchQuery, searchScope, searchScanScope());
+    // The search's marks, drawn by the ::highlight(wa-search) rules; per uid, so a re-rendered row drops its old ranges.
+    const searchHl = globalThis.Highlight ? { hit: new globalThis.Highlight(), byUid: new Map() } : null;
+    if (searchHl) CSS.highlights.set('wa-search', searchHl.hit);
+    const unmarkSearch = uid => {
+        if (!searchHl) return;
+        for (const r of (uid === undefined ? [...searchHl.byUid.values()].flat() : searchHl.byUid.get(uid) ?? [])) searchHl.hit.delete(r);
+        uid === undefined ? searchHl.byUid.clear() : searchHl.byUid.delete(uid);
+    };
+    /** Marks the query's positive terms in `row`'s title, key chips and text, each only when its field admitted the query. */
+    const markSearch = (row, e) => {
+        unmarkSearch(e.uid);
+        if (!searchHl || !searchQuery.trim()) return;
+        const sc = searchScanScope(), ranges = [];
+        // `cap`: a preview shows only its head, so only the head is matched.
+        const mark = (el, field, cap = Infinity) => {
+            const node = el?.firstChild;
+            if (node?.nodeType !== Node.TEXT_NODE) return;
+            for (const sp of searchSpans(node.data.slice(0, cap), searchQuery, sc, field)) {
+                if (sp.negated) continue;
+                const r = new Range();
+                r.setStart(node, Math.min(sp.start, node.length)); r.setEnd(node, Math.min(sp.end, node.length));
+                searchHl.hit.add(r); ranges.push(r);
+            }
+        };
+        if (searchScope.title) mark(row.querySelector('.wa-entry-title'), wiTitleOf(e));
+        if (searchScope.entry) {
+            for (const el of row.querySelectorAll('.wa-entry-preview, .wa-card-preview-text')) mark(el, e.content, 600);
+            if (expanded.has(e.uid)) mark(row.querySelector('.wa-entry-marked'), e.content);
+        }
+        if (searchScope.keywords) {
+            const keys = (Array.isArray(e.key) ? e.key : []).join('\n');
+            for (const el of row.querySelectorAll('.wa-kw-para .wa-kw-text')) mark(el, keys);
+        }
+        searchHl.byUid.set(e.uid, ranges);
+    };
+    /** Scrolls `el` itself, never the page, so its first search mark sits a third of the way down. */
+    const scrollToHit = el => {
+        const r = el && searchHl && [...searchHl.hit].find(x => x.startContainer === el.firstChild);
+        if (r) el.scrollTop += r.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientHeight / 3;
+    };
     const typeMatch = e => typeMatchOf(e, entryFilter, scan);
     const filterMatch = e => matchSearch(e) && typeMatch(e);
     const sortEntries = list => {
@@ -1988,7 +2058,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
     // The term tabs' entry set: type filter + the shared sort, without the search — those tabs rank by it (rankBySearch).
     const visibleEntries = () => sortEntries(Object.values(data?.entries ?? {}).filter(typeMatch));
 
-    const rankBySearch = groups => rankBySearchOf(groups, searchQuery, searchScope);
+    const rankBySearch = groups => rankBySearchOf(groups, searchQuery, searchScope, searchScanScope());
 
     // --- Shared header controls: the search box and type filter read and write the same state on every tab ---
     const buildSearchBox = onChange => {
@@ -3728,7 +3798,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
         pane.append(fixed, body);
         // Repaints just the entry list and the count for the current filter + search.
         const applyFilter = () => {
-            rowEls.clear();
+            rowEls.clear(); unmarkSearch();
             const shown = sortEntries(total.filter(filterMatch));
             visibleUids = shown.map(e => e.uid);   // keep the "visual order" source of truth in sync
             countSpan.textContent = (entryFilter.size || searchQuery.trim())

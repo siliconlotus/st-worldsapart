@@ -492,6 +492,12 @@ textarea.wa-entry-full { display: block; width: 100%; box-sizing: border-box;
     font-family: inherit; color: inherit; background: var(--black30a, rgba(0,0,0,0.2));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 5px; padding: 5px 7px; }
 textarea.wa-entry-full.wa-tall { max-height: 62vh; }
+/* The Explorer search's read-only text, shown in the editor's place while the query lands in it. */
+.wa-entry-marked { font-size: 0.92em; line-height: 1.35; max-height: calc(1.35em * 8 + 16px); overflow-y: auto; white-space: pre-wrap;
+    overflow-wrap: anywhere; cursor: text; background: var(--black30a, rgba(0,0,0,0.2));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15)); border-radius: 5px; padding: 5px 7px; }
+.wa-entry-marked.wa-tall { max-height: 62vh; }
+::highlight(wa-search) { background-color: color-mix(in srgb, var(--SmartThemeQuoteColor, #e18a24) 40%, transparent); color: inherit; }
 @keyframes wa-flash { from { background: var(--active, rgba(120,180,120,0.35)); } to { background: transparent; } }
 .wa-entry.wa-flash { animation: wa-flash 1.2s ease-out; }
 .wa-studio-exphead .menu_button { margin: 0; padding: 4px 12px; font-size: 0.82em; width: 9.5rem;
