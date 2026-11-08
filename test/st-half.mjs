@@ -6,6 +6,7 @@ export const ST_HALF = [
     'worldsapart.js',
     'st/studio.mjs',
     'st/ui-widgets.mjs',
+    'st/entry-card.mjs',
     'st/capture-ui.mjs',
     'st/keyword-tools.mjs',
     'st/lang-store.mjs',

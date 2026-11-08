@@ -98,6 +98,10 @@ export const sigmoid = x => 1 / (1 + Math.exp(-x));
 export const mean = xs => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 export const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
 
+/** True when the population's `text` column is flat and its `keys` column is not; scoreRelevance then reads `keys` in the `text` slot. */
+export const keysStandInForText = population => !sd(population.map(r => Number(r?.text) || 0))
+    && sd(population.map(r => Number(r?.keys) || 0)) > 0;
+
 /** `E[credit]` per row of ONE scene, standardised over `population` — `rows` for a `scene` fit, every candidate of the scene for a `pooled` one (`model.standardise`). P(>=3) is clamped to P(>=2).
  *  @returns {number[]} in the order given, NaN when the model cannot score */
 export function scoreRelevance(model, rows, population = rows) {
@@ -110,7 +114,9 @@ export function scoreRelevance(model, rows, population = rows) {
     }
     // `sd || 1` must be the fit's own guard, or a column constant here meets a slope fitted elsewhere.
     const pop = population?.length ? population : rows;
-    const z = feats.map(name => {
+    const swap = keysStandInForText(pop);
+    const z = feats.map(feat => {
+        const name = swap && feat === 'text' ? 'keys' : feat;
         const m = mean(pop.map(r => Number(r?.[name]) || 0));
         const s = sd(pop.map(r => Number(r?.[name]) || 0)) || 1;
         return rows.map(r => ((Number(r?.[name]) || 0) - m) / s);

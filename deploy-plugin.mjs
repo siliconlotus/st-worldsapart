@@ -60,10 +60,14 @@ for (const name of fs.readdirSync(DEST)) {
     console.log(`removed  plugins/worlds-apart/${name}  (not part of the loader)`);
 }
 
-const configPath = path.join(ST.root, 'config.yaml');
+let configPath = path.join(ST.root, 'config.yaml');
 let cfg = null;
 // ENOENT only: a failed backup or write below must surface as itself, not as a missing file.
-try { cfg = fs.readFileSync(configPath, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+// Resolved first: ST's Docker image links config.yaml into config/, and the rename below would replace the link.
+try {
+    configPath = fs.realpathSync(configPath);
+    cfg = fs.readFileSync(configPath, 'utf8');
+} catch (e) { if (e.code !== 'ENOENT') throw e; }
 if (cfg === null) {
     console.log(`NOTE     no config.yaml at ${configPath} — launch ST once, then set enableServerPlugins: true`);
 } else if (/^enableServerPlugins:\s*false\b/m.test(cfg)) {

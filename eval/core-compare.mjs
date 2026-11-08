@@ -4,7 +4,7 @@
 //   node .../core-compare.mjs <sample.json> [...] --cutoff 0.10 [--tier memory|reference|all] [--budget 25083,37624] [--core-top-k 5] [--core-order order|newest|oldest] [--core-depth 2] [--core-uids 1,2,3] [--tokenizer gpt-3.5-turbo]
 // The defaults are a stock install (max_entries 5, depth 2, order untouched); a tuned install scores measurably higher (R14), so say which is being quoted.
 import fs from 'node:fs';
-import { haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel, boundaryOverride } from './lib/scene.mjs';
+import { embed, haystackFor, indexPath, isMemory, loadScene, makeCandidateSet, makeGradeOf, openSample, sceneParams, makeLayoutOrder, sceneLabel, boundaryOverride } from './lib/scene.mjs';
 import { gradeCredit, fbeta, RECALL_WEIGHT, arg } from './lib/metrics.mjs';
 import { offlineTokenCounter } from './lib/tokens.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
@@ -67,7 +67,9 @@ for (const file of samples) {
     } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
     let scene; try { scene = loadScene(S, { indexFile, indexOpts: { model: MODEL }, params: P }); } catch (e) { console.error(`  ${sceneLabel(S) || file}: ${e.message}`); continue; }
     const build = makeCandidateSet({ ...scene, params: P });
-    const rows = build(P.K1, P.B, null, [], S.query, haystackFor(S, P));
+    const em = resolveModel(MODEL ?? S.embedModel);
+    const qvec = await embed(em.query + S.query, { model: em.model, label: em.label, endpoint: em.endpoint, url: em.url });
+    const rows = build(P.K1, P.B, null, qvec, S.query, haystackFor(S, P));
     if (!rows.length) continue;
     if (Number.isFinite(CORE_DEPTH) && CORE_DEPTH > Number(S.depth)) {
         console.error(`  ${sceneLabel(S) || file}: --core-depth ${CORE_DEPTH} exceeds the ${S.depth} messages this capture stored; skipped rather than scored at ${S.depth}`);
@@ -75,7 +77,7 @@ for (const file of samples) {
     }
     // Core's keyword route, re-scored at ITS scan depth. Same candidate builder, shallower haystack.
     const coreKeyed = Number.isFinite(CORE_DEPTH) && CORE_DEPTH !== P.depth
-        ? new Set(build(P.K1, P.B, null, [], S.query, haystackFor(S, P, { depth: CORE_DEPTH }))
+        ? new Set(build(P.K1, P.B, null, qvec, S.query, haystackFor(S, P, { depth: CORE_DEPTH }))
             .filter(r => r.keywordHits?.length).map(r => Number(r.uid)))
         : null;
     // makeLayoutOrder is what the layout is ordered by, so this reads WA's own layout rather than a second copy of it.

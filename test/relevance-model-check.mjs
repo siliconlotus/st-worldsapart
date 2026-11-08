@@ -1,5 +1,5 @@
 // relevance-model-check — the selection relevance prediction's pure half (relevance.mjs, selection.mjs relevanceCut).
-import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, postDates, modelKey } from '../extension/relevance.mjs';
+import { properNames, buildNameDf, properShared, properDensity, scoreRelevance, keysStandInForText, postDates, modelKey } from '../extension/relevance.mjs';
 import { relevanceCut } from '../extension/selection.mjs';
 import { buildTermWeights } from '../extension/entity.mjs';
 import { eq } from '../eval/lib/metrics.mjs';
@@ -90,6 +90,22 @@ let threw = false;
 try { scoreRelevance({ features: ['cosine', 'text'], beta: { ge2: [0, 1], ge3: [0, 1] } }, [{ cosine: 1 }, { cosine: 2 }]); }
 catch { threw = true; }
 eq(threw, true, 'a model whose beta does not match its feature count throws');
+
+// ---- keys in the text slot ----------------------------------------------------------------------
+
+const lex = { features: ['text'], beta: { ge2: [0, 1], ge3: [0, 1] } };
+const swapped = scoreRelevance(lex, [{ text: 0, keys: 0 }, { text: 0, keys: 2 }]);
+eq(swapped[1] > swapped[0], true, 'a flat text column is read from keys, so the keyed row scores higher');
+eq(swapped.map(v => v.toFixed(10)).join(), scoreRelevance(lex, [{ text: 0 }, { text: 2 }]).map(v => v.toFixed(10)).join(),
+    'keys in the slot are standardised and take text\'s coefficient, exactly as a text column of the same values');
+const textLive = scoreRelevance(lex, [{ text: 3, keys: 0 }, { text: 1, keys: 5 }]);
+eq(textLive[0] > textLive[1], true, 'a text column with spread is read as text, whatever keys say');
+const bothFlat = scoreRelevance(lex, [{ text: 0, keys: 1 }, { text: 0, keys: 1 }]);
+eq(bothFlat.every(v => Math.abs(v - sig(0)) < 1e-12), true, 'with keys flat too, the slot contributes nothing');
+const byPopulation = scoreRelevance(lex, [{ text: 0, keys: 0 }, { text: 0, keys: 4 }], [{ text: 0, keys: 0 }, { text: 0, keys: 4 }, { text: 6, keys: 0 }]);
+eq(Math.abs(byPopulation[0] - byPopulation[1]) < 1e-12, true, 'the swap is decided over the population: text with spread there keeps the slot as text');
+eq(keysStandInForText([{ text: 0, keys: 1 }, { text: 0, keys: 3 }]), true, 'flat text with keys that vary is the swap condition');
+eq(keysStandInForText([]), false, 'an empty population does not swap');
 
 // ---- the shipped model file: one fit per embedding model, keyed by modelKey; the contract holds for EVERY entry (E14)
 

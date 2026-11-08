@@ -6,6 +6,8 @@ const MODULE_NAME = 'worldsApart';
 
 export const defaultSettings = {
     enabled: true,
+    relevance: true, // off: WA activates by key only; core selects, budgets and orders (docs/matching-architecture.md, *The pipeline*)
+    alwaysIncludeConstants: true, // relevance off: constants get ignoreBudget so core's budget cannot drop them
     chunkSize: 1750, // characters, not tokens; changing it re-embeds every collection
     chunkMode: 'paragraph', // 'paragraph' | 'length' (chunking.mjs splitRecursive)
     llmProfile: '', // Connection Manager profile id for WA's own generation calls; '' = the current API
@@ -41,6 +43,7 @@ export const defaultSettings = {
     worldPriorityMode: 'interleaved', // 'interleaved' (one list; weight scales score, offset shifts prompt position) | 'sequential' (strict book tiers)
     /** @type {Record<string, Array<{ world: string, weight: number, offset: number, cap: number }>>} keyed by character/group id; the chat's own book is the sentinel `'chat'` */
     worldPriorityByChar: {},
+    studioOnWiButton: false, // ST's World Info toolbar button opens the Studio instead of core's drawer
     debugLog: false, // narrate each turn's run and console.table the ranking; per-generation token counting when a budget is set
 };
 
@@ -116,6 +119,8 @@ export const runState = {
     waRecursionTexts: [],         // every pass's recursion-eligible entry content so far; the rematch window is chat + these
     waMinSkew: 0,                 // min-activation passes core has scheduled; widens WA's window one message per pass
     waCandidates: null,           // candidate entries fetched at intercept (live keys); null = no owned scan state
+    relevanceRun: true,           // settings().relevance as the armed run read it; the gates read this, so a mid-run toggle cannot split a scan
+    waForced: [],                 // the copies WA force-activated for this scan; core's budget reads these, not its own entries
     verboseRun: false,            // true during a /wa-debug run
     dryRunInProgress: false,      // true during either slash-command run
     generationIsDryRun: false,    // true while ST's own dry-run generation is in flight

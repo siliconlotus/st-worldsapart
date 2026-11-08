@@ -14,6 +14,20 @@ export const PLUGIN_FILES = [
 /** plugin/loader.js's own LOADER_VERSION, which /ping reports: an older deployed loader asks for one redeploy. Keep the two equal. */
 export const LOADER_VERSION = 2;
 
+/** What a /ping answer says about the plugin, or null when the body is not the plugin's: a host that serves its page for any
+ *  unknown path answers 200 with HTML. Each field is null where an older plugin does not send it. */
+export function readPing(body) {
+    if (body?.ok !== true) return null;
+    return {
+        root: body.root ?? null,
+        fingerprint: body.fingerprint ?? null,
+        loader: Number(body.loader) || null,
+        install: body.install ?? null,
+        dataRoot: body.dataRoot ?? null,
+        shared: body.shared === true,
+    };
+}
+
 function hashText(str) {
     let h = 5381;
     for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;

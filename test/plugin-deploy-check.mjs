@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { eq } from '../eval/lib/metrics.mjs';
 import { deploySandbox } from './plugin-sandbox.mjs';
+import { LOADER_VERSION, readPing } from '../plugin/fingerprint.mjs';
 import { stInstall } from '../eval/lib/st-install.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
@@ -74,6 +75,7 @@ try {
             routes.get('/ping')({ body: {} }, { send: x => { sent = x; } });
             eq(sent.install, path.join('public', 'scripts', 'extensions', 'third-party', name), '...and /ping names the install it loaded, not the stale record');
             eq(sent.shared, false, 'a ping with no folder name reports no shared install');
+            eq(readPing(JSON.parse(JSON.stringify(sent)))?.loader, LOADER_VERSION, 'the browser reads the real /ping answer as the plugin, loader version included');
             eq('root' in sent || 'dataRoot' in sent, false, 'a caller who is not an admin is not told where the server keeps its files');
             routes.get('/ping')({ body: {}, user: { profile: { admin: true } } }, { send: x => { sent = x; } });
             eq(path.isAbsolute(sent.root) && path.isAbsolute(sent.dataRoot), true, '...and an admin is, for the deploy command');
@@ -105,6 +107,19 @@ try {
     try {
         eq(fs.existsSync(`${cfgOf(on.root)}.wa-backup`), false, 'already true: no backup is taken');
     } finally { on.cleanup(); }
+
+    // ST's Docker image: config.yaml is a relative link into the mounted config/.
+    const linked = deploySandbox({ prepare: root => {
+        fs.mkdirSync(path.join(root, 'config'));
+        fs.writeFileSync(path.join(root, 'config', 'config.yaml'), 'enableServerPlugins: false\n');
+        fs.symlinkSync(path.join('.', 'config', 'config.yaml'), cfgOf(root));
+    } });
+    try {
+        eq(linked.run.status, 0, 'a deploy over a linked config.yaml succeeds');
+        eq(lstat(cfgOf(linked.root))?.isSymbolicLink(), true, '...leaves the link a link');
+        eq(fs.readFileSync(path.join(linked.root, 'config', 'config.yaml'), 'utf8'), 'enableServerPlugins: true\n', '...patches the file it points to');
+        eq(fs.existsSync(path.join(linked.root, 'config', 'config.yaml.wa-backup')), true, '...and backs up beside that file');
+    } finally { linked.cleanup(); }
 
     const none = deploySandbox();
     try {

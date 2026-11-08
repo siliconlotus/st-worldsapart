@@ -1024,8 +1024,7 @@ export function gateVerdict(entry, opts = {}) {
     // decoratorFor, NOT hasDecorator: core strips these lines from a parsed entry's content and keeps only
     // names prefix-matching its own two. Both present latches ON, as @@activate beats @@dont_activate.
     if (opts.fired && latchActive(entry, opts.fired, opts.chatLength)) return 'admit';
-    if (opts.fired && decoratorFor(entry, '@@keep_activate_after_match') === null
-        && latchSuppressed(entry, opts.fired, opts.chatLength)) return 'skip';
+    if (opts.fired && latchedOut(entry, opts.fired, opts.chatLength)) return 'skip';
 
     const onlyAfter = decoratorCount(entry, '@@activate_only_after');
     if (onlyAfter && Number(opts.assistantCount ?? Infinity) < onlyAfter) return 'skip';   // `&&`, not `!== null`: 0 means no gate, not a threshold of 0
@@ -1073,6 +1072,10 @@ export function latchSuppressed(entry, record, chatLength) {
     const n = decoratorCount(entry, '@@dont_activate_after_match');
     return n === null || Number(chatLength) <= Number(at) + n;   // `=== null`, not falsy: a duration of 0 expires at once
 }
+
+/** Whether a latch holds this entry out of the scan: `@@dont_activate_after_match` in force and no `@@keep_activate_after_match`, which wins when both are present. */
+export const latchedOut = (entry, record, chatLength) =>
+    decoratorFor(entry, '@@keep_activate_after_match') === null && latchSuppressed(entry, record, chatLength);
 
 /** Whether `@@keep_activate_after_match` still holds this entry in: it has fired, and either carries no
  *  duration (WA's extension — bare is CCv3's "in any case") or the chat is still inside it. Sticky by
@@ -1131,6 +1134,17 @@ export function activationAdds(entries, windowFor, opts = {}) {
         }
     }
     return out;
+}
+
+/** Stamps each activated entry with the hash core gave it this scan, which core's sticky and cooldown windows are keyed on.
+ *  @param {Map<string, object>} activated Core's activated map, holding WA's force-activated copies
+ *  @param {object[]} sortedEntries Core's hashed entries for the scan */
+export function adoptCoreHashes(activated, sortedEntries) {
+    const hashOf = new Map((sortedEntries ?? []).map(e => [`${e.world}.${e.uid}`, e.hash]));
+    for (const entry of activated?.values?.() ?? []) {
+        const hash = hashOf.get(`${entry.world}.${entry.uid}`);
+        if (hash !== undefined) entry.hash = hash;
+    }
 }
 
 /** `position` values; must match core's `world_info_position` (world-info.js). */
