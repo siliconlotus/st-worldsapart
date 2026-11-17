@@ -244,7 +244,7 @@ Every activated entry becomes a row, `score` its cosine from the similarity quer
 - **Entry caps**, 0 off: `maxTotalEntries` over every counted entry; `maxDynamicEntries` over the dynamic block; `maxVectorEntries` over dynamic plus promoted rows carrying `vectorized`; a per-book `cap` over dynamic plus promoted.
 - A blocked entry is skipped, not stopped at; a skip after the last admission is marked `tail`.
 
-Survivors stay in core's map. The **prompt order** is one sort of the survivors by `presentationOrder` (any `SORT_FNS` key, or `best-first`/`best-last` on the weighted credit), grouped by tier under `presentationTiered` and by book tier under `sequential`; each survivor's `order` is rewritten to its index, since assembly sorts by `order`. The delivery panel reads `runState.lastPromptOrder`, `lastSkipped` and `lastBudget`.
+Survivors stay in core's map. The **prompt order** is one sort of the survivors by `presentationOrder` (the key of any `SORT_FNS` sort, or `best-first`/`best-last` on the weighted credit), ties falling to authored order ascending, as core assembles them, grouped by tier under `presentationTiered` and by book tier under `sequential`; each survivor's `order` is rewritten to its index, since assembly sorts by `order`. The delivery panel reads `runState.lastPromptOrder`, `lastSkipped` and `lastBudget`.
 
 ## Divergences from ST core
 

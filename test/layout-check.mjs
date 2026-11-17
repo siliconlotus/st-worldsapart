@@ -103,6 +103,13 @@ eq(layoutScore({ eCredit: 0 }), 0, '...and a genuine 0 is not treated as unscore
     eq(uids([...items].sort(seq.compare)), [1, 2], '...and sequential ignores the offset');
 }
 
+// --- a field sort as the prompt order: its own key, then authored order ascending as core assembles
+{
+    const items = [row(1, { order: 30 }), row(2, { order: 10, constant: true }), row(3, { order: 20 }), row(4, { order: 5 })];
+    const { compare } = layoutOrder(items, { ...BASE, presentationOrder: 'priority' });
+    eq(uids([...items].sort(compare)), [2, 4, 3, 1], 'Priority places constants first, then the rest by authored order ascending');
+}
+
 // --- empties -----------------------------------------------------------------------------------------
 {
     const { sticky, constant, promoted, results } = layoutOrder([], BASE);
