@@ -62,6 +62,10 @@ eq(sortTiered(list, { sortKey: 'authored', tiered: true, tierCfg: cfg }).map(e =
     'a legacy presentation alias resolves through normPresentation');
 eq(sortTiered(list, { sortKey: 'best-first', tiered: true, tierCfg: cfg }).map(e => e.uid).join(','), '2,4,1,5,3',
     'a relevance key has no rest-state score and degrades to order-asc');
+eq(sortTiered(list, { sortKey: 'priority' }).map(e => e.uid).join(','), '2,5,4,1,3',
+    "Priority as the editor shows it: core's tie-break, order descending");
+eq(sortTiered(list, { sortKey: 'priority', insert: true }).map(e => e.uid).join(','), '2,1,4,5,3',
+    '...and as the prompt places it: ties by order ascending, as core assembles');
 // Turning a tier off removes its rank, so the entries that would have filled it fall to the next bucket.
 const noSticky = cfg.map(t => (t.id === 'sticky' ? { ...t, on: false } : t));
 eq(sortTiered(list, { sortKey: 'order-asc', tiered: true, tierCfg: noSticky }).map(e => e.uid).join(','), '2,1,4,5,3',

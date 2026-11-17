@@ -1,7 +1,7 @@
 // layout.mjs — scoring's product: the layout order. Classifies activated rows into the four blocks the
 // budget walks and orders each. Pure: settings and resolved book names arrive as parameters
 // (test/layout-check.mjs).
-import { SORT_FNS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
+import { SORT_KEYS, normPresentation, reconcileTiers, tierRank } from './sort.mjs';
 import { hasDecorator } from './matcher.mjs';
 
 /** A constant: the `constant` flag or `@@activate`, which core activates before any matching, as it does a constant. */
@@ -58,7 +58,7 @@ export function layoutOrder(items, { isArmedSticky, isPromoted, priorityList = [
         orderKey === 'order-desc' ? (a, b) => -authored(a, b) :
         orderKey === 'best-first' ? (a, b) => (layoutScore(b) - layoutScore(a)) || authored(a, b) :
         orderKey === 'best-last' ? (a, b) => (layoutScore(a) - layoutScore(b)) || authored(a, b) :
-        SORT_FNS[orderKey] ? (a, b) => SORT_FNS[orderKey](a.entry, b.entry) || authored(a, b) :
+        SORT_KEYS[orderKey] ? (a, b) => SORT_KEYS[orderKey](a.entry, b.entry) || authored(a, b) :
         authored;
 
     const cfg = reconcileTiers(tierCfg);

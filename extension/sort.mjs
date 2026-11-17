@@ -41,23 +41,25 @@ const numAsc = f => (a, b) => (Number(a[f]) || 0) - (Number(b[f]) || 0);
 /** The comment, not wiTitleOf: "UID 12" would file among the U-words. */
 const titleKey = e => (e.comment ?? '').trim();
 
-export const SORT_FNS = {
-    'priority':   sortWith((a, b) => sortPrio(a) - sortPrio(b)),
-    'custom':     sortWith((a, b) => (a.displayIndex ?? 0) - (b.displayIndex ?? 0)),
+/** Each sort's primary key alone; SORT_FNS adds the editor's tie-breaks (order desc, uid asc). */
+export const SORT_KEYS = {
+    'priority':   (a, b) => sortPrio(a) - sortPrio(b),
+    'custom':     (a, b) => (a.displayIndex ?? 0) - (b.displayIndex ?? 0),
     // 'en', never the user's locale: the title order is the same on every install, and matches the matcher's locale-independent fold.
-    'title-asc':  sortWith((a, b) => titleKey(a).localeCompare(titleKey(b), 'en')),
-    'title-desc': sortWith((a, b) => titleKey(b).localeCompare(titleKey(a), 'en')),
-    'tokens-asc': sortWith((a, b) => String(a.content ?? '').length - String(b.content ?? '').length),
-    'tokens-desc':sortWith((a, b) => String(b.content ?? '').length - String(a.content ?? '').length),
-    'depth-asc':  sortWith(numAsc('depth')),
-    'depth-desc': sortWith((a, b) => (Number(b.depth) || 0) - (Number(a.depth) || 0)),
-    'order-asc':  sortWith(numAsc('order')),
-    'order-desc': sortWith((a, b) => (Number(b.order) || 0) - (Number(a.order) || 0)),
-    'uid-asc':    sortWith((a, b) => a.uid - b.uid),
-    'uid-desc':   sortWith((a, b) => b.uid - a.uid),
-    'prob-asc':   sortWith((a, b) => (a.probability ?? 100) - (b.probability ?? 100)),
-    'prob-desc':  sortWith((a, b) => (b.probability ?? 100) - (a.probability ?? 100)),
+    'title-asc':  (a, b) => titleKey(a).localeCompare(titleKey(b), 'en'),
+    'title-desc': (a, b) => titleKey(b).localeCompare(titleKey(a), 'en'),
+    'tokens-asc': (a, b) => String(a.content ?? '').length - String(b.content ?? '').length,
+    'tokens-desc':(a, b) => String(b.content ?? '').length - String(a.content ?? '').length,
+    'depth-asc':  numAsc('depth'),
+    'depth-desc': (a, b) => (Number(b.depth) || 0) - (Number(a.depth) || 0),
+    'order-asc':  numAsc('order'),
+    'order-desc': (a, b) => (Number(b.order) || 0) - (Number(a.order) || 0),
+    'uid-asc':    (a, b) => a.uid - b.uid,
+    'uid-desc':   (a, b) => b.uid - a.uid,
+    'prob-asc':   (a, b) => (a.probability ?? 100) - (b.probability ?? 100),
+    'prob-desc':  (a, b) => (b.probability ?? 100) - (a.probability ?? 100),
 };
+export const SORT_FNS = Object.fromEntries(Object.entries(SORT_KEYS).map(([k, f]) => [k, sortWith(f)]));
 export const SORT_LABELS = {
     'priority': 'Priority', 'custom': 'Custom', 'title-asc': 'Title A→Z', 'title-desc': 'Title Z→A',
     'tokens-asc': 'Tokens ↑', 'tokens-desc': 'Tokens ↓', 'depth-asc': 'Depth ↑', 'depth-desc': 'Depth ↓',
@@ -80,9 +82,11 @@ export const normPresentation = k => PRESENTATION_ALIAS[k] ?? k ?? 'order-asc';
 export const presentationBaseLabel = k => SORT_LABELS[normPresentation(k)] ?? { 'best-first': 'Most relevant first', 'best-last': 'Most relevant last' }[k] ?? k;
 
 /** Explorer display order: `sortKey` (a SORT_FNS key or a legacy presentation alias), then tiered buckets by
- *  tierRank with the base order kept within each. */
-export const sortTiered = (list, { sortKey, tiered = false, tierCfg = [] } = {}) => {
-    const sorted = [...list].sort(SORT_FNS[normPresentation(sortKey)] ?? SORT_FNS['order-asc']);
+ *  tierRank with the base order kept within each. `insert` breaks ties as the prompt order does: order asc, then uid. */
+export const sortTiered = (list, { sortKey, tiered = false, tierCfg = [], insert = false } = {}) => {
+    const k = normPresentation(sortKey);
+    const cmp = insert && SORT_KEYS[k] ? (a, b) => SORT_KEYS[k](a, b) || numAsc('order')(a, b) || sortTer(a, b) : SORT_FNS[k] ?? SORT_FNS['order-asc'];
+    const sorted = [...list].sort(cmp);
     if (!tiered) return sorted;
     const buckets = [];
     for (const e of sorted) (buckets[tierRank(e, tierCfg)] ??= []).push(e);

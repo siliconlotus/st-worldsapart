@@ -1645,6 +1645,7 @@ export async function lorebookStudio(preferredBook = null, open = null) {
             sortKey: insert ? settings().presentationOrder : entrySort,
             tiered: insert ? !!settings().presentationTiered : tieredMode,
             tierCfg: tierCfg(),
+            insert,
         });
     };
 
